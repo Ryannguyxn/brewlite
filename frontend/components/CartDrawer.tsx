@@ -1,81 +1,18 @@
 "use client";
 
 import React, { useState } from "react";
+import {
+  MOCK_CART_CONFIG,
+  MOCK_INITIAL_CART_ITEMS,
+  MOCK_UPSELL_OFFER,
+  type CartConfig,
+  type CartItem,
+  type UpsellOffer,
+} from "@/mock-data";
+import { createOrderMock } from "@/services/api.service";
 
-export interface CartItem {
-  id: string;
-  name: string;
-  unitPrice: number;
-  qty: number;
-  image: string;
-  imageAlt: string;
-  customizations: {
-    text: string;
-    dotColor: string;
-    muted?: boolean;
-  }[];
-}
-
-export const INITIAL_CART_ITEMS: CartItem[] = [
-  {
-    id: "cartItem1",
-    name: "Cà phê Sữa Đá Sài Gòn",
-    unitPrice: 65000,
-    qty: 2,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuC7mqw_OV826ImKUuoqFmyvYBg5mAvCPmco-fM1eqk5rTK9ax6WTVGwSemiuxwE_0H3PLN1ZVHLWXG9ag-VSJ3qkX8P5LJgNUu2L_RqjOLxsTlxKcOE-3mDMXhhd4IqN_EyYQNhDG3wMWVytts_MJITKYS65c-DghftfAmFK_A6f4IfY1egjY5_zqL0R-9eLlF6m7paMntYIruek4dh5sPv2ynR4Gq2W2FLdwRjDwp1Sg4Ff8HezrGI",
-    imageAlt:
-      "Close up shot of Vietnamese Iced Milk Coffee in clear glass with condensed milk layer and rich crema swirls, studio cafe style.",
-    customizations: [
-      {
-        text: "Size M (+6.000đ) • 50% đường",
-        dotColor: "bg-primary/60",
-      },
-      {
-        text: "Topping: Thạch Cà Phê (+8.000đ), Kem Cheese (+12.000đ)",
-        dotColor: "bg-secondary-container",
-        muted: true,
-      },
-    ],
-  },
-  {
-    id: "cartItem2",
-    name: "Cold Brew Cam Sả Thảo Mộc",
-    unitPrice: 74000,
-    qty: 1,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuA87eEtI2K7XoNg3hivIlqub1VYiLPalxZmmrFHAfBXHsxVAh64sxZb1tEAOKFAFFZSzQuYji2F8_hutr4nKoDKPdY2L-7FFhAvioWB1DN2d6MD7ZziWdaqj4DXkLYpN1lp0JHxKKE40zMB7uTcxk44cRWS9GCC2JMK_ziL2QasOLwnz54fi5GK25MAsNZjmDSEUXgGB7FjbZdgUUQMvvuPdvefagAuGkKMtHrHuEOpGXTv4bDgRZlQ",
-    imageAlt:
-      "Amber cold brew coffee infused with fresh orange slice and fragrant lemongrass stalk in clear modern tumbler, cafe lighting.",
-    customizations: [
-      {
-        text: "Size L (+12.000đ) • Không topping",
-        dotColor: "bg-primary/60",
-      },
-      {
-        text: "Đá riêng 70%",
-        dotColor: "bg-secondary-container",
-        muted: true,
-      },
-    ],
-  },
-  {
-    id: "cartItem3",
-    name: "Croissant Bơ Pháp Nướng",
-    unitPrice: 38000,
-    qty: 1,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCEGhGqvQFCMTt4S_1bFUl-uGRXw8MVCXbawPjxWNnD81K9caHnZK4_WuPC1gdWPGOZgHErFgihRB-bV0bEKz6wNt8SyuZgdf3ILKQUM2nYaTioYTYHutAJGAXRpCpMnANkaDzWchuO3srZEHf_T-SIrPK39x0p9gcaw5y4hjC4JQTHHA23PtmWSx9OhIcAydVDjCJ3J4kwm-KlMQl166cAsZZLCNZYSYDoONFyhETPvOmmyViV0K0W",
-    imageAlt:
-      "Flaky golden buttery Parisian croissant warmed fresh from the oven, served on minimal aesthetic cafe napkin.",
-    customizations: [
-      {
-        text: "Yêu cầu: Nướng nóng giòn trước khi giao",
-        dotColor: "bg-tertiary",
-      },
-    ],
-  },
-];
+export type { CartItem };
+export const INITIAL_CART_ITEMS = MOCK_INITIAL_CART_ITEMS;
 
 function formatVND(amount: number): string {
   return amount.toLocaleString("vi-VN") + "đ";
@@ -85,6 +22,8 @@ interface CartDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItem[];
+  upsellOffer?: UpsellOffer;
+  cartConfig?: CartConfig;
   onUpdateQty: (id: string, delta: number) => void;
   onRemoveItem: (id: string) => void;
   onClearCart: () => void;
@@ -96,6 +35,8 @@ export default function CartDrawer({
   isOpen,
   onClose,
   items,
+  upsellOffer = MOCK_UPSELL_OFFER,
+  cartConfig = MOCK_CART_CONFIG,
   onUpdateQty,
   onRemoveItem,
   onClearCart,
@@ -103,8 +44,8 @@ export default function CartDrawer({
   onAddUpsell,
 }: CartDrawerProps) {
   const [isMockEmpty, setIsMockEmpty] = useState(false);
-  const [voucherCode, setVoucherCode] = useState("BREWLITE20K");
-  const [discount, setDiscount] = useState(20000);
+  const [voucherCode, setVoucherCode] = useState(cartConfig.defaultVoucherCode);
+  const [discount, setDiscount] = useState(cartConfig.defaultMemberDiscount);
 
   const visibleItems = isMockEmpty ? [] : items;
   const isEmpty = visibleItems.length === 0;
@@ -113,14 +54,18 @@ export default function CartDrawer({
     (sum, item) => sum + item.unitPrice * item.qty,
     0
   );
-  const freeshipThreshold = 280000;
+  const freeshipThreshold = cartConfig.freeshipThreshold;
   const freeshipProgress = Math.min(
     100,
     Math.round((subtotal / freeshipThreshold) * 100)
   );
   const amountToFreeship = Math.max(0, freeshipThreshold - subtotal);
   const shippingFee =
-    subtotal === 0 ? 0 : subtotal >= freeshipThreshold ? 0 : 15000;
+    subtotal === 0
+      ? 0
+      : subtotal >= freeshipThreshold
+      ? 0
+      : cartConfig.defaultShippingFee;
   const appliedDiscount = subtotal > 0 ? discount : 0;
   const totalAmount = Math.max(0, subtotal - appliedDiscount + shippingFee);
 
@@ -138,16 +83,23 @@ export default function CartDrawer({
   const handleApplyVoucher = () => {
     const code = voucherCode.trim().toUpperCase();
     if (code) {
-      setDiscount(20000);
+      // TODO: Thay thế kiểm tra voucher này bằng axios.post('/api/vouchers/validate', { code })
+      setDiscount(cartConfig.defaultMemberDiscount);
       alert(`Đã áp dụng thành công mã ưu đãi ${code} (-20.000đ)`);
     } else {
       setDiscount(0);
     }
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
+    // TODO: Thay thế hàm createOrderMock bên trong services/api.service.ts bằng axios.post('/orders', ...)
+    const res = await createOrderMock({
+      items: visibleItems,
+      voucherCode,
+      totalAmount,
+    });
     alert(
-      "Đang tiến hành tạo mã thanh toán VietQR & chuyển sang cổng giao dịch an toàn..."
+      `Đơn hàng #${res.orderId} (${res.status}) đã tạo! Đang tiến hành tạo mã thanh toán VietQR & chuyển sang cổng giao dịch an toàn...`
     );
   };
 
@@ -212,7 +164,7 @@ export default function CartDrawer({
                 <span className="material-symbols-outlined text-[18px] text-tertiary">
                   local_shipping
                 </span>
-                Freeship đơn từ 280.000đ
+                Freeship đơn từ {formatVND(freeshipThreshold)}
               </span>
               <span className="text-primary font-bold">
                 {freeshipProgress}%
@@ -364,10 +316,10 @@ export default function CartDrawer({
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="font-title-sm text-[13px] text-on-secondary-fixed font-semibold leading-tight">
-                    Thêm Bánh Quy Bơ Hạnh Nhân?
+                    {upsellOffer.title}
                   </p>
                   <p className="font-body-sm text-[11px] text-on-secondary-fixed-variant leading-tight">
-                    Chỉ +18.000đ khi gọi cùng Cold Brew
+                    {upsellOffer.subtitle}
                   </p>
                 </div>
                 <button
@@ -480,7 +432,7 @@ export default function CartDrawer({
                   Tổng thanh toán
                 </span>
                 <span className="block font-body-sm text-[11px] text-outline leading-tight">
-                  (Đã bao gồm thuế GTGT 8%)
+                  {cartConfig.taxNotice}
                 </span>
               </div>
               <div className="text-right">
@@ -518,8 +470,9 @@ export default function CartDrawer({
             <span className="material-symbols-outlined text-[14px] text-primary">
               storefront
             </span>
-            Hoặc nhận trực tiếp tại <strong>BrewLite Saigon Center</strong>{" "}
-            trong 15 phút
+            Hoặc nhận trực tiếp tại{" "}
+            <strong>{cartConfig.pickupBranchName}</strong>{" "}
+            {cartConfig.pickupTimeNotice}
           </p>
         </div>
       </aside>

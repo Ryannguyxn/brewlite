@@ -1,28 +1,22 @@
 "use client";
 
 import React from "react";
+import {
+  MOCK_CATEGORIES,
+  MOCK_PRICE_FILTER_OPTIONS,
+  MOCK_SORT_OPTIONS,
+  type CategoryId,
+  type CategoryOption,
+  type SelectOption,
+} from "@/mock-data";
 
-export type CategoryId =
-  | "all"
-  | "traditional"
-  | "espresso"
-  | "tea"
-  | "bakery";
-
-export interface CategoryOption {
-  id: CategoryId;
-  label: string;
-}
-
-export const CATEGORIES: CategoryOption[] = [
-  { id: "all", label: "Tất cả (24)" },
-  { id: "traditional", label: "Cà phê truyền thống" },
-  { id: "espresso", label: "Espresso & Cold Brew" },
-  { id: "tea", label: "Trà & Macchiato" },
-  { id: "bakery", label: "Bánh & Tráng miệng" },
-];
+export type { CategoryId, CategoryOption };
+export const CATEGORIES = MOCK_CATEGORIES;
 
 interface CategoryFilterBarProps {
+  categories?: CategoryOption[];
+  sortOptions?: SelectOption[];
+  priceFilterOptions?: SelectOption[];
   activeCategory: CategoryId;
   onSelectCategory: (cat: CategoryId) => void;
   sortBy: string;
@@ -32,6 +26,9 @@ interface CategoryFilterBarProps {
 }
 
 export default function CategoryFilterBar({
+  categories = MOCK_CATEGORIES,
+  sortOptions = MOCK_SORT_OPTIONS,
+  priceFilterOptions = MOCK_PRICE_FILTER_OPTIONS,
   activeCategory,
   onSelectCategory,
   sortBy,
@@ -43,7 +40,7 @@ export default function CategoryFilterBar({
     <div className="max-w-[1320px] mx-auto px-margin w-full -mt-6 relative z-20">
       <div className="p-space-md rounded-xl bg-surface-container-lowest shadow-md flex flex-wrap items-center justify-between gap-space-md">
         <div className="flex flex-wrap items-center gap-2">
-          {CATEGORIES.map((cat) => {
+          {categories.map((cat) => {
             const isActive = activeCategory === cat.id;
             return (
               <button
@@ -79,10 +76,11 @@ export default function CategoryFilterBar({
               value={sortBy}
               onChange={(e) => onSortChange(e.target.value)}
             >
-              <option value="popular">Phổ biến nhất</option>
-              <option value="price-asc">Giá tăng dần</option>
-              <option value="price-desc">Giá giảm dần</option>
-              <option value="newest">Mới nhất</option>
+              {sortOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -102,10 +100,11 @@ export default function CategoryFilterBar({
               value={priceRange}
               onChange={(e) => onPriceRangeChange(e.target.value)}
             >
-              <option value="all">Tất cả mức giá</option>
-              <option value="under-45">Dưới 45.000đ</option>
-              <option value="45-60">45.000đ - 60.000đ</option>
-              <option value="above-60">Trên 60.000đ</option>
+              {priceFilterOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
         </div>

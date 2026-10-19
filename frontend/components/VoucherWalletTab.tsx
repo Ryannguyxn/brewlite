@@ -1,89 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
+import { MOCK_VOUCHERS, type VoucherTicket } from "@/mock-data";
 
-export interface VoucherTicket {
-  id: string;
-  category: "cash" | "shipping" | "gift";
-  badgeLabel: string;
-  mainValue: string;
-  subValue: string;
-  conditionNote: string;
-  title: string;
-  expiryBadge: string;
-  expiryUrgent?: boolean;
-  description: string;
-  code: string;
-  expiryDate: string;
-  variant: "primary" | "secondary" | "tertiary" | "gift";
-  iconName?: string;
-}
-
-export const INITIAL_VOUCHERS: VoucherTicket[] = [
-  {
-    id: "v1",
-    category: "cash",
-    badgeLabel: "GIẢM TIỀN MẶT",
-    mainValue: "20.000",
-    subValue: "VNĐ",
-    conditionNote: "Cho đơn từ 150k",
-    title: "Giảm 20.000 đ đơn hàng",
-    expiryBadge: "Còn 5 ngày",
-    expiryUrgent: true,
-    description:
-      "Áp dụng cho mọi hóa đơn từ 150.000 đ. Thưởng thức trọn vẹn hương vị Robusta Đắk Lắk & Arabica Cầu Đất.",
-    code: "COFFEEVIP20",
-    expiryDate: "HSD: 30/10/2025",
-    variant: "primary",
-  },
-  {
-    id: "v2",
-    category: "shipping",
-    badgeLabel: "FREESHIP",
-    mainValue: "25.000",
-    subValue: "VNĐ",
-    conditionNote: "Bán kính ≤ 5km",
-    title: "Miễn phí giao hàng 25k",
-    expiryBadge: "Còn 12 ngày",
-    description:
-      "Đặc quyền thành viên Hạng Vàng. Miễn phí vận chuyển cho đơn hàng giao nhanh tận nơi.",
-    code: "FREESHIPGOLD",
-    expiryDate: "HSD: 06/11/2025",
-    variant: "secondary",
-  },
-  {
-    id: "v3",
-    category: "cash",
-    badgeLabel: "SPECIALTY",
-    mainValue: "15%",
-    subValue: "GIẢM TỐI ĐA 40K",
-    conditionNote: "Dòng Cold Brew",
-    title: "Giảm 15% Cold Brew & Drip",
-    expiryBadge: "Còn 20 ngày",
-    description:
-      "Áp dụng toàn bộ menu Cold Brew ngâm ủ 18 tiếng và Single Origin Pour-over tuyển chọn.",
-    code: "THANKS15",
-    expiryDate: "HSD: 15/11/2025",
-    variant: "tertiary",
-  },
-  {
-    id: "v4",
-    category: "gift",
-    badgeLabel: "TẶNG MÓN",
-    mainValue: "",
-    subValue: "CROISSANT",
-    conditionNote: "Kèm 2 ly Size L",
-    title: "Tặng 01 Croissant Bơ Pháp",
-    expiryBadge: "Còn 7 ngày",
-    expiryUrgent: true,
-    description:
-      "Bánh nướng thủ công bơ nhập khẩu thơm lừng, giòn rụm khi order từ 2 ly thức uống Size L.",
-    code: "FREEBAKERY",
-    expiryDate: "HSD: 01/11/2025",
-    variant: "gift",
-    iconName: "bakery_dining",
-  },
-];
+export type { VoucherTicket };
+export const INITIAL_VOUCHERS = MOCK_VOUCHERS;
 
 interface VoucherWalletTabProps {
   vouchers: VoucherTicket[];

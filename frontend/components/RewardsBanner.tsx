@@ -1,8 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
+import { MOCK_SITE_CONFIG } from "@/mock-data";
 
-export default function RewardsBanner() {
+interface RewardsBannerProps {
+  bannerData?: typeof MOCK_SITE_CONFIG.rewardsBanner;
+}
+
+export default function RewardsBanner({
+  bannerData = MOCK_SITE_CONFIG.rewardsBanner,
+}: RewardsBannerProps) {
   const [phone, setPhone] = useState("");
 
   const handleSubscribe = () => {
@@ -10,6 +17,7 @@ export default function RewardsBanner() {
       alert("Vui lòng nhập số điện thoại của bạn để nhận ưu đãi!");
       return;
     }
+    // TODO: Thay thế xử lý đăng ký thành viên nhanh này bằng axios.post('/api/auth/quick-register', { phone })
     alert(
       `Chúc mừng! Số điện thoại ${phone} đã được đăng ký thành viên BrewLite Rewards.`
     );
@@ -30,18 +38,17 @@ export default function RewardsBanner() {
           </div>
           <div className="flex flex-col">
             <h4 className="font-headline-md text-headline-md text-on-surface">
-              Đăng ký thành viên BrewLite Rewards
+              {bannerData.title}
             </h4>
             <p className="font-body-md text-body-md text-on-surface-variant">
-              Tích 1 điểm cho mỗi 10.000đ. Đổi ngay ly cà phê miễn phí và ưu đãi
-              sinh nhật độc quyền.
+              {bannerData.description}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-space-sm flex-shrink-0">
           <input
             className="px-4 py-3 rounded-lg bg-surface-container-lowest text-on-surface placeholder:text-outline font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary shadow-sm w-64"
-            placeholder="Nhập số điện thoại của bạn..."
+            placeholder={bannerData.inputPlaceholder}
             type="text"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
@@ -51,7 +58,7 @@ export default function RewardsBanner() {
             className="px-6 py-3 rounded-lg bg-primary text-on-primary font-title-sm text-title-sm hover:bg-primary-container shadow-md transition-colors whitespace-nowrap cursor-pointer"
             type="button"
           >
-            Nhận Ưu Đãi
+            {bannerData.buttonLabel}
           </button>
         </div>
       </div>

@@ -1,21 +1,9 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import type { CategoryId } from "./CategoryFilterBar";
+import type { ProductItem } from "@/mock-data";
 
-export interface ProductItem {
-  id: string;
-  name: string;
-  category: CategoryId;
-  rating: string;
-  reviews: string;
-  description: string;
-  price: number;
-  image: string;
-  imageAlt: string;
-  badge?: "Best Seller" | "Mới";
-  outOfStock?: boolean;
-}
+export type { ProductItem };
 
 interface ProductCardProps {
   product: ProductItem;

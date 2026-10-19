@@ -1,138 +1,54 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import HeroBanner from "@/components/HeroBanner";
-import CategoryFilterBar, { type CategoryId } from "@/components/CategoryFilterBar";
-import ProductCard, { type ProductItem } from "@/components/ProductCard";
+import CategoryFilterBar from "@/components/CategoryFilterBar";
+import ProductCard from "@/components/ProductCard";
 import PaginationBar from "@/components/PaginationBar";
 import RewardsBanner from "@/components/RewardsBanner";
-import CartDrawer, {
-  INITIAL_CART_ITEMS,
-  type CartItem,
-} from "@/components/CartDrawer";
+import CartDrawer from "@/components/CartDrawer";
 
-const CATALOG_PRODUCTS: ProductItem[] = [
-  {
-    id: "prod-1",
-    name: "Cà phê Sữa Đá Sài Gòn",
-    category: "traditional",
-    rating: "4.9",
-    reviews: "1.2k đánh giá",
-    description:
-      "Robusta Đắk Lắk ủ lạnh cùng sữa đặc ngọt thanh béo ngậy truyền thống, chuẩn vị sảng khoái.",
-    price: 39000,
-    badge: "Best Seller",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAzPqOrPhhCzHcloM2uKm1XEgi-tjFoOSz2izs77CruoHqfl2jxlSHB-Lmk32TgfE5vohxZTqlHsJt-WY7D2J3zYTuTTcDS8yuJnHVIh--fpbrKXiWnNxNrILhx1hS1NvTVL93KBhx-IVsBuo0WGNyq1A7XeT7yF0Cf8DTpPm3XpAvvqSjT2ncqLOb6_Z8UN1sySN2guHg2vQl2hc5WpbB2wkIkGp1qUdKoFBxgvGCYVfyluswN5Hsh",
-    imageAlt:
-      "A cold glass of authentic Vietnamese iced milk coffee with condensation droplets, dark roasted Robusta layered with sweet condensed milk, ice cubes, shot on natural oak cafe table in soft morning light.",
-  },
-  {
-    id: "prod-2",
-    name: "Espresso Macchiato Caramel",
-    category: "espresso",
-    rating: "4.8",
-    reviews: "640 đánh giá",
-    description:
-      "Shot đôi Arabica Cầu Đất cùng lớp bọt sữa mịn màng, phủ sốt caramel muối béo thơm.",
-    price: 55000,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBKiusDa3WsTymaJ0fU4HocmlMRCP9kTWzhea3qEznYMsykkkYhWSqqdGhkZsmTzexA5-ocAFXAE4_kB_OfyWN-6-tdl79IswlyI-S7cWQFSC6c3LARIB6Y9uWOIabZM7rQ26e7TuXz8FsoZZGcz4Xp8v5DPpDOI9B3-Dgp8YL5_ftymilQmpG6JdU-FknuuaAhLRYwo_sfjzFk21Z4mz8p4qpHcoQYZnUNisQ-BZQ0B8Io798Y9o0V",
-    imageAlt:
-      "Espresso Macchiato in a minimal artisanal ceramic cup with delicate micro-foam, delicate caramel swirl drizzled on top, velvety texture against a clean beige aesthetic background.",
-  },
-  {
-    id: "prod-3",
-    name: "Cold Brew Cam Sả Thảo Mộc",
-    category: "espresso",
-    rating: "4.9",
-    reviews: "310 đánh giá",
-    description:
-      "Chiết xuất lạnh 16 giờ với hương sả đập dập thơm the và lát cam sành mọng nước thanh mát.",
-    price: 62000,
-    badge: "Mới",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDYo3FoAt1qaudXwGWCT1rQdBzxp1CH-ojbRnYV5GcvRn8FMzlwdJFccQvdKR13KdREqdNB7c9CcTQTOxkXShaokdAZVhEQ26QgOiUPilj13A5cQ2sFo9UohyRxyU0WYPXv2NxAX0vnx1ugm7FrELX_Jp5lszQiewBQs2vYjM2BAe9Cov-63v9ul876RK6fAUlIcH9gabFkXgAHKdM9JNlrMjMowqVQn7PRoBe2p5YYJAfWM7Scam8V",
-    imageAlt:
-      "Artisanal glass carafe of cold brew coffee infused with fresh orange slice and lemongrass stalk, crystalline clear ice, warm ambient light on polished stone cafe surface.",
-  },
-  {
-    id: "prod-4",
-    name: "Bạc Xỉu Kem Béo Phin",
-    category: "traditional",
-    rating: "4.7",
-    reviews: "890 đánh giá",
-    description:
-      "Hòa quyện giữa sữa tươi thơm lừng, kem whipping béo ngậy và chút cà phê phin mộc dịu dàng.",
-    price: 45000,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuD9hVqzfVvhs1qWlZSE960-Xz9ba0R80g5p8UkpPESUDOggsFJi1spIxbVUVJxVn-MohgHToKg_nlW6X3_3aOFoqJWzIJak3o760eryk9uBfe0qiAkrsH_1s9yO03ee6UPe15tdKa7NyVEdyCrXAhUTU_MEViD5wFm-g8DPUyj69EGVB74t-wBBPyoPXr6I5beQ5PhuPV15Cssn6zmE38_f3xNUfbO6jzjjyIXOfdTHgVqkGLksS04w",
-    imageAlt:
-      "Traditional Vietnamese Bac Xiu layered iced coffee with distinct condensed milk bottom, rich cream layer and aromatic coffee top layer in a tall fluted glass, cafe ambiance.",
-  },
-  {
-    id: "prod-5",
-    name: "Cà Phê Muối Cố Đô",
-    category: "traditional",
-    rating: "5.0",
-    reviews: "2.1k đánh giá",
-    description:
-      "Công thức kem mặn cốt dừa độc quyền xứ Huế cân bằng hoàn hảo vị đắng đậm đà của cà phê.",
-    price: 49000,
-    badge: "Best Seller",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuB4Gve-RqDkpafN_RG-yUg2T3pDm67IlsY-2_qFvXQNTJsjJybBXLPDXHqwzvAdcc131ntfX_I26GPfe_ZIHKyrhWyyaJF0Eb0w04JGD6SDglcqIuFC5DATgjq4B7jrCQ2BjgEU0s2LCtUAZXW8UeTK9_PEd-KVz1BxUiT2onF1Q8O4q8q0hOWonoXg6Q_Ln5YnBM7V3XhJoaaUiBajercbpMZt7GViJ5LJ3ytB6VhIW27QewsX1ISH",
-    imageAlt:
-      "Traditional Hue salted cream coffee in vintage ceramic mug, thick savory sweet cream layer on dark robusta coffee, sprinkle of cocoa powder, serene atmospheric daylight.",
-  },
-  {
-    id: "prod-6",
-    name: "Trà Đào Cam Sả Hoàng Gia",
-    category: "tea",
-    rating: "4.8",
-    reviews: "750 đánh giá",
-    description:
-      "Trà ô long thượng hạng ủ lạnh kết hợp đào miếng giòn ngọt, tinh dầu sả tươi và cam vàng.",
-    price: 52000,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAFrlRYbbFdaws-kSmMBj4gvBHQKhN22IxIUBXnmVpzdDUhxVgUXQm0iKNZ9H9LQNDLTRLZtBhSrN_40OYDNIsNUY7J8XCZJEdVKE4e7C0KKIRvjXgdOT1r32rCvgch9-wpU6yIcfiSK4QwOg7zP7_vXrG8FWFte2mcFT1iNS-fYZWhMtETF3TLN6IItebcwkkuLlyLTcWYuNPDLeNQh2TbcxDvgCPBg2ggpdIC7Oxet9XLoaVQUq7Q",
-    imageAlt:
-      "Vibrant peach iced tea with orange slice and fresh lemongrass in a highball glass, golden hour backlight highlighting juicy peach chunks and glistening condensation.",
-  },
-  {
-    id: "prod-7",
-    name: "Cold Brew Vải Hoa Hồng",
-    category: "espresso",
-    rating: "4.9",
-    reviews: "180 đánh giá",
-    description:
-      "Nốt hương trái vải thơm ngát cùng chiết xuất cánh hoa hồng Damask chưng cất tự nhiên.",
-    price: 65000,
-    outOfStock: true,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAqpxb9e0jPl7WxiFsALgagy43y8x4qKxO1NDEVmYeZYu4eBR1ZvrcLlc-dZIlPh1V8oHQC_aScquZOc3Johz76dFe7ZpeB_3sk7i2MphGxKYuxC6Bm4NK_SjTUQySxMdfVXQHwWrJ-viD81gyhoKD_252GxnEcE1vQOP8B1EtgTnBkCTJBqm5YX3LjFkovjIhnsFAfN5qDJc7lGg_bqrBYOgCUZSU1c_CpFfgC4R6Ofxec9Gd89rqZ",
-    imageAlt:
-      "Cold brew coffee infused with lychee and dried rose petals in a modern stemless glass, delicate red botanical notes, soft cinematic cafe studio shot.",
-  },
-  {
-    id: "prod-8",
-    name: "Croissant Bơ Pháp Nướng",
-    category: "bakery",
-    rating: "4.6",
-    reviews: "420 đánh giá",
-    description:
-      "Vỏ ngàn lớp giòn rụm nướng nóng hổi mỗi sáng, dùng bơ Isigny Pháp thơm ngậy cao cấp.",
-    price: 38000,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuD2GIXbK_gjHDiFDwZkAZAs73C3wK4ab5Lmc5cE75nVHuWfcEhLuEvSSVghnIHrnBle5wifQ_WjdQEJ2_7ZjgUkayLlCY2-YHiHFWHNGzMfraKlZ3FawYmqKam8sGgMRhLqB5AHBd8l1hgTdDQ6c0xDricuCmnTpGO5Sulyvnc8iiwpAce1xHH3aHsDyH6K5_QFaqpjkosbyIuxKlYgLpFutCcXtoPsBMsNXNT3laP64_5AcdFkdaCx",
-    imageAlt:
-      "Golden crisp French buttery croissant fresh from the oven on a ceramic plate beside hot espresso, flaky layers, artisan cafe bakery lighting.",
-  },
-];
+import {
+  MOCK_CART_CONFIG,
+  MOCK_CATALOG_PRODUCTS,
+  MOCK_CATEGORIES,
+  MOCK_HERO_BANNER,
+  MOCK_INITIAL_CART_ITEMS,
+  MOCK_PRICE_FILTER_OPTIONS,
+  MOCK_SITE_CONFIG,
+  MOCK_SORT_OPTIONS,
+  MOCK_UPSELL_OFFER,
+  type CartConfig,
+  type CartItem,
+  type CategoryId,
+  type CategoryOption,
+  type HeroBannerData,
+  type ProductItem,
+  type SelectOption,
+  type SiteConfigData,
+  type UpsellOffer,
+} from "@/mock-data";
+import { fetchCartData, fetchCatalogData } from "@/services/api.service";
 
 export default function HomePage() {
+  // ==========================================================================
+  // PHẦN 1: QUẢN LÝ STATE & GỌI DỮ LIỆU TỪ SERVICE (LOGIC TÁCH BIỆT UI)
+  // ==========================================================================
+  const [products, setProducts] = useState<ProductItem[]>(MOCK_CATALOG_PRODUCTS);
+  const [categories, setCategories] =
+    useState<CategoryOption[]>(MOCK_CATEGORIES);
+  const [sortOptions, setSortOptions] =
+    useState<SelectOption[]>(MOCK_SORT_OPTIONS);
+  const [priceFilterOptions, setPriceFilterOptions] = useState<SelectOption[]>(
+    MOCK_PRICE_FILTER_OPTIONS
+  );
+  const [heroBanner, setHeroBanner] =
+    useState<HeroBannerData>(MOCK_HERO_BANNER);
+  const [siteConfig, setSiteConfig] =
+    useState<SiteConfigData>(MOCK_SITE_CONFIG);
+
   const [activeCategory, setActiveCategory] = useState<CategoryId>("all");
   const [sortBy, setSortBy] = useState("popular");
   const [priceRange, setPriceRange] = useState("all");
@@ -140,7 +56,13 @@ export default function HomePage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [cartItems, setCartItems] = useState<CartItem[]>(INITIAL_CART_ITEMS);
+  const [cartItems, setCartItems] = useState<CartItem[]>(
+    MOCK_INITIAL_CART_ITEMS
+  );
+  const [upsellOffer, setUpsellOffer] =
+    useState<UpsellOffer>(MOCK_UPSELL_OFFER);
+  const [cartConfig, setCartConfig] = useState<CartConfig>(MOCK_CART_CONFIG);
+
   const [cartBounceKey, setCartBounceKey] = useState(0);
   const [addedToast, setAddedToast] = useState<{
     visible: boolean;
@@ -148,13 +70,46 @@ export default function HomePage() {
     image: string;
   }>({ visible: false, productName: "", image: "" });
 
+  // Gọi hàm giả lập API khi khởi tạo trang
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialData() {
+      // TODO: Thay thế fetchCatalogData() & fetchCartData() trong services/api.service.ts
+      // bằng axios.get('http://localhost:3001/products') khi ghép nối Backend thật.
+      const [catalogRes, cartRes] = await Promise.all([
+        fetchCatalogData(),
+        fetchCartData(),
+      ]);
+
+      if (!isMounted) return;
+      setProducts(catalogRes.products);
+      setCategories(catalogRes.categories);
+      setSortOptions(catalogRes.sortOptions);
+      setPriceFilterOptions(catalogRes.priceFilterOptions);
+      setHeroBanner(catalogRes.heroBanner);
+      setSiteConfig(catalogRes.siteConfig);
+
+      setCartItems(cartRes.items);
+      setUpsellOffer(cartRes.upsellOffer);
+      setCartConfig(cartRes.cartConfig);
+    }
+
+    loadInitialData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Tính tổng số lượng sản phẩm trong giỏ
   const totalCartQty = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.qty, 0),
     [cartItems]
   );
 
+  // Lọc và sắp xếp danh sách sản phẩm theo state người dùng chọn
   const filteredProducts = useMemo(() => {
-    let list = [...CATALOG_PRODUCTS];
+    let list = [...products];
 
     if (activeCategory !== "all") {
       list = list.filter((p) => p.category === activeCategory);
@@ -188,8 +143,9 @@ export default function HomePage() {
     }
 
     return list;
-  }, [activeCategory, searchQuery, priceRange, sortBy]);
+  }, [products, activeCategory, searchQuery, priceRange, sortBy]);
 
+  // Các hàm xử lý sự kiện Giỏ hàng (Handlers)
   const handleAddToCart = (product: ProductItem) => {
     setCartItems((prev) => {
       const existing = prev.find((item) => item.name === product.name);
@@ -247,39 +203,26 @@ export default function HomePage() {
   };
 
   const handleRestoreDefaultCart = () => {
-    setCartItems(INITIAL_CART_ITEMS);
+    setCartItems(MOCK_INITIAL_CART_ITEMS);
   };
 
   const handleAddUpsell = () => {
+    const upsellItem = upsellOffer.item;
     setCartItems((prev) => {
-      const existing = prev.find((i) => i.id === "cartItemUpsell");
+      const existing = prev.find((i) => i.id === upsellItem.id);
       if (existing) {
         return prev.map((i) =>
-          i.id === "cartItemUpsell" ? { ...i, qty: i.qty + 1 } : i
+          i.id === upsellItem.id ? { ...i, qty: i.qty + 1 } : i
         );
       }
-      return [
-        ...prev,
-        {
-          id: "cartItemUpsell",
-          name: "Bánh Quy Bơ Hạnh Nhân",
-          unitPrice: 18000,
-          qty: 1,
-          image:
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuCEGhGqvQFCMTt4S_1bFUl-uGRXw8MVCXbawPjxWNnD81K9caHnZK4_WuPC1gdWPGOZgHErFgihRB-bV0bEKz6wNt8SyuZgdf3ILKQUM2nYaTioYTYHutAJGAXRpCpMnANkaDzWchuO3srZEHf_T-SIrPK39x0p9gcaw5y4hjC4JQTHHA23PtmWSx9OhIcAydVDjCJ3J4kwm-KlMQl166cAsZZLCNZYSYDoONFyhETPvOmmyViV0K0W",
-          imageAlt: "Bánh Quy Bơ Hạnh Nhân giòn thơm",
-          customizations: [
-            {
-              text: "Ưu đãi mua kèm Cold Brew",
-              dotColor: "bg-tertiary",
-            },
-          ],
-        },
-      ];
+      return [...prev, { ...upsellItem }];
     });
     setCartBounceKey((prev) => prev + 1);
   };
 
+  // ==========================================================================
+  // PHẦN 2: HIỂN THỊ GIAO DIỆN (UI RENDERING)
+  // ==========================================================================
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface">
       <Header
@@ -289,13 +232,17 @@ export default function HomePage() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeNav="thuc-don"
+        siteConfig={siteConfig}
       />
 
       <main className="w-full pt-20 bg-background min-h-screen flex-1">
         <div className="flex flex-col w-full">
-          <HeroBanner />
+          <HeroBanner data={heroBanner} />
 
           <CategoryFilterBar
+            categories={categories}
+            sortOptions={sortOptions}
+            priceFilterOptions={priceFilterOptions}
             activeCategory={activeCategory}
             onSelectCategory={setActiveCategory}
             sortBy={sortBy}
@@ -311,12 +258,13 @@ export default function HomePage() {
                   Thực Đơn Chọn Lọc
                 </h2>
                 <span className="font-body-sm text-body-sm text-on-surface-variant">
-                  {filteredProducts.length} trên tổng số 24 công thức đặc trưng
+                  {filteredProducts.length} trên tổng số{" "}
+                  {siteConfig.totalCatalogCount} công thức đặc trưng
                 </span>
               </div>
               <div className="flex items-center gap-2 text-on-surface-variant font-body-sm text-body-sm">
                 <span className="w-2.5 h-2.5 rounded-full bg-secondary-container" />
-                Giao nhanh trong 20 phút tại nội thành
+                {siteConfig.deliveryHighlight}
               </div>
             </div>
 
@@ -338,12 +286,12 @@ export default function HomePage() {
               currentPage={currentPage}
               totalPages={3}
               showingCount={filteredProducts.length}
-              totalItems={24}
+              totalItems={siteConfig.totalCatalogCount}
               onPageChange={setCurrentPage}
             />
           </section>
 
-          <RewardsBanner />
+          <RewardsBanner bannerData={siteConfig.rewardsBanner} />
         </div>
       </main>
 
@@ -389,6 +337,8 @@ export default function HomePage() {
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         items={cartItems}
+        upsellOffer={upsellOffer}
+        cartConfig={cartConfig}
         onUpdateQty={handleUpdateQty}
         onRemoveItem={handleRemoveItem}
         onClearCart={handleClearCart}
@@ -396,7 +346,7 @@ export default function HomePage() {
         onAddUpsell={handleAddUpsell}
       />
 
-      <Footer />
+      <Footer siteConfig={siteConfig} />
     </div>
   );
 }

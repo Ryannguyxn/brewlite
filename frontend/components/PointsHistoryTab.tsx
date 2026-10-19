@@ -1,67 +1,20 @@
 "use client";
 
 import React from "react";
+import {
+  MOCK_POINT_TRANSACTIONS,
+  type PointTransaction,
+} from "@/mock-data";
 
-export interface PointTransaction {
-  id: string;
-  timestamp: string;
-  title: string;
-  reference: string;
-  source: string;
-  deltaText: string;
-  balanceAfter: number;
-  type: "earn" | "spend" | "bonus";
-}
-
-export const INITIAL_TRANSACTIONS: PointTransaction[] = [
-  {
-    id: "tx-1",
-    timestamp: "24/10/2025 • 09:15",
-    title: "Tích điểm đơn hàng hoàn tất",
-    reference: "#BL-89241",
-    source: "BrewLite Saigon Center",
-    deltaText: "+16 điểm",
-    balanceAfter: 240,
-    type: "earn",
-  },
-  {
-    id: "tx-2",
-    timestamp: "20/10/2025 • 15:40",
-    title: "Tích điểm đơn hàng hoàn tất",
-    reference: "#BL-88924",
-    source: "BrewLite Hồ Con Rùa",
-    deltaText: "+24 điểm",
-    balanceAfter: 224,
-    type: "earn",
-  },
-  {
-    id: "tx-3",
-    timestamp: "18/10/2025 • 11:22",
-    title: "Đổi Voucher COFFEEVIP20",
-    reference: "REDEEM-9921",
-    source: "Cửa hàng Rewards Online",
-    deltaText: "-120 điểm",
-    balanceAfter: 200,
-    type: "spend",
-  },
-  {
-    id: "tx-4",
-    timestamp: "15/10/2025 • 08:00",
-    title: "Thưởng duy trì chuỗi tuần Hạng Vàng",
-    reference: "REWARD-WEEKLY",
-    source: "Hệ thống BrewLite Rewards",
-    deltaText: "+20 điểm",
-    balanceAfter: 320,
-    type: "bonus",
-  },
-];
+export type { PointTransaction };
+export const INITIAL_TRANSACTIONS = MOCK_POINT_TRANSACTIONS;
 
 interface PointsHistoryTabProps {
   transactions: PointTransaction[];
 }
 
 export default function PointsHistoryTab({
-  transactions,
+  transactions = MOCK_POINT_TRANSACTIONS,
 }: PointsHistoryTabProps) {
   return (
     <div className="flex flex-col gap-space-lg">

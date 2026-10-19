@@ -1,6 +1,11 @@
 import React from "react";
+import { MOCK_SITE_CONFIG, type SiteConfigData } from "@/mock-data";
 
-export default function Footer() {
+interface FooterProps {
+  siteConfig?: SiteConfigData;
+}
+
+export default function Footer({ siteConfig = MOCK_SITE_CONFIG }: FooterProps) {
   return (
     <footer
       id="footer"
@@ -11,13 +16,11 @@ export default function Footer() {
           <div className="col-span-12 lg:col-span-4 flex flex-col gap-space-sm">
             <div className="flex items-center gap-space-sm">
               <span className="font-headline-md text-headline-md text-primary tracking-tight">
-                BrewLite
+                {siteConfig.brandName}
               </span>
             </div>
             <p className="font-body-md text-body-md text-on-surface-variant max-w-sm">
-              Trải nghiệm cà phê đặc sản thủ công tuyển chọn từ nông trại Cầu
-              Đất và Đắk Lắk. Mỗi tách cà phê là một câu chuyện tôn vinh giá trị
-              nguyên bản.
+              {siteConfig.brandStory}
             </p>
             <div className="flex items-center gap-2 mt-2">
               <span className="material-symbols-outlined text-primary text-[20px]">
@@ -27,7 +30,7 @@ export default function Footer() {
                 Hotline CSKH:
               </span>
               <span className="font-title-sm text-title-sm text-primary font-bold">
-                1900 6868
+                {siteConfig.hotline}
               </span>
             </div>
           </div>
@@ -37,32 +40,14 @@ export default function Footer() {
               Hệ thống chi nhánh
             </h4>
             <ul className="space-y-2 text-on-surface-variant font-body-sm text-body-sm">
-              <li className="flex items-start gap-2">
-                <span className="material-symbols-outlined text-primary text-[18px] flex-shrink-0">
-                  pin_drop
-                </span>
-                <span>
-                  BrewLite Saigon Center: Tầng B2, 65 Lê Lợi, P. Bến Nghé, Quận
-                  1, TP. HCM
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="material-symbols-outlined text-primary text-[18px] flex-shrink-0">
-                  pin_drop
-                </span>
-                <span>
-                  BrewLite Hồ Con Rùa: 02 Công Xã Paris, P. Bến Nghé, Quận 1,
-                  TP. HCM
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="material-symbols-outlined text-primary text-[18px] flex-shrink-0">
-                  pin_drop
-                </span>
-                <span>
-                  BrewLite Thảo Điền: 38 Xuân Thủy, P. Thảo Điền, TP. Thủ Đức
-                </span>
-              </li>
+              {siteConfig.branches.map((branch) => (
+                <li key={branch.id} className="flex items-start gap-2">
+                  <span className="material-symbols-outlined text-primary text-[18px] flex-shrink-0">
+                    pin_drop
+                  </span>
+                  <span>{branch.address}</span>
+                </li>
+              ))}
             </ul>
           </div>
 
@@ -71,43 +56,25 @@ export default function Footer() {
               Liên kết nhanh
             </h4>
             <div className="grid grid-cols-2 gap-2 font-body-sm text-body-sm text-on-surface-variant">
-              <a
-                className="hover:text-primary transition-colors"
-                href="/"
-              >
-                Thực đơn đặc sản
-              </a>
-              <a
-                className="hover:text-primary transition-colors"
-                href="/voucher"
-              >
-                Ưu đãi thành viên
-              </a>
-              <a
-                className="hover:text-primary transition-colors"
-                href="#footer"
-              >
-                Câu chuyện hạt cà phê
-              </a>
-              <a className="hover:text-primary transition-colors" href="#">
-                Kiểm tra đơn hàng
-              </a>
-              <a className="hover:text-primary transition-colors" href="#">
-                Chính sách bảo mật
-              </a>
-              <a className="hover:text-primary transition-colors" href="#">
-                Điều khoản dịch vụ
-              </a>
+              {siteConfig.quickLinks.map((link, idx) => (
+                <a
+                  key={idx}
+                  className="hover:text-primary transition-colors"
+                  href={link.href}
+                >
+                  {link.label}
+                </a>
+              ))}
             </div>
           </div>
         </div>
 
         <div className="mt-space-xl pt-space-lg flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="font-body-sm text-body-sm text-on-surface-variant">
-            © 2025 BrewLite Specialty Coffee Co. Mọi quyền được bảo lưu.
+            {siteConfig.copyright}
           </p>
           <p className="font-body-sm text-body-sm text-on-surface-variant">
-            Thiết kế cho người yêu cà phê nguyên bản Việt Nam.
+            {siteConfig.tagline}
           </p>
         </div>
       </div>

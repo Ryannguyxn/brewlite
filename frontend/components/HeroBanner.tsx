@@ -1,6 +1,13 @@
 import React from "react";
+import { MOCK_HERO_BANNER, type HeroBannerData } from "@/mock-data";
 
-export default function HeroBanner() {
+interface HeroBannerProps {
+  data?: HeroBannerData;
+}
+
+export default function HeroBanner({
+  data = MOCK_HERO_BANNER,
+}: HeroBannerProps) {
   return (
     <section className="w-full relative overflow-hidden bg-surface-container-low py-space-xl">
       <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-transparent to-secondary/10 pointer-events-none" />
@@ -10,22 +17,20 @@ export default function HeroBanner() {
             <div className="flex items-center gap-space-xs">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md">
                 <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
-                Niên vụ mới 2025 • Cầu Đất Farm
+                {data.seasonBadge}
               </span>
               <span className="text-on-surface-variant font-body-sm text-body-sm">
-                Rang mộc thủ công mẻ nhỏ
+                {data.roastSubtitle}
               </span>
             </div>
             <h1 className="font-display-lg text-display-lg text-on-surface tracking-tight">
-              Thưởng Thức Vị Nguyên Bản <br />
+              {data.headlineLine1} <br />
               <span className="text-primary italic font-headline-xl text-headline-xl">
-                Từng Giọt Cà Phê Thủ Công
+                {data.headlineHighlight}
               </span>
             </h1>
             <p className="font-body-lg text-body-lg text-on-surface-variant max-w-2xl">
-              Tận hưởng bộ sưu tập cà phê phin truyền thống phối trộn Robusta
-              mật ong Buôn Ma Thuột cùng dòng Arabica Bourbon trứ danh, pha chế
-              theo tỉ lệ vàng chuẩn gu người Việt.
+              {data.description}
             </p>
           </div>
           <div className="col-span-12 lg:col-span-4 flex justify-end">
@@ -40,13 +45,13 @@ export default function HeroBanner() {
               </div>
               <div className="flex flex-col">
                 <span className="font-label-md text-label-md text-on-surface-variant uppercase">
-                  Món pha chế hôm nay
+                  {data.featuredLabel}
                 </span>
                 <span className="font-title-sm text-title-sm text-on-surface">
-                  Cà Phê Muối Cố Đô
+                  {data.featuredDrinkName}
                 </span>
                 <span className="font-body-sm text-body-sm text-primary font-semibold">
-                  Ưu đãi 15% cho thành viên
+                  {data.featuredPromoText}
                 </span>
               </div>
             </div>

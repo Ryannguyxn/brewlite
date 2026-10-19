@@ -1,34 +1,60 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import CartDrawer, {
-  INITIAL_CART_ITEMS,
-  type CartItem,
-} from "@/components/CartDrawer";
+import CartDrawer from "@/components/CartDrawer";
 import MembershipHeroCard from "@/components/MembershipHeroCard";
-import VoucherWalletTab, {
-  INITIAL_VOUCHERS,
-  type VoucherTicket,
-} from "@/components/VoucherWalletTab";
-import RewardExchangeTab, {
-  type RewardCatalogItem,
-} from "@/components/RewardExchangeTab";
-import PointsHistoryTab, {
-  INITIAL_TRANSACTIONS,
+import VoucherWalletTab from "@/components/VoucherWalletTab";
+import RewardExchangeTab from "@/components/RewardExchangeTab";
+import PointsHistoryTab from "@/components/PointsHistoryTab";
+
+import {
+  MOCK_GOLD_PERKS,
+  MOCK_INITIAL_CART_ITEMS,
+  MOCK_MEMBERSHIP_RULES,
+  MOCK_POINT_TRANSACTIONS,
+  MOCK_REWARD_CATALOG,
+  MOCK_UPSELL_OFFER,
+  MOCK_USER_PROFILE,
+  MOCK_VOUCHERS,
+  type CartItem,
+  type MembershipPerk,
+  type MembershipRule,
   type PointTransaction,
-} from "@/components/PointsHistoryTab";
+  type RewardCatalogItem,
+  type UserProfile,
+  type VoucherTicket,
+} from "@/mock-data";
+import {
+  fetchCartData,
+  fetchVoucherAndRewardsData,
+  redeemRewardMock,
+} from "@/services/api.service";
 
 export default function VoucherPage() {
+  // ==========================================================================
+  // PHẦN 1: QUẢN LÝ STATE & GỌI DỮ LIỆU TỪ SERVICE (LOGIC TÁCH BIỆT UI)
+  // ==========================================================================
   const [activeTab, setActiveTab] = useState<"wallet" | "exchange" | "history">(
     "wallet"
   );
-  const [userPoints, setUserPoints] = useState(240);
-  const [vouchers, setVouchers] = useState<VoucherTicket[]>(INITIAL_VOUCHERS);
-  const [transactions, setTransactions] =
-    useState<PointTransaction[]>(INITIAL_TRANSACTIONS);
+  const [userProfile, setUserProfile] =
+    useState<UserProfile>(MOCK_USER_PROFILE);
+  const [userPoints, setUserPoints] = useState(MOCK_USER_PROFILE.points);
+  const [vouchers, setVouchers] = useState<VoucherTicket[]>(MOCK_VOUCHERS);
+  const [rewardCatalog, setRewardCatalog] =
+    useState<RewardCatalogItem[]>(MOCK_REWARD_CATALOG);
+  const [transactions, setTransactions] = useState<PointTransaction[]>(
+    MOCK_POINT_TRANSACTIONS
+  );
+  const [goldPerks, setGoldPerks] =
+    useState<MembershipPerk[]>(MOCK_GOLD_PERKS);
+  const [membershipRules, setMembershipRules] = useState<MembershipRule[]>(
+    MOCK_MEMBERSHIP_RULES
+  );
+
   const [manualPromoCode, setManualPromoCode] = useState("");
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
@@ -43,7 +69,43 @@ export default function VoucherPage() {
   });
 
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [cartItems, setCartItems] = useState<CartItem[]>(INITIAL_CART_ITEMS);
+  const [cartItems, setCartItems] = useState<CartItem[]>(
+    MOCK_INITIAL_CART_ITEMS
+  );
+
+  // Gọi hàm giả lập API khi vào trang Voucher & Rewards
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadVoucherPageData() {
+      // TODO: Thay thế fetchVoucherAndRewardsData() & fetchCartData() trong services/api.service.ts
+      // bằng axios.get('http://localhost:3001/loyalty/me') và '/vouchers/me' khi ghép Backend thật.
+      const [voucherRes, cartRes] = await Promise.all([
+        fetchVoucherAndRewardsData(),
+        fetchCartData(),
+      ]);
+
+      if (!isMounted) return;
+      setUserProfile(voucherRes.userProfile);
+      setUserPoints(voucherRes.userProfile.points);
+      setVouchers(voucherRes.vouchers);
+      setRewardCatalog(voucherRes.rewardCatalog);
+      setTransactions(voucherRes.transactions);
+      setGoldPerks(voucherRes.goldPerks);
+      setMembershipRules(voucherRes.membershipRules);
+      setCartItems(cartRes.items);
+    }
+
+    loadVoucherPageData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const totalCartQty = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.qty, 0),
+    [cartItems]
+  );
 
   const showToast = (message: string, isSuccess = true) => {
     setToast({ visible: true, message, isSuccess });
@@ -74,6 +136,7 @@ export default function VoucherPage() {
       showToast("Vui lòng nhập mã ưu đãi hợp lệ", false);
       return;
     }
+    // TODO: Thay thế lưu mã thủ công bằng axios.post('http://localhost:3001/vouchers/claim', { code: val })
     const newTicket: VoucherTicket = {
       id: `v-manual-${Date.now()}`,
       category: "cash",
@@ -95,7 +158,7 @@ export default function VoucherPage() {
     showToast(`Đã lưu mã ${val} vào ví voucher của bạn!`);
   };
 
-  const handleRedeemReward = (reward: RewardCatalogItem) => {
+  const handleRedeemReward = async (reward: RewardCatalogItem) => {
     if (userPoints < reward.points) {
       showToast("Bạn chưa đủ điểm để đổi phần quà này", false);
       return;
@@ -105,37 +168,15 @@ export default function VoucherPage() {
     );
     if (!confirmed) return;
 
+    // TODO: Thay thế hàm redeemRewardMock trong services/api.service.ts bằng axios.post('/loyalty/redeem', ...)
+    const res = await redeemRewardMock(reward);
     const nextBalance = userPoints - reward.points;
     setUserPoints(nextBalance);
-
-    const generatedCode = `REWARD${reward.points}`;
-    const newVoucher: VoucherTicket = {
-      id: `v-redeem-${Date.now()}`,
-      category: reward.tag === "Vận Chuyển" ? "shipping" : "cash",
-      badgeLabel: "ĐỔI ĐIỂM",
-      mainValue: `${reward.points}P`,
-      subValue: "REWARD",
-      conditionNote: "Đổi từ BrewPoints",
-      title: reward.title,
-      expiryBadge: "Còn 30 ngày",
-      description: reward.description,
-      code: generatedCode,
-      expiryDate: "HSD: 30/11/2025",
-      variant: "secondary",
-    };
-    setVouchers((prev) => [newVoucher, ...prev]);
-
-    const newTx: PointTransaction = {
-      id: `tx-${Date.now()}`,
-      timestamp: "Vừa xong",
-      title: `Đổi quà: ${reward.title}`,
-      reference: `REDEEM-${Math.floor(1000 + Math.random() * 9000)}`,
-      source: "Cửa hàng Rewards Online",
-      deltaText: `-${reward.points} điểm`,
-      balanceAfter: nextBalance,
-      type: "spend",
-    };
-    setTransactions((prev) => [newTx, ...prev]);
+    setVouchers((prev) => [res.newVoucher, ...prev]);
+    setTransactions((prev) => [
+      { ...res.newTransaction, balanceAfter: nextBalance },
+      ...prev,
+    ]);
 
     showToast("Đổi quà thành công! Đã chuyển vào Kho Voucher của bạn.");
   };
@@ -159,44 +200,32 @@ export default function VoucherPage() {
   };
 
   const handleRestoreDefaultCart = () => {
-    setCartItems(INITIAL_CART_ITEMS);
+    setCartItems(MOCK_INITIAL_CART_ITEMS);
   };
 
   const handleAddUpsell = () => {
+    const upsellItem = MOCK_UPSELL_OFFER.item;
     setCartItems((prev) => {
-      const existing = prev.find((i) => i.id === "cartItemUpsell");
+      const existing = prev.find((i) => i.id === upsellItem.id);
       if (existing) {
         return prev.map((i) =>
-          i.id === "cartItemUpsell" ? { ...i, qty: i.qty + 1 } : i
+          i.id === upsellItem.id ? { ...i, qty: i.qty + 1 } : i
         );
       }
-      return [
-        ...prev,
-        {
-          id: "cartItemUpsell",
-          name: "Bánh Quy Bơ Hạnh Nhân",
-          unitPrice: 18000,
-          qty: 1,
-          image:
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuCEGhGqvQFCMTt4S_1bFUl-uGRXw8MVCXbawPjxWNnD81K9caHnZK4_WuPC1gdWPGOZgHErFgihRB-bV0bEKz6wNt8SyuZgdf3ILKQUM2nYaTioYTYHutAJGAXRpCpMnANkaDzWchuO3srZEHf_T-SIrPK39x0p9gcaw5y4hjC4JQTHHA23PtmWSx9OhIcAydVDjCJ3J4kwm-KlMQl166cAsZZLCNZYSYDoONFyhETPvOmmyViV0K0W",
-          imageAlt: "Bánh Quy Bơ Hạnh Nhân giòn thơm",
-          customizations: [
-            {
-              text: "Ưu đãi mua kèm Cold Brew",
-              dotColor: "bg-tertiary",
-            },
-          ],
-        },
-      ];
+      return [...prev, { ...upsellItem }];
     });
   };
 
+  // ==========================================================================
+  // PHẦN 2: HIỂN THỊ GIAO DIỆN (UI RENDERING)
+  // ==========================================================================
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface">
       <Header
-        cartCount={cartItems.length}
+        cartCount={totalCartQty}
         onOpenCart={() => setIsCartOpen(true)}
         activeNav="khuyen-mai"
+        userProfile={{ ...userProfile, points: userPoints }}
       />
 
       <main className="w-full pt-20 bg-background min-h-screen flex-1">
@@ -253,7 +282,7 @@ export default function VoucherPage() {
                         Đã tiết kiệm tháng này
                       </p>
                       <p className="font-title-sm text-title-sm text-primary font-bold">
-                        210.000 đ
+                        {userProfile.savedThisMonth.toLocaleString("vi-VN")} đ
                       </p>
                     </div>
                   </div>
@@ -280,6 +309,8 @@ export default function VoucherPage() {
             {/* 2. Hero Gold Membership Card Showcase */}
             <MembershipHeroCard
               points={userPoints}
+              userProfile={userProfile}
+              perks={goldPerks}
               onOpenQr={() => setIsQrModalOpen(true)}
               onSwitchTab={setActiveTab}
             />
@@ -373,6 +404,7 @@ export default function VoucherPage() {
             {activeTab === "exchange" && (
               <RewardExchangeTab
                 userPoints={userPoints}
+                rewards={rewardCatalog}
                 onRedeem={handleRedeemReward}
               />
             )}
@@ -387,56 +419,28 @@ export default function VoucherPage() {
               id="rules"
               className="grid grid-cols-1 md:grid-cols-3 gap-gutter mt-space-sm"
             >
-              <div className="p-space-md rounded-xl bg-surface-container-lowest shadow-sm flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0">
-                  <span className="material-symbols-outlined text-[20px]">
-                    verified
-                  </span>
+              {membershipRules.map((rule) => (
+                <div
+                  key={rule.id}
+                  className="p-space-md rounded-xl bg-surface-container-lowest shadow-sm flex items-start gap-3"
+                >
+                  <div
+                    className={`w-10 h-10 rounded-lg ${rule.iconBgClass} flex items-center justify-center ${rule.iconTextClass} flex-shrink-0`}
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      {rule.icon}
+                    </span>
+                  </div>
+                  <div>
+                    <h4 className="font-title-sm text-title-sm text-on-surface font-bold">
+                      {rule.title}
+                    </h4>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+                      {rule.description}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-title-sm text-title-sm text-on-surface font-bold">
-                    Hạn sử dụng điểm
-                  </h4>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-                    Điểm BrewPoints có giá trị trong 12 tháng kể từ ngày tích
-                    lũy phát sinh gần nhất.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-space-md rounded-xl bg-surface-container-lowest shadow-sm flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-secondary-fixed flex items-center justify-center text-secondary flex-shrink-0">
-                  <span className="material-symbols-outlined text-[20px]">
-                    sync_saved_locally
-                  </span>
-                </div>
-                <div>
-                  <h4 className="font-title-sm text-title-sm text-on-surface font-bold">
-                    Tự động áp dụng
-                  </h4>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-                    Voucher sau khi đổi sẽ nằm trong ví và tự gợi ý khi bạn tiến
-                    hành đặt món.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-space-md rounded-xl bg-surface-container-lowest shadow-sm flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-tertiary-fixed flex items-center justify-center text-tertiary flex-shrink-0">
-                  <span className="material-symbols-outlined text-[20px]">
-                    phone_in_talk
-                  </span>
-                </div>
-                <div>
-                  <h4 className="font-title-sm text-title-sm text-on-surface font-bold">
-                    Hỗ trợ Hội viên VIP
-                  </h4>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-                    Đường dây nóng độc quyền: 1900 6868 (Phím 2) hỗ trợ kiểm tra
-                    quyền lợi tức thì.
-                  </p>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
@@ -462,10 +466,11 @@ export default function VoucherPage() {
                   Thẻ Hội Viên Điện Tử
                 </span>
                 <h3 className="font-title-md text-title-md text-on-surface font-bold">
-                  Nguyễn Hải Đăng
+                  {userProfile.fullName}
                 </h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  Mã thẻ: BL-8942-GLD (Hạng Vàng)
+                  Mã thẻ: {userProfile.memberCode.replace("#", "")} (
+                  {userProfile.tierName})
                 </p>
 
                 <div className="my-space-md p-4 bg-white rounded-xl shadow-inner border border-surface-container flex items-center justify-center">

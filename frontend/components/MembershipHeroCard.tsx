@@ -1,19 +1,29 @@
 "use client";
 
 import React from "react";
+import {
+  MOCK_GOLD_PERKS,
+  MOCK_USER_PROFILE,
+  type MembershipPerk,
+  type UserProfile,
+} from "@/mock-data";
 
 interface MembershipHeroCardProps {
   points: number;
+  userProfile?: UserProfile;
+  perks?: MembershipPerk[];
   onOpenQr: () => void;
   onSwitchTab: (tab: "wallet" | "exchange" | "history") => void;
 }
 
 export default function MembershipHeroCard({
   points,
+  userProfile = MOCK_USER_PROFILE,
+  perks = MOCK_GOLD_PERKS,
   onOpenQr,
   onSwitchTab,
 }: MembershipHeroCardProps) {
-  const diamondTarget = 300;
+  const diamondTarget = userProfile.nextTierPoints;
   const progressPercent = Math.min(
     100,
     Math.round((points / diamondTarget) * 100)
@@ -46,14 +56,15 @@ export default function MembershipHeroCard({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-headline-md text-headline-md tracking-tight font-bold text-surface-container-lowest">
-                  Nguyễn Hải Đăng
+                  {userProfile.fullName}
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-md text-label-md shadow-sm">
-                  ★ HẠNG VÀNG
+                  {userProfile.tierBadge}
                 </span>
               </div>
               <p className="font-body-sm text-body-sm text-surface-container-high/80 mt-0.5">
-                Mã hội viên: #BL-8942-GLD • Thành viên từ 03/2023
+                Mã hội viên: {userProfile.memberCode} • Thành viên từ{" "}
+                {userProfile.memberSince}
               </p>
             </div>
           </div>
@@ -86,7 +97,7 @@ export default function MembershipHeroCard({
             <p className="font-body-sm text-body-sm text-surface-container-high/90 mt-1">
               ≈ Đổi được{" "}
               <span className="font-semibold text-tertiary-fixed underline underline-offset-2">
-                02 ly Specialty Coffee
+                {userProfile.equivalentRewardHint}
               </span>{" "}
               tại quầy
             </p>
@@ -120,7 +131,7 @@ export default function MembershipHeroCard({
               </span>
               Tiến độ thăng hạng:{" "}
               <strong className="text-tertiary-fixed font-bold">
-                HẠNG KIM CƯƠNG
+                {userProfile.nextTierName}
               </strong>
             </span>
             <span className="text-surface-container-highest font-semibold">
@@ -138,7 +149,7 @@ export default function MembershipHeroCard({
               Còn <strong>{pointsRemaining} điểm</strong> nữa để thăng hạng
             </span>
             <span className="text-tertiary-fixed font-medium">
-              Đặc quyền mới: Tích x1.5 điểm • Free Upsize • Quà sinh nhật
+              {userProfile.nextTierPerksSummary}
             </span>
           </div>
         </div>
@@ -152,7 +163,7 @@ export default function MembershipHeroCard({
               workspace_premium
             </span>
             <h3 className="font-title-md text-title-md text-on-surface">
-              Đặc quyền Hạng Vàng của bạn
+              Đặc quyền {userProfile.tierName} của bạn
             </h3>
           </div>
           <a
@@ -164,53 +175,28 @@ export default function MembershipHeroCard({
         </div>
 
         <div className="space-y-3">
-          <div className="flex items-start gap-3 p-2.5 rounded-lg bg-surface-container-low">
-            <div className="w-8 h-8 rounded-lg bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0">
-              <span className="material-symbols-outlined text-[18px]">
-                percent
-              </span>
+          {perks.map((perk) => (
+            <div
+              key={perk.id}
+              className="flex items-start gap-3 p-2.5 rounded-lg bg-surface-container-low"
+            >
+              <div
+                className={`w-8 h-8 rounded-lg ${perk.iconBgClass} flex items-center justify-center ${perk.iconTextClass} flex-shrink-0`}
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {perk.icon}
+                </span>
+              </div>
+              <div>
+                <p className="font-title-sm text-title-sm text-on-surface">
+                  {perk.title}
+                </p>
+                <p className="font-body-sm text-body-sm text-on-surface-variant">
+                  {perk.description}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-title-sm text-title-sm text-on-surface">
-                Tích lũy 8% trên giá trị hóa đơn
-              </p>
-              <p className="font-body-sm text-body-sm text-on-surface-variant">
-                Mỗi 10.000 đ thanh toán quy đổi thành 1 BrewPoint.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3 p-2.5 rounded-lg bg-surface-container-low">
-            <div className="w-8 h-8 rounded-lg bg-secondary-fixed flex items-center justify-center text-secondary flex-shrink-0">
-              <span className="material-symbols-outlined text-[18px]">
-                cake
-              </span>
-            </div>
-            <div>
-              <p className="font-title-sm text-title-sm text-on-surface">
-                Tặng 01 Bánh ngọt Specialty sinh nhật
-              </p>
-              <p className="font-body-sm text-body-sm text-on-surface-variant">
-                Voucher tự động kích hoạt vào tháng sinh nhật của bạn.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3 p-2.5 rounded-lg bg-surface-container-low">
-            <div className="w-8 h-8 rounded-lg bg-tertiary-fixed flex items-center justify-center text-tertiary flex-shrink-0">
-              <span className="material-symbols-outlined text-[18px]">
-                local_shipping
-              </span>
-            </div>
-            <div>
-              <p className="font-title-sm text-title-sm text-on-surface">
-                Ưu tiên giao hàng &amp; Voucher FreeShip
-              </p>
-              <p className="font-body-sm text-body-sm text-on-surface-variant">
-                Nhận 02 mã Freeship bán kính 5km vào ngày 1 hàng tháng.
-              </p>
-            </div>
-          </div>
+          ))}
         </div>
 
         <div className="pt-space-xs flex items-center justify-between bg-surface-container p-3 rounded-lg">

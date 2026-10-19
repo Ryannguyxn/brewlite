@@ -1,111 +1,30 @@
 "use client";
 
 import React, { useState } from "react";
+import {
+  MOCK_REWARD_CATALOG,
+  type RewardCatalogItem,
+} from "@/mock-data";
 
-export interface RewardCatalogItem {
-  id: string;
-  tag: string;
-  popular?: boolean;
-  physical?: boolean;
-  points: number;
-  title: string;
-  description: string;
-  stockText: string;
-  image: string;
-  imageAlt: string;
-}
-
-export const REWARD_CATALOG: RewardCatalogItem[] = [
-  {
-    id: "r1",
-    tag: "Voucher Điện Tử",
-    points: 60,
-    title: "Voucher giảm giá 15.000 đ",
-    description:
-      "Giảm trực tiếp 15.000 đ cho bất kỳ đơn hàng takeaway hoặc thưởng thức tại quán.",
-    stockText: "Còn lại 148 suất",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBWVIQjOqtVh8C9EqOs7xdWBS95lyArl3pWpWD6ksginfLTDne3OYFhwVnT317QMxuFegjEw5VlQC1Ep-tPavpkGVapFwKuNSPITGRzm61CuDrKNUqdejYez7lzM47REmolwL2EB4OjvxGNc8IC4iHN1ObQ4GECvwLww8kJLmG0Gu8TODigW2NVT6jcj6hirCjXqmhz6gPr4yUTMMJ38iVsoiZAiDh-8plFQaWhx4q13dJR1R0z7bUn",
-    imageAlt: "Voucher giảm giá 15.000 đ",
-  },
-  {
-    id: "r2",
-    tag: "Vận Chuyển",
-    points: 80,
-    title: "Miễn phí vận chuyển toàn thành phố",
-    description:
-      "Tối đa 25.000 đ phí vận chuyển. Áp dụng cho chi nhánh Saigon Center, Hồ Con Rùa và Thảo Điền.",
-    stockText: "Còn lại 85 suất",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDae47uEZnw4snsY35BdcH5WhDGH-lwlAsaT-yce7TS6ZTdJ8IXJFqNZH4fDPX0O5ptjJJMirgX-A4Ole_X1lhIWLdVPXI5aFSHlH1OXb2dbX2xc3xRqlbMoCaI5K95cHC_tGDeQSSi1ravSsYITsVMOhw5a5lHEmFjoSVXH4o2M-tSWxtNw8-t7hCtY9bA1VAQZQjt7u7QWRzyPe4BRXu_tZnxFcPSGUiIhAQoHa-QksoDVAW47SiD",
-    imageAlt: "Miễn phí vận chuyển toàn thành phố",
-  },
-  {
-    id: "r3",
-    tag: "★ Phổ biến nhất",
-    popular: true,
-    points: 120,
-    title: "01 Ly Cà Phê Sữa Đá Sài Gòn (M)",
-    description:
-      "Hạt Robusta Fine Đắk Lắk đậm đà hòa quyện cùng sữa đặc nguyên kem thơm béo truyền thống.",
-    stockText: "Đã đổi 312 lượt",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBQCt7aEPGEetbRM7b711vmga7aWxURD1SFcWcOPss1PGxLq9JGDsR0OW0DktfbC0tKn9xPtFoJJruJ10CdNGONt1mmyeHUeD_bVxpQmHiTKTpi-buW6JrbtrIi38kvAny3tcuOmxNKoCV1-HUmFJoLg9hM98D9HG24yE53U5ArF89yV6wQLFLNoTe8e8Bc3HZ1qNpE8cEVAmVMbILUYjPNZZnBS9N5JEpPIgSym_FRGvxUlp5ReE_i",
-    imageAlt: "01 Ly Cà Phê Sữa Đá Sài Gòn (M)",
-  },
-  {
-    id: "r4",
-    tag: "Voucher Giảm Giá",
-    points: 140,
-    title: "Voucher giảm giá 35.000 đ",
-    description:
-      "Áp dụng cho mọi hóa đơn từ 150.000 đ. Thích hợp cho buổi cà phê gặp gỡ bạn bè hoặc làm việc.",
-    stockText: "Còn lại 40 suất",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCSCu5B1S1-x38dYSXC9uF-Du5JLkG5NRqkHuWg5_KSXbwcjio3OjWMgkJSnDkdyUjgYdp8SlKGFuMP2rKmpVfZd_KM0wM5RU7Mx7RP1l1fl38XYcwEDDjGPaRBtB3YCtGWsjtwJXs2J6R2fcC3UXH23Dg9fwmQtnd5MFDKuAxVHy4nwW_Q_p-GerN0LT4cRrT_hvRnpOFN5p3VhyGKDSJ5LnhqVoQJ73afY1ym095oZt1bAXDL1_2u",
-    imageAlt: "Voucher giảm giá 35.000 đ",
-  },
-  {
-    id: "r5",
-    tag: "Specialty Drink",
-    points: 180,
-    title: "01 Ly Cold Brew Cam Sả Thảo Mộc (L)",
-    description:
-      "Cold brew 18h ủ lạnh kết hợp nước ép cam tươi và sả đập dập thơm mát sảng khoái.",
-    stockText: "Còn lại 25 suất",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuB9gDu53BXXyxu843amGzpq8UdY1Vjg8_zKbjF4LbyMx9vQuwiCnI2fF9kjcPH194pCrqlNItW8_SS26gxDudi975Am0EGIzTgkSvMvZdraHszkODXAXdqyQGzpuCZE1eQ4Km-4A2N-VCyvz43Eqa7FasAvUE7ICCFF1drflITLYxb9ecnRnex7IL5NlmzRaifpbmWu-fMcTZQJMvfLGFQClmsRs1bqVh3Y6X3nGUciNJ2OoGDNFp4V",
-    imageAlt: "01 Ly Cold Brew Cam Sả Thảo Mộc (L)",
-  },
-  {
-    id: "r6",
-    tag: "Quà Tặng Hiện Vật",
-    physical: true,
-    points: 320,
-    title: "Bình Giữ Nhiệt BrewLite Eco 500ml",
-    description:
-      "Chất liệu Inox 304 giữ nóng/lạnh 12 tiếng, nắp tre tự nhiên khắc laser thương hiệu độc quyền.",
-    stockText: "Còn 12 bình",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCX4XsjBLKuKwC_m1zNC6LZYljopruEAU5QBSnaU9HcoU2iYtMUHQPOHhPkxmbj73D8auqNTuZ2WZLQ-SdMelMedmiBMIEyBY-FMYUZ-w9YDhW6r1oWZm3z5yNuSzYytAhFSC2BqqSSfx_Z9MAcl_RUOuFYmnPmKRUOZpXU7yVDifRsEzotJcrJhyZL_lPSVgDKRQ7dEfV3wF4Di0v3f77Sx-7XhQ5VsGtTgRbKvFauRIcQjrrEVuxh",
-    imageAlt: "Bình Giữ Nhiệt BrewLite Eco 500ml",
-  },
-];
+export type { RewardCatalogItem };
+export const REWARD_CATALOG = MOCK_REWARD_CATALOG;
 
 interface RewardExchangeTabProps {
   userPoints: number;
+  rewards?: RewardCatalogItem[];
   onRedeem: (reward: RewardCatalogItem) => void;
 }
 
 export default function RewardExchangeTab({
   userPoints,
+  rewards = MOCK_REWARD_CATALOG,
   onRedeem,
 }: RewardExchangeTabProps) {
   const [rangeFilter, setRangeFilter] = useState<
     "all" | "under100" | "100to200" | "over200"
   >("all");
 
-  const filteredRewards = REWARD_CATALOG.filter((item) => {
+  const filteredRewards = rewards.filter((item) => {
     if (rangeFilter === "under100") return item.points < 100;
     if (rangeFilter === "100to200")
       return item.points >= 100 && item.points <= 200;

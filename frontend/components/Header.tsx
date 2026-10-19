@@ -1,0 +1,183 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+
+interface HeaderProps {
+  cartCount?: number;
+  cartBounceKey?: number;
+  onOpenCart?: () => void;
+  searchQuery?: string;
+  onSearchChange?: (value: string) => void;
+  activeNav?: "thuc-don" | "khuyen-mai" | "lich-su-don-hang" | "ve-brewlite";
+}
+
+export default function Header({
+  cartCount = 3,
+  cartBounceKey = 0,
+  onOpenCart,
+  searchQuery = "",
+  onSearchChange,
+  activeNav = "thuc-don",
+}: HeaderProps) {
+  const [isBouncing, setIsBouncing] = useState(false);
+
+  useEffect(() => {
+    if (cartBounceKey > 0) {
+      setIsBouncing(false);
+      const startTimer = setTimeout(() => setIsBouncing(true), 10);
+      const endTimer = setTimeout(() => setIsBouncing(false), 850);
+      return () => {
+        clearTimeout(startTimer);
+        clearTimeout(endTimer);
+      };
+    }
+  }, [cartBounceKey]);
+
+  return (
+    <header className="fixed top-0 left-0 right-0 w-full z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
+      <div className="h-20 max-w-[1320px] mx-auto px-margin flex items-center justify-between gap-gutter">
+        <div className="flex items-center gap-space-lg flex-shrink-0">
+          <Link className="flex items-center gap-space-sm" href="/">
+            <img
+              alt="BrewLite Logo"
+              className="h-8 w-auto object-contain"
+              src="https://lh3.googleusercontent.com/aida-public/AB6AXuCXc4_MXJFOX6cH9aqKb1GUvI22wWtCiixATqMzxvfLUHdNh-RMpdpq4aKguUIbRNeklKhZ2_XMAdoKAQR1i0D8hr9JlS_jFWECEfVRnjVvMBDndAfuRQo7zLqe_xWw8ESAd7J9Dy3j7kFGH76FadaxIE8md5pOUkzAW_G-q76cyP-MzzPQia5WNtJ7PCvAcMprzobIqdlsJEB-ECd3DB3G4JZztoE7bxQSNVHcbHvqIJ4y3Zwra1vq"
+            />
+            <span className="font-headline-md text-headline-md text-primary tracking-tight">
+              BrewLite
+            </span>
+          </Link>
+          <button
+            className="hidden xl:flex items-center gap-space-xs px-space-sm py-1.5 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors cursor-pointer"
+            type="button"
+          >
+            <span className="material-symbols-outlined text-primary text-[18px]">
+              location_on
+            </span>
+            <span className="font-label-md text-label-md">
+              Chi nhánh: Saigon Center
+            </span>
+            <span className="material-symbols-outlined text-[16px]">
+              expand_more
+            </span>
+          </button>
+        </div>
+
+        <div className="hidden lg:flex items-center flex-1 max-w-sm mx-space-sm">
+          <div className="relative w-full">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-outline">
+              <span className="material-symbols-outlined text-[20px]">
+                search
+              </span>
+            </span>
+            <input
+              className="w-full pl-10 pr-4 py-2 bg-surface-container-lowest text-on-surface placeholder:text-outline text-body-sm font-body-sm rounded-full focus:outline-none focus:ring-1 focus:ring-primary shadow-[0_1px_4px_rgba(44,32,24,0.04)] transition-all"
+              placeholder="Tìm kiếm cà phê, món uống yêu thích..."
+              type="text"
+              value={searchQuery}
+              onChange={(e) => onSearchChange?.(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <nav className="hidden md:flex items-center gap-1">
+          <Link
+            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors ${
+              activeNav === "thuc-don"
+                ? "bg-primary text-on-primary shadow-sm font-semibold"
+                : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+            }`}
+            href="/"
+          >
+            Thực đơn
+          </Link>
+          <Link
+            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors ${
+              activeNav === "khuyen-mai"
+                ? "bg-primary text-on-primary shadow-sm font-semibold"
+                : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+            }`}
+            href="/voucher"
+          >
+            Khuyến mãi
+          </Link>
+          <a
+            className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors"
+            href="#"
+          >
+            Lịch sử đơn hàng
+          </a>
+          <a
+            className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors"
+            href="#footer"
+          >
+            Về BrewLite
+          </a>
+        </nav>
+
+        <div className="flex items-center gap-space-md flex-shrink-0">
+          <button
+            id="header-cart-btn"
+            onClick={onOpenCart}
+            className={`relative flex items-center gap-space-xs px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
+              isBouncing
+                ? "animate-cart-shake bg-primary-fixed ring-2 ring-primary shadow-md text-on-primary-fixed"
+                : "bg-surface-container-low hover:bg-surface-container-high text-on-surface"
+            }`}
+            type="button"
+          >
+            {isBouncing && (
+              <span
+                key={cartBounceKey}
+                className="animate-float-plus absolute -top-2 right-1 z-50 px-1.5 py-0.5 rounded-full bg-tertiary text-on-tertiary font-label-md text-[11px] font-bold shadow-md pointer-events-none"
+              >
+                +1
+              </span>
+            )}
+            <span
+              className={`material-symbols-outlined text-[22px] text-primary transition-transform ${
+                isBouncing ? "scale-110" : ""
+              }`}
+            >
+              shopping_bag
+            </span>
+            <span className="font-label-md text-label-md hidden sm:inline">
+              Giỏ hàng
+            </span>
+            <span
+              className={`flex items-center justify-center px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-md text-[11px] leading-tight ${
+                isBouncing ? "animate-badge-pop" : ""
+              }`}
+            >
+              {cartCount} món
+            </span>
+          </button>
+          <Link
+            className="flex items-center gap-space-sm pl-2 group"
+            href="/voucher"
+          >
+            <img
+              alt="Profile"
+              className="w-8 h-8 rounded-full object-cover shadow-[0_1px_4px_rgba(0,0,0,0.1)] ring-1 ring-surface-variant group-hover:ring-primary transition-all"
+              src="https://lh3.googleusercontent.com/aida-public/AB6AXuAmjZyk-pzjwkCEoPO7SFsUXdOHYNQDc63AaSSxPr76MYlbtIIHpTaCKlf9fuYeGovvBP7GGh2hWDdcNHr4te7tpNsNap4v1zhAGOMsCPmkginD83t0GdeIN1gPvEpX2le9utpBZPeP5d4PoRCAZMXFUgz8V4IqWDd7QcFfUM4RGZu7HgVYtEBYehumIn2cweDn97IH39PPlG7klYsm12FxPwb0rJ5Kj0IZB6P99gC4t0pCp12y_PzS"
+            />
+            <div className="hidden sm:flex flex-col text-left">
+              <span className="font-title-sm text-title-sm text-on-surface leading-tight group-hover:text-primary transition-colors">
+                Nguyễn Hải Đăng
+              </span>
+              <div className="flex items-center gap-1 mt-0.5">
+                <span className="font-label-md text-[11px] text-primary font-bold bg-primary-fixed/60 px-1.5 py-0.2 rounded">
+                  Hạng Vàng
+                </span>
+                <span className="font-label-md text-[11px] text-tertiary font-semibold">
+                  💎 240 điểm
+                </span>
+              </div>
+            </div>
+          </Link>
+        </div>
+      </div>
+    </header>
+  );
+}

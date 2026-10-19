@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+
+<html lang="vi"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><title>BrewLite - Cà Phê Thủ Công Đặc Sản</title><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@500;600;700&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"on-primary":"#ffffff","secondary-fixed":"#ffdbcd","on-primary-container":"#fffbff","tertiary":"#8d4b00","surface-container-lowest":"#ffffff","surface-container":"#f1ede7","background":"#fdf9f3","on-primary-fixed-variant":"#70370e","on-secondary":"#ffffff","on-error-container":"#93000a","surface-container-high":"#ebe8e2","surface-tint":"#8d4e24","error":"#ba1a1a","outline":"#86736a","on-secondary-fixed":"#360f00","secondary-container":"#fe9e72","secondary":"#944925","on-tertiary-fixed":"#2f1500","tertiary-fixed-dim":"#ffb77d","outline-variant":"#d8c2b7","secondary-fixed-dim":"#ffb596","on-primary-fixed":"#321200","on-surface":"#1c1c18","on-secondary-container":"#773310","surface-container-highest":"#e6e2dc","on-error":"#ffffff","on-secondary-fixed-variant":"#76320f","on-tertiary":"#ffffff","inverse-surface":"#31302d","surface-variant":"#e6e2dc","surface":"#fdf9f3","on-tertiary-fixed-variant":"#6e3900","primary-container":"#a86338","surface-dim":"#ddd9d4","tertiary-container":"#b15f00","surface-bright":"#fdf9f3","inverse-primary":"#ffb68c","on-surface-variant":"#53443b","error-container":"#ffdad6","primary-fixed":"#ffdbc9","primary":"#8a4c22","on-background":"#1c1c18","on-tertiary-container":"#fffbff","inverse-on-surface":"#f4f0ea","tertiary-fixed":"#ffdcc3","primary-fixed-dim":"#ffb68c","surface-container-low":"#f7f3ed"},borderRadius:{"DEFAULT":"0.25rem","lg":"0.5rem","xl":"0.75rem","full":"9999px"},spacing:{"space-xs":"0.25rem","space-sm":"0.5rem","space-md":"1rem","margin":"3rem","space-xl":"2.5rem","gutter":"1.5rem","space-lg":"1.5rem"},fontFamily:{"headline-xl":["Plus Jakarta Sans"],"title-md":["Plus Jakarta Sans"],"headline-lg":["Plus Jakarta Sans"],"headline-md":["Plus Jakarta Sans"],"body-lg":["Inter"],"label-lg":["Plus Jakarta Sans"],"title-sm":["Plus Jakarta Sans"],"body-sm":["Inter"],"label-md":["Plus Jakarta Sans"],"price-lg":["Plus Jakarta Sans"],"display-lg":["Plus Jakarta Sans"],"body-md":["Inter"]},fontSize:{"headline-xl":["36px",{lineHeight:"44px",letterSpacing:"-0.02em",fontWeight:"700"}],"title-md":["18px",{lineHeight:"26px",letterSpacing:"0em",fontWeight:"600"}],"headline-lg":["28px",{lineHeight:"36px",letterSpacing:"-0.01em",fontWeight:"600"}],"headline-md":["22px",{lineHeight:"30px",letterSpacing:"-0.01em",fontWeight:"600"}],"body-lg":["16px",{lineHeight:"26px",letterSpacing:"0em",fontWeight:"400"}],"label-lg":["14px",{lineHeight:"20px",letterSpacing:"0.01em",fontWeight:"600"}],"title-sm":["16px",{lineHeight:"24px",letterSpacing:"0em",fontWeight:"600"}],"body-sm":["12px",{lineHeight:"18px",letterSpacing:"0.01em",fontWeight:"400"}],"label-md":["12px",{lineHeight:"16px",letterSpacing:"0.02em",fontWeight:"600"}],"price-lg":["20px",{lineHeight:"24px",letterSpacing:"-0.01em",fontWeight:"700"}],"display-lg":["48px",{lineHeight:"56px",letterSpacing:"-0.02em",fontWeight:"700"}],"body-md":["14px",{lineHeight:"22px",letterSpacing:"0em",fontWeight:"400"}]}}}};</script></head><body class="bg-background font-body-md text-on-surface antialiased"><header class="fixed top-0 left-0 right-0 w-full z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-20 max-w-[1320px] mx-auto px-margin flex items-center justify-between gap-gutter"><div class="flex items-center gap-space-lg flex-shrink-0"><a class="flex items-center gap-space-sm" data-path="thuc-don" href="#"><img alt="BrewLite Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCXc4_MXJFOX6cH9aqKb1GUvI22wWtCiixATqMzxvfLUHdNh-RMpdpq4aKguUIbRNeklKhZ2_XMAdoKAQR1i0D8hr9JlS_jFWECEfVRnjVvMBDndAfuRQo7zLqe_xWw8ESAd7J9Dy3j7kFGH76FadaxIE8md5pOUkzAW_G-q76cyP-MzzPQia5WNtJ7PCvAcMprzobIqdlsJEB-ECd3DB3G4JZztoE7bxQSNVHcbHvqIJ4y3Zwra1vq"/><span class="font-headline-md text-headline-md text-primary tracking-tight">BrewLite</span></a><button class="hidden xl:flex items-center gap-space-xs px-space-sm py-1.5 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-primary text-[18px]">location_on</span><span class="font-label-md text-label-md">Chi nhánh: Saigon Center</span><span class="material-symbols-outlined text-[16px]">expand_more</span></button></div><div class="hidden lg:flex items-center flex-1 max-w-xs mx-space-sm"><div class="relative w-full"><span class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-outline"><span class="material-symbols-outlined text-[20px]">search</span></span><input class="w-full pl-10 pr-4 py-2 bg-surface-container-lowest text-on-surface placeholder:text-outline text-body-sm font-body-sm rounded-full focus:outline-none focus:ring-1 focus:ring-primary shadow-[0_1px_4px_rgba(44,32,24,0.04)] transition-all" placeholder="Tìm kiếm cà phê, món uống..." type="text"/></div></div><nav class="hidden md:flex items-center gap-1" data-active-classes="bg-primary text-on-primary rounded-lg shadow-sm font-semibold"><a class="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors" data-path="thuc-don" href="#">Thực đơn</a><a class="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors" data-path="doi-diem-thuong-kho-voucher" href="#">Khuyến mãi / Đổi quà</a><a class="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors" data-path="lich-su-don-hang" href="#">Lịch sử đơn hàng</a><a class="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors" data-path="ve-brewlite" href="#">Về BrewLite</a></nav><div class="flex items-center gap-space-md flex-shrink-0"><button class="relative flex items-center gap-space-xs px-3.5 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-[22px] text-primary">shopping_bag</span><span class="font-label-md text-label-md hidden sm:inline">Giỏ hàng</span><span class="flex items-center justify-center px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-md text-[11px] leading-tight">3 món</span></button><a class="flex items-center gap-space-sm pl-2 group" data-path="doi-diem-thuong-kho-voucher" href="#"><img alt="Profile" class="w-8 h-8 rounded-full object-cover shadow-[0_1px_4px_rgba(0,0,0,0.1)] ring-1 ring-surface-variant group-hover:ring-primary transition-all" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAmjZyk-pzjwkCEoPO7SFsUXdOHYNQDc63AaSSxPr76MYlbtIIHpTaCKlf9fuYeGovvBP7GGh2hWDdcNHr4te7tpNsNap4v1zhAGOMsCPmkginD83t0GdeIN1gPvEpX2le9utpBZPeP5d4PoRCAZMXFUgz8V4IqWDd7QcFfUM4RGZu7HgVYtEBYehumIn2cweDn97IH39PPlG7klYsm12FxPwb0rJ5Kj0IZB6P99gC4t0pCp12y_PzS"/><div class="hidden sm:flex flex-col text-left"><span class="font-title-sm text-title-sm text-on-surface leading-tight group-hover:text-primary transition-colors">Nguyễn Hải Đăng</span><div class="flex items-center gap-1 mt-0.5"><span class="font-label-md text-[11px] text-primary font-bold bg-primary-fixed/60 px-1.5 py-0.2 rounded">Hạng Vàng</span><span class="font-label-md text-[11px] text-tertiary font-semibold">💎 240 điểm</span></div></div></a></div></div></header><main class="w-full pt-20 bg-background min-h-screen"><div class="flex flex-col w-full">
+<!-- Main Content Canvas (Desktop 1440px target, max-w-[1320px]) -->
+<div class="max-w-[1320px] w-full mx-auto px-margin py-space-lg flex flex-col gap-space-xl">
+<!-- 1. Breadcrumb & Section Intro -->
+<div class="flex flex-col gap-space-xs">
+<nav class="flex items-center gap-2 text-on-surface-variant font-body-sm text-body-sm">
+<a class="hover:text-primary transition-colors" href="#">Trang chủ</a>
+<span class="text-outline-variant">/</span>
+<a class="hover:text-primary transition-colors" href="#">Tài khoản</a>
+<span class="text-outline-variant">/</span>
+<span class="text-primary font-semibold">Đổi điểm &amp; Kho Voucher</span>
+</nav>
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-space-md pt-space-xs">
+<div>
+<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed/50 text-on-primary-fixed-variant font-label-md text-label-md mb-2">
+<span class="material-symbols-outlined text-[16px] text-primary" style="font-variation-settings: 'FILL' 1;">military_tech</span>
+            BrewLite Privilege Program
+          </span>
+<h1 class="font-headline-xl text-headline-xl text-on-surface tracking-tight">BrewLite Rewards &amp; Kho Voucher Ưu Đãi</h1>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1 max-w-2xl">
+            Tận hưởng đặc quyền tích lũy sau mỗi tách cà phê thủ công. Đổi hạt điểm BrewPoints lấy voucher giảm giá, thức uống cao cấp và quà tặng độc quyền.
+          </p>
+</div>
+<!-- Quick stats summary card -->
+<div class="flex items-center gap-space-md bg-surface-container-low p-space-sm px-space-md rounded-xl shadow-sm">
+<div class="flex items-center gap-2">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[22px]">savings</span>
+</div>
+<div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Đã tiết kiệm tháng này</p>
+<p class="font-title-sm text-title-sm text-primary font-bold">210.000 đ</p>
+</div>
+</div>
+<div class="w-px h-8 bg-surface-container-highest"></div>
+<div class="flex items-center gap-2">
+<div class="w-10 h-10 rounded-full bg-secondary-container/40 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[22px]">confirmation_number</span>
+</div>
+<div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Voucher sẵn sàng</p>
+<p class="font-title-sm text-title-sm text-on-surface font-bold">4 mã khả dụng</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- 2. Hero Gold Membership Card Showcase -->
+<div class="grid grid-cols-12 gap-gutter items-stretch">
+<!-- High Luxury Gold Tier Card (Left 7 Cols) -->
+<div class="col-span-12 lg:col-span-7 relative overflow-hidden rounded-xl bg-gradient-to-br from-primary-container via-primary to-on-primary-fixed-variant text-on-primary p-space-lg shadow-xl flex flex-col justify-between min-h-[300px]">
+<!-- Subtle luxury decorative watermark -->
+<div class="absolute -right-16 -top-16 w-72 h-72 rounded-full bg-secondary-container/20 blur-2xl pointer-events-none"></div>
+<div class="absolute right-4 bottom-4 opacity-10 pointer-events-none select-none">
+<span class="material-symbols-outlined text-[200px] leading-none">local_cafe</span>
+</div>
+<!-- Card Top Bar -->
+<div class="relative z-10 flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-surface-container-lowest/20 backdrop-blur-md p-1 shadow-inner flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary-fixed text-[28px]" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<span class="font-headline-md text-headline-md tracking-tight font-bold text-surface-container-lowest">Nguyễn Hải Đăng</span>
+<span class="px-2.5 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-md text-label-md shadow-sm">
+                  ★ HẠNG VÀNG
+                </span>
+</div>
+<p class="font-body-sm text-body-sm text-surface-container-high/80 mt-0.5">Mã hội viên: #BL-8942-GLD • Thành viên từ 03/2023</p>
+</div>
+</div>
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-lowest/15 hover:bg-surface-container-lowest/25 backdrop-blur-sm text-surface-container-lowest font-label-md text-label-md transition-all" id="open-qr-modal">
+<span class="material-symbols-outlined text-[18px]">qr_code_2</span>
+<span>QR Tích điểm</span>
+</button>
+</div>
+<!-- Card Mid: Points Balance -->
+<div class="relative z-10 my-4 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+<div>
+<p class="font-body-sm text-body-sm text-surface-container-highest tracking-wide uppercase">Số dư điểm khả dụng</p>
+<div class="flex items-baseline gap-2 mt-1">
+<span class="font-display-lg text-display-lg font-bold text-surface-container-lowest leading-none">240</span>
+<span class="font-title-md text-title-md text-tertiary-fixed font-semibold">BrewPoints</span>
+</div>
+<p class="font-body-sm text-body-sm text-surface-container-high/90 mt-1">
+              ≈ Đổi được <span class="font-semibold text-tertiary-fixed underline underline-offset-2">02 ly Specialty Coffee</span> tại quầy
+            </p>
+</div>
+<div class="flex gap-2">
+<button class="px-4 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-label-lg text-label-lg shadow-md hover:bg-surface-container-low transition-all" onclick="switchTab('exchange-tab')">
+              Đổi quà ngay
+            </button>
+<a class="px-3 py-2 rounded-lg bg-surface-container-lowest/10 hover:bg-surface-container-lowest/20 backdrop-blur-sm text-surface-container-lowest font-label-md text-label-md flex items-center gap-1 transition-colors" href="#">
+              Quy chế hạng
+              <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</a>
+</div>
+</div>
+<!-- Card Bottom: Diamond Tier Progression Bar -->
+<div class="relative z-10 pt-3 bg-surface-container-lowest/10 backdrop-blur-md rounded-xl p-3.5">
+<div class="flex items-center justify-between text-body-sm font-body-sm mb-1.5">
+<span class="text-surface-container-lowest font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-tertiary-fixed">diamond</span>
+              Tiến độ thăng hạng: <strong class="text-tertiary-fixed font-bold">HẠNG KIM CƯƠNG</strong>
+</span>
+<span class="text-surface-container-highest font-semibold">240 / 300 điểm</span>
+</div>
+<!-- Bar -->
+<div class="w-full h-2.5 bg-surface-container-lowest/20 rounded-full overflow-hidden">
+<div class="h-full bg-gradient-to-r from-tertiary-fixed to-secondary-fixed rounded-full" style="width: 80%;"></div>
+</div>
+<div class="flex items-center justify-between mt-2 font-body-sm text-[11px] text-surface-container-high/90">
+<span>Còn <strong>60 điểm</strong> nữa để thăng hạng</span>
+<span class="text-tertiary-fixed font-medium">Đặc quyền mới: Tích x1.5 điểm • Free Upsize • Quà sinh nhật</span>
+</div>
+</div>
+</div>
+<!-- Quick Actions & Next Tier Perks Info (Right 5 Cols) -->
+<div class="col-span-12 lg:col-span-5 flex flex-col justify-between gap-space-sm bg-surface-container-lowest p-space-lg rounded-xl shadow-sm">
+<div class="flex items-center justify-between pb-space-xs">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[24px]">workspace_premium</span>
+<h3 class="font-title-md text-title-md text-on-surface">Đặc quyền Hạng Vàng của bạn</h3>
+</div>
+<span class="text-primary font-label-md text-label-md cursor-pointer hover:underline">Chi tiết</span>
+</div>
+<!-- Perks list with warm badges -->
+<div class="space-y-3">
+<div class="flex items-start gap-3 p-2.5 rounded-lg bg-surface-container-low">
+<div class="w-8 h-8 rounded-lg bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0">
+<span class="material-symbols-outlined text-[18px]">percent</span>
+</div>
+<div>
+<p class="font-title-sm text-title-sm text-on-surface">Tích lũy 8% trên giá trị hóa đơn</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Mỗi 10.000 đ thanh toán quy đổi thành 1 BrewPoint.</p>
+</div>
+</div>
+<div class="flex items-start gap-3 p-2.5 rounded-lg bg-surface-container-low">
+<div class="w-8 h-8 rounded-lg bg-secondary-fixed flex items-center justify-center text-secondary flex-shrink-0">
+<span class="material-symbols-outlined text-[18px]">cake</span>
+</div>
+<div>
+<p class="font-title-sm text-title-sm text-on-surface">Tặng 01 Bánh ngọt Specialty sinh nhật</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Voucher tự động kích hoạt vào tháng sinh nhật của bạn.</p>
+</div>
+</div>
+<div class="flex items-start gap-3 p-2.5 rounded-lg bg-surface-container-low">
+<div class="w-8 h-8 rounded-lg bg-tertiary-fixed flex items-center justify-center text-tertiary flex-shrink-0">
+<span class="material-symbols-outlined text-[18px]">local_shipping</span>
+</div>
+<div>
+<p class="font-title-sm text-title-sm text-on-surface">Ưu tiên giao hàng &amp; Voucher FreeShip</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Nhận 02 mã Freeship bán kính 5km vào ngày 1 hàng tháng.</p>
+</div>
+</div>
+</div>
+<div class="pt-space-xs flex items-center justify-between bg-surface-container p-3 rounded-lg">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">history</span>
+<span class="font-label-lg text-label-lg text-on-surface">Kiểm tra lịch sử giao dịch?</span>
+</div>
+<button class="font-label-md text-label-md text-primary font-bold hover:underline" onclick="switchTab('history-tab')">
+            Xem sao kê điểm →
+          </button>
+</div>
+</div>
+</div>
+<!-- 3. Segmented Navigation Tabs -->
+<div class="flex flex-col sm:flex-row items-center justify-between gap-space-md bg-surface-container-low p-1.5 rounded-xl">
+<div class="flex items-center gap-1 w-full sm:w-auto" role="tablist">
+<button class="tab-button flex items-center justify-center gap-2 px-space-md py-2.5 rounded-lg bg-primary text-on-primary font-label-lg text-label-lg shadow-sm transition-all flex-1 sm:flex-initial" id="tab-btn-wallet" onclick="switchTab('wallet-tab')">
+<span class="material-symbols-outlined text-[20px]">account_balance_wallet</span>
+<span>Kho Voucher của tôi (4)</span>
+</button>
+<button class="tab-button flex items-center justify-center gap-2 px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-lg text-label-lg transition-all flex-1 sm:flex-initial" id="tab-btn-exchange" onclick="switchTab('exchange-tab')">
+<span class="material-symbols-outlined text-[20px]">redeem</span>
+<span>Đổi điểm nhận Voucher &amp; Quà</span>
+</button>
+<button class="tab-button flex items-center justify-center gap-2 px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface font-label-lg text-label-lg transition-all flex-1 sm:flex-initial" id="tab-btn-history" onclick="switchTab('history-tab')">
+<span class="material-symbols-outlined text-[20px]">receipt_long</span>
+<span>Lịch sử tích &amp; dùng điểm</span>
+</button>
+</div>
+<!-- Quick Add Promo Code bar in Tab strip -->
+<div class="flex items-center gap-2 w-full sm:w-auto px-2">
+<div class="relative w-full sm:w-64">
+<span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-outline">
+<span class="material-symbols-outlined text-[18px]">sell</span>
+</span>
+<input class="w-full pl-9 pr-3 py-1.5 bg-surface-container-lowest text-on-surface placeholder:text-outline font-body-sm text-body-sm rounded-lg focus:outline-none focus:ring-1 focus:ring-primary uppercase tracking-wider" id="input-promo-code" placeholder="Nhập mã ưu đãi riêng..." type="text"/>
+</div>
+<button class="px-3.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-primary hover:text-on-primary text-on-surface font-label-md text-label-md transition-colors flex-shrink-0" onclick="applyManualCode()">
+          Lưu mã
+        </button>
+</div>
+</div>
+<!-- ========================================== -->
+<!-- TAB 1: KHO VOUCHER CỦA TÔI (ACTIVE CONTENT) -->
+<!-- ========================================== -->
+<div class="tab-pane flex flex-col gap-space-lg" id="wallet-tab-content">
+<!-- Filter Chips -->
+<div class="flex flex-wrap items-center justify-between gap-space-md">
+<div class="flex items-center gap-2 overflow-x-auto pb-1">
+<button class="px-4 py-1.5 rounded-full bg-on-surface text-surface-container-lowest font-label-md text-label-md">Tất cả (4)</button>
+<button class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-md text-label-md transition-colors">Giảm tiền mặt (2)</button>
+<button class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-md text-label-md transition-colors">Miễn phí vận chuyển (1)</button>
+<button class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-md text-label-md transition-colors">Tặng món (1)</button>
+</div>
+<div class="text-on-surface-variant font-body-sm text-body-sm">
+          Sắp xếp theo: <span class="text-primary font-semibold cursor-pointer">Sắp hết hạn trước</span>
+</div>
+</div>
+<!-- Ticket Coupon Grid (4 Tickets) -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-gutter">
+<!-- Voucher Ticket 1 -->
+<div class="relative bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col sm:flex-row items-stretch group">
+<!-- Ticket Left Notch & Value -->
+<div class="sm:w-44 bg-gradient-to-br from-primary-fixed to-primary-container p-space-md flex flex-col justify-between items-center text-center relative">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-on-primary-fixed/20 text-on-primary-fixed font-label-md text-[11px] font-bold">
+              GIẢM TIỀN MẶT
+            </span>
+<div class="my-auto py-2">
+<span class="font-display-lg text-[32px] leading-tight font-extrabold text-on-primary-container">20.000</span>
+<span class="block font-title-sm text-title-sm text-on-primary-container font-semibold -mt-1">VNĐ</span>
+</div>
+<span class="font-body-sm text-[11px] text-on-primary-container/80">Cho đơn từ 150k</span>
+<!-- Decorative Cutout circle notches on edge -->
+<div class="hidden sm:block absolute -top-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+<div class="hidden sm:block absolute -bottom-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+</div>
+<!-- Ticket Right Details -->
+<div class="flex-1 p-space-md flex flex-col justify-between gap-space-sm bg-surface-container-lowest">
+<div>
+<div class="flex items-center justify-between gap-2">
+<h4 class="font-title-md text-title-md text-on-surface font-bold">Giảm 20.000 đ đơn hàng</h4>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-error-container text-on-error-container font-label-md text-[11px] font-bold">
+<span class="material-symbols-outlined text-[13px]">alarm</span> Còn 5 ngày
+                </span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                Áp dụng cho mọi hóa đơn từ 150.000 đ. Thưởng thức trọn vẹn hương vị Robusta Đắk Lắk &amp; Arabica Cầu Đất.
+              </p>
+</div>
+<!-- Code copy & CTA -->
+<div class="pt-3 flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-surface-container font-label-md text-label-md text-primary font-mono select-all">
+<span>COFFEEVIP20</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors" onclick="copyCode('COFFEEVIP20')" title="Sao chép mã">
+<span class="material-symbols-outlined text-[16px]">content_copy</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<span class="font-body-sm text-[11px] text-outline">HSD: 30/10/2025</span>
+<button class="px-4 py-1.5 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors">
+                  Dùng ngay
+                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Voucher Ticket 2 -->
+<div class="relative bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col sm:flex-row items-stretch group">
+<!-- Ticket Left Notch & Value -->
+<div class="sm:w-44 bg-gradient-to-br from-secondary-fixed to-secondary p-space-md flex flex-col justify-between items-center text-center relative">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-on-secondary-fixed/20 text-on-secondary-fixed font-label-md text-[11px] font-bold">
+              FREESHIP
+            </span>
+<div class="my-auto py-2">
+<span class="font-display-lg text-[30px] leading-tight font-extrabold text-on-secondary">25.000</span>
+<span class="block font-title-sm text-title-sm text-on-secondary font-semibold -mt-1">VNĐ</span>
+</div>
+<span class="font-body-sm text-[11px] text-on-secondary/80">Bán kính ≤ 5km</span>
+<div class="hidden sm:block absolute -top-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+<div class="hidden sm:block absolute -bottom-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+</div>
+<!-- Ticket Right Details -->
+<div class="flex-1 p-space-md flex flex-col justify-between gap-space-sm bg-surface-container-lowest">
+<div>
+<div class="flex items-center justify-between gap-2">
+<h4 class="font-title-md text-title-md text-on-surface font-bold">Miễn phí giao hàng 25k</h4>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-md text-[11px]">
+<span class="material-symbols-outlined text-[13px]">schedule</span> Còn 12 ngày
+                </span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                Đặc quyền thành viên Hạng Vàng. Miễn phí vận chuyển cho đơn hàng giao nhanh tận nơi.
+              </p>
+</div>
+<!-- Code copy & CTA -->
+<div class="pt-3 flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-surface-container font-label-md text-label-md text-primary font-mono select-all">
+<span>FREESHIPGOLD</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors" onclick="copyCode('FREESHIPGOLD')" title="Sao chép mã">
+<span class="material-symbols-outlined text-[16px]">content_copy</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<span class="font-body-sm text-[11px] text-outline">HSD: 06/11/2025</span>
+<button class="px-4 py-1.5 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors">
+                  Dùng ngay
+                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Voucher Ticket 3 -->
+<div class="relative bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col sm:flex-row items-stretch group">
+<!-- Ticket Left Notch & Value -->
+<div class="sm:w-44 bg-gradient-to-br from-tertiary-fixed to-tertiary-container p-space-md flex flex-col justify-between items-center text-center relative">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-on-tertiary-fixed/20 text-on-tertiary-fixed font-label-md text-[11px] font-bold">
+              SPECIALTY
+            </span>
+<div class="my-auto py-2">
+<span class="font-display-lg text-[36px] leading-tight font-extrabold text-on-tertiary-container">15%</span>
+<span class="block font-title-sm text-title-sm text-on-tertiary-container font-semibold -mt-1">GIẢM TỐI ĐA 40K</span>
+</div>
+<span class="font-body-sm text-[11px] text-on-tertiary-container/80">Dòng Cold Brew</span>
+<div class="hidden sm:block absolute -top-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+<div class="hidden sm:block absolute -bottom-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+</div>
+<!-- Ticket Right Details -->
+<div class="flex-1 p-space-md flex flex-col justify-between gap-space-sm bg-surface-container-lowest">
+<div>
+<div class="flex items-center justify-between gap-2">
+<h4 class="font-title-md text-title-md text-on-surface font-bold">Giảm 15% Cold Brew &amp; Drip</h4>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-md text-[11px]">
+<span class="material-symbols-outlined text-[13px]">schedule</span> Còn 20 ngày
+                </span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                Áp dụng toàn bộ menu Cold Brew ngâm ủ 18 tiếng và Single Origin Pour-over tuyển chọn.
+              </p>
+</div>
+<!-- Code copy & CTA -->
+<div class="pt-3 flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-surface-container font-label-md text-label-md text-primary font-mono select-all">
+<span>THANKS15</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors" onclick="copyCode('THANKS15')" title="Sao chép mã">
+<span class="material-symbols-outlined text-[16px]">content_copy</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<span class="font-body-sm text-[11px] text-outline">HSD: 15/11/2025</span>
+<button class="px-4 py-1.5 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors">
+                  Dùng ngay
+                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Voucher Ticket 4 -->
+<div class="relative bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col sm:flex-row items-stretch group">
+<!-- Ticket Left Notch & Value -->
+<div class="sm:w-44 bg-gradient-to-br from-primary-fixed-dim to-secondary-container p-space-md flex flex-col justify-between items-center text-center relative">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-on-secondary-container/20 text-on-secondary-container font-label-md text-[11px] font-bold">
+              TẶNG MÓN
+            </span>
+<div class="my-auto py-2">
+<span class="material-symbols-outlined text-[36px] text-on-secondary-container">bakery_dining</span>
+<span class="block font-title-sm text-title-sm text-on-secondary-container font-semibold mt-1">CROISSANT</span>
+</div>
+<span class="font-body-sm text-[11px] text-on-secondary-container/80">Kèm 2 ly Size L</span>
+<div class="hidden sm:block absolute -top-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+<div class="hidden sm:block absolute -bottom-3 -right-3 w-6 h-6 rounded-full bg-background"></div>
+</div>
+<!-- Ticket Right Details -->
+<div class="flex-1 p-space-md flex flex-col justify-between gap-space-sm bg-surface-container-lowest">
+<div>
+<div class="flex items-center justify-between gap-2">
+<h4 class="font-title-md text-title-md text-on-surface font-bold">Tặng 01 Croissant Bơ Pháp</h4>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-error-container text-on-error-container font-label-md text-[11px] font-bold">
+<span class="material-symbols-outlined text-[13px]">alarm</span> Còn 7 ngày
+                </span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                Bánh nướng thủ công bơ nhập khẩu thơm lừng, giòn rụm khi order từ 2 ly thức uống Size L.
+              </p>
+</div>
+<!-- Code copy & CTA -->
+<div class="pt-3 flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-surface-container font-label-md text-label-md text-primary font-mono select-all">
+<span>FREEBAKERY</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors" onclick="copyCode('FREEBAKERY')" title="Sao chép mã">
+<span class="material-symbols-outlined text-[16px]">content_copy</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<span class="font-body-sm text-[11px] text-outline">HSD: 01/11/2025</span>
+<button class="px-4 py-1.5 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors">
+                  Dùng ngay
+                </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ========================================== -->
+<!-- TAB 2: ĐỔI ĐIỂM NHẬN VOUCHER & QUÀ TẶNG -->
+<!-- ========================================== -->
+<div class="tab-pane flex flex-col gap-space-lg" id="exchange-tab-content">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md bg-surface-container-low p-space-md rounded-xl">
+<div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[24px]">storefront</span>
+<h2 class="font-headline-lg text-headline-lg text-on-surface font-bold">Cửa hàng Đổi quà BrewPoints</h2>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">
+            Số dư khả dụng hiện tại: <strong class="text-primary font-bold">240 BrewPoints</strong>. Điểm sau khi đổi sẽ lập tức chuyển thành voucher trong ví.
+          </p>
+</div>
+<!-- Filter range buttons -->
+<div class="flex items-center gap-1 bg-surface-container-lowest p-1 rounded-lg shadow-sm overflow-x-auto">
+<button class="px-3 py-1.5 rounded-md bg-primary text-on-primary font-label-md text-label-md">Tất cả</button>
+<button class="px-3 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-label-md text-label-md transition-colors">Dưới 100 điểm</button>
+<button class="px-3 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-label-md text-label-md transition-colors">100 - 200 điểm</button>
+<button class="px-3 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-label-md text-label-md transition-colors">Trên 200 điểm</button>
+</div>
+</div>
+<!-- Reward Exchange Grid (6 Rewards - 3 cols desktop) -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
+<!-- Reward 1 -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all p-space-md flex flex-col justify-between group">
+<div>
+<div class="relative w-full h-44 rounded-lg overflow-hidden bg-surface-container-low mb-space-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" data-alt="Artisanal flat lay of Vietnamese craft coffee voucher with rustic coffee beans, a ceramic cup of espresso with golden crema on light textured oak tabletop, warm natural lighting, warm amber tones, 8k resolution" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBWVIQjOqtVh8C9EqOs7xdWBS95lyArl3pWpWD6ksginfLTDne3OYFhwVnT317QMxuFegjEw5VlQC1Ep-tPavpkGVapFwKuNSPITGRzm61CuDrKNUqdejYez7lzM47REmolwL2EB4OjvxGNc8IC4iHN1ObQ4GECvwLww8kJLmG0Gu8TODigW2NVT6jcj6hirCjXqmhz6gPr4yUTMMJ38iVsoiZAiDh-8plFQaWhx4q13dJR1R0z7bUn"/>
+<span class="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/90 backdrop-blur-md text-primary font-label-md text-[11px] font-bold shadow-sm">
+                Voucher Điện Tử
+              </span>
+<span class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-[11px] font-semibold">
+                Đủ điểm đổi
+              </span>
+</div>
+<div class="flex items-center gap-1.5 text-primary font-title-sm text-title-sm font-bold">
+<span class="material-symbols-outlined text-[18px]">monetization_on</span>
+<span>60 BrewPoints</span>
+</div>
+<h3 class="font-title-md text-title-md text-on-surface font-bold mt-1">Voucher giảm giá 15.000 đ</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
+              Giảm trực tiếp 15.000 đ cho bất kỳ đơn hàng takeaway hoặc thưởng thức tại quán.
+            </p>
+</div>
+<div class="pt-4 mt-2 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-outline">Còn lại 148 suất</span>
+<button class="px-4 py-2 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors" onclick="confirmRedeem('Voucher 15.000 đ', 60)">
+              Đổi quà ngay
+            </button>
+</div>
+</div>
+<!-- Reward 2 -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all p-space-md flex flex-col justify-between group">
+<div>
+<div class="relative w-full h-44 rounded-lg overflow-hidden bg-surface-container-low mb-space-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" data-alt="A delivery coffee paper cup secured in a kraft paper carrier alongside whole roasted beans in an artisanal roastery setting, natural soft window lighting, warm cream and caramel atmosphere" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDae47uEZnw4snsY35BdcH5WhDGH-lwlAsaT-yce7TS6ZTdJ8IXJFqNZH4fDPX0O5ptjJJMirgX-A4Ole_X1lhIWLdVPXI5aFSHlH1OXb2dbX2xc3xRqlbMoCaI5K95cHC_tGDeQSSi1ravSsYITsVMOhw5a5lHEmFjoSVXH4o2M-tSWxtNw8-t7hCtY9bA1VAQZQjt7u7QWRzyPe4BRXu_tZnxFcPSGUiIhAQoHa-QksoDVAW47SiD"/>
+<span class="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/90 backdrop-blur-md text-primary font-label-md text-[11px] font-bold shadow-sm">
+                Vận Chuyển
+              </span>
+<span class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-[11px] font-semibold">
+                Đủ điểm đổi
+              </span>
+</div>
+<div class="flex items-center gap-1.5 text-primary font-title-sm text-title-sm font-bold">
+<span class="material-symbols-outlined text-[18px]">monetization_on</span>
+<span>80 BrewPoints</span>
+</div>
+<h3 class="font-title-md text-title-md text-on-surface font-bold mt-1">Miễn phí vận chuyển toàn thành phố</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
+              Tối đa 25.000 đ phí vận chuyển. Áp dụng cho chi nhánh Saigon Center, Hồ Con Rùa và Thảo Điền.
+            </p>
+</div>
+<div class="pt-4 mt-2 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-outline">Còn lại 85 suất</span>
+<button class="px-4 py-2 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors" onclick="confirmRedeem('Freeship Đơn hàng', 80)">
+              Đổi quà ngay
+            </button>
+</div>
+</div>
+<!-- Reward 3 -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all p-space-md flex flex-col justify-between group">
+<div>
+<div class="relative w-full h-44 rounded-lg overflow-hidden bg-surface-container-low mb-space-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" data-alt="Authentic traditional Vietnamese iced milk coffee with condensation on artisanal ribbed glassware, condensed milk gradient swirls, fine roasted beans scattered around, warm ambient coffee shop atmosphere" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBQCt7aEPGEetbRM7b711vmga7aWxURD1SFcWcOPss1PGxLq9JGDsR0OW0DktfbC0tKn9xPtFoJJruJ10CdNGONt1mmyeHUeD_bVxpQmHiTKTpi-buW6JrbtrIi38kvAny3tcuOmxNKoCV1-HUmFJoLg9hM98D9HG24yE53U5ArF89yV6wQLFLNoTe8e8Bc3HZ1qNpE8cEVAmVMbILUYjPNZZnBS9N5JEpPIgSym_FRGvxUlp5ReE_i"/>
+<span class="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-primary text-on-primary font-label-md text-[11px] font-bold shadow-sm">
+                ★ Phổ biến nhất
+              </span>
+<span class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-[11px] font-semibold">
+                Đủ điểm đổi
+              </span>
+</div>
+<div class="flex items-center gap-1.5 text-primary font-title-sm text-title-sm font-bold">
+<span class="material-symbols-outlined text-[18px]">monetization_on</span>
+<span>120 BrewPoints</span>
+</div>
+<h3 class="font-title-md text-title-md text-on-surface font-bold mt-1">01 Ly Cà Phê Sữa Đá Sài Gòn (M)</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
+              Hạt Robusta Fine Đắk Lắk đậm đà hòa quyện cùng sữa đặc nguyên kem thơm béo truyền thống.
+            </p>
+</div>
+<div class="pt-4 mt-2 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-outline">Đã đổi 312 lượt</span>
+<button class="px-4 py-2 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors" onclick="confirmRedeem('Cà Phê Sữa Đá Sài Gòn (M)', 120)">
+              Đổi quà ngay
+            </button>
+</div>
+</div>
+<!-- Reward 4 -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all p-space-md flex flex-col justify-between group">
+<div>
+<div class="relative w-full h-44 rounded-lg overflow-hidden bg-surface-container-low mb-space-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" data-alt="Artisanal pour over coffee dripper station with amber glass carafe on light wooden bar, fresh ground coffee aroma aesthetic, warm morning light, editorial cafe look" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCSCu5B1S1-x38dYSXC9uF-Du5JLkG5NRqkHuWg5_KSXbwcjio3OjWMgkJSnDkdyUjgYdp8SlKGFuMP2rKmpVfZd_KM0wM5RU7Mx7RP1l1fl38XYcwEDDjGPaRBtB3YCtGWsjtwJXs2J6R2fcC3UXH23Dg9fwmQtnd5MFDKuAxVHy4nwW_Q_p-GerN0LT4cRrT_hvRnpOFN5p3VhyGKDSJ5LnhqVoQJ73afY1ym095oZt1bAXDL1_2u"/>
+<span class="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/90 backdrop-blur-md text-primary font-label-md text-[11px] font-bold shadow-sm">
+                Voucher Giảm Giá
+              </span>
+<span class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-[11px] font-semibold">
+                Đủ điểm đổi
+              </span>
+</div>
+<div class="flex items-center gap-1.5 text-primary font-title-sm text-title-sm font-bold">
+<span class="material-symbols-outlined text-[18px]">monetization_on</span>
+<span>140 BrewPoints</span>
+</div>
+<h3 class="font-title-md text-title-md text-on-surface font-bold mt-1">Voucher giảm giá 35.000 đ</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
+              Áp dụng cho mọi hóa đơn từ 150.000 đ. Thích hợp cho buổi cà phê gặp gỡ bạn bè hoặc làm việc.
+            </p>
+</div>
+<div class="pt-4 mt-2 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-outline">Còn lại 40 suất</span>
+<button class="px-4 py-2 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors" onclick="confirmRedeem('Voucher giảm 35.000 đ', 140)">
+              Đổi quà ngay
+            </button>
+</div>
+</div>
+<!-- Reward 5 -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all p-space-md flex flex-col justify-between group">
+<div>
+<div class="relative w-full h-44 rounded-lg overflow-hidden bg-surface-container-low mb-space-sm">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" data-alt="Glass of cold brew coffee garnished with fresh dried orange slice, lemongrass stalk, and fresh herbs on natural sandstone slab, elegant cafe lighting, aesthetic amber liquid" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB9gDu53BXXyxu843amGzpq8UdY1Vjg8_zKbjF4LbyMx9vQuwiCnI2fF9kjcPH194pCrqlNItW8_SS26gxDudi975Am0EGIzTgkSvMvZdraHszkODXAXdqyQGzpuCZE1eQ4Km-4A2N-VCyvz43Eqa7FasAvUE7ICCFF1drflITLYxb9ecnRnex7IL5NlmzRaifpbmWu-fMcTZQJMvfLGFQClmsRs1bqVh3Y6X3nGUciNJ2OoGDNFp4V"/>
+<span class="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/90 backdrop-blur-md text-primary font-label-md text-[11px] font-bold shadow-sm">
+                Specialty Drink
+              </span>
+<span class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-[11px] font-semibold">
+                Đủ điểm đổi
+              </span>
+</div>
+<div class="flex items-center gap-1.5 text-primary font-title-sm text-title-sm font-bold">
+<span class="material-symbols-outlined text-[18px]">monetization_on</span>
+<span>180 BrewPoints</span>
+</div>
+<h3 class="font-title-md text-title-md text-on-surface font-bold mt-1">01 Ly Cold Brew Cam Sả Thảo Mộc (L)</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
+              Cold brew 18h ủ lạnh kết hợp nước ép cam tươi và sả đập dập thơm mát sảng khoái.
+            </p>
+</div>
+<div class="pt-4 mt-2 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-outline">Còn lại 25 suất</span>
+<button class="px-4 py-2 rounded-lg bg-primary hover:bg-secondary text-on-primary font-label-md text-label-md shadow-sm transition-colors" onclick="confirmRedeem('Cold Brew Cam Sả Thảo Mộc (L)', 180)">
+              Đổi quà ngay
+            </button>
+</div>
+</div>
+<!-- Reward 6 (Locked / Need More Points) -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col justify-between opacity-85 group relative overflow-hidden">
+<div class="absolute inset-0 bg-surface-container/20 pointer-events-none"></div>
+<div>
+<div class="relative w-full h-44 rounded-lg overflow-hidden bg-surface-container-low mb-space-sm">
+<img class="w-full h-full object-cover grayscale-[20%] group-hover:scale-100" data-alt="Minimalist premium matte terracotta ceramic insulated tumbler with bamboo wooden lid and laser etched BrewLite specialty coffee emblem, set on light oak shelf with warm studio light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCX4XsjBLKuKwC_m1zNC6LZYljopruEAU5QBSnaU9HcoU2iYtMUHQPOHhPkxmbj73D8auqNTuZ2WZLQ-SdMelMedmiBMIEyBY-FMYUZ-w9YDhW6r1oWZm3z5yNuSzYytAhFSC2BqqSSfx_Z9MAcl_RUOuFYmnPmKRUOZpXU7yVDifRsEzotJcrJhyZL_lPSVgDKRQ7dEfV3wF4Di0v3f77Sx-7XhQ5VsGtTgRbKvFauRIcQjrrEVuxh"/>
+<span class="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-inverse-surface text-inverse-on-surface font-label-md text-[11px] font-bold shadow-sm">
+                Quà Tặng Hiện Vật
+              </span>
+<span class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-error-container text-on-error-container font-label-md text-[11px] font-semibold">
+                Thiếu 80 điểm
+              </span>
+</div>
+<div class="flex items-center gap-1.5 text-on-surface-variant font-title-sm text-title-sm font-bold">
+<span class="material-symbols-outlined text-[18px]">lock</span>
+<span>320 BrewPoints</span>
+</div>
+<h3 class="font-title-md text-title-md text-on-surface font-bold mt-1">Bình Giữ Nhiệt BrewLite Eco 500ml</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
+              Chất liệu Inox 304 giữ nóng/lạnh 12 tiếng, nắp tre tự nhiên khắc laser thương hiệu độc quyền.
+            </p>
+<!-- Progress bar to unlock -->
+<div class="mt-3 bg-surface-container-low p-2.5 rounded-lg">
+<div class="flex items-center justify-between text-[11px] font-label-md text-on-surface-variant mb-1">
+<span>Tiến độ tích lũy</span>
+<span class="font-bold text-primary">240 / 320 điểm</span>
+</div>
+<div class="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full" style="width: 75%;"></div>
+</div>
+</div>
+</div>
+<div class="pt-4 mt-2 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-outline">Còn 12 bình</span>
+<button class="px-4 py-2 rounded-lg bg-surface-container-high text-outline cursor-not-allowed font-label-md text-label-md" disabled="">
+              Chưa đủ điểm
+            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- ========================================== -->
+<!-- TAB 3: LỊCH SỬ TÍCH & DÙNG ĐIỂM -->
+<!-- ========================================== -->
+<div class="tab-pane hidden flex flex-col gap-space-lg" id="history-tab-content">
+<div class="bg-surface-container-lowest p-space-lg rounded-xl shadow-sm">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-md pb-space-md border-b border-surface-container">
+<div>
+<h3 class="font-title-md text-title-md text-on-surface font-bold">Nhật ký biến động BrewPoints</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Sao kê chi tiết các lượt tích điểm từ đơn hàng và tiêu điểm đổi voucher</p>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-3 py-1.5 rounded-lg bg-surface-container text-on-surface font-label-md text-label-md flex items-center gap-1 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-[16px]">filter_alt</span>
+<span>Lọc theo tháng</span>
+</button>
+<button class="px-3 py-1.5 rounded-lg bg-surface-container text-on-surface font-label-md text-label-md flex items-center gap-1 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-[16px]">file_download</span>
+<span>Xuất sao kê</span>
+</button>
+</div>
+</div>
+<!-- History Transactions Table -->
+<div class="overflow-x-auto mt-space-sm">
+<table class="w-full text-left font-body-sm text-body-sm">
+<thead>
+<tr class="text-on-surface-variant font-label-md text-label-md border-b border-surface-container">
+<th class="py-3 px-2">Thời gian</th>
+<th class="py-3 px-2">Loại giao dịch</th>
+<th class="py-3 px-2">Mã tham chiếu</th>
+<th class="py-3 px-2">Chi nhánh / Nguồn</th>
+<th class="py-3 px-2 text-right">Biến động điểm</th>
+<th class="py-3 px-2 text-right">Số dư sau GD</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container">
+<!-- Item 1 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="py-3.5 px-2 text-on-surface font-medium">24/10/2025 • 09:15</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-secondary-fixed flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[14px]">add</span>
+</span>
+<span class="font-semibold text-on-surface">Tích điểm đơn hàng hoàn tất</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-mono text-primary font-semibold">#BL-89241</td>
+<td class="py-3.5 px-2 text-on-surface-variant">BrewLite Saigon Center</td>
+<td class="py-3.5 px-2 text-right font-bold text-secondary font-mono">+16 điểm</td>
+<td class="py-3.5 px-2 text-right text-on-surface font-semibold font-mono">240</td>
+</tr>
+<!-- Item 2 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="py-3.5 px-2 text-on-surface font-medium">20/10/2025 • 15:40</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-secondary-fixed flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[14px]">add</span>
+</span>
+<span class="font-semibold text-on-surface">Tích điểm đơn hàng hoàn tất</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-mono text-primary font-semibold">#BL-88924</td>
+<td class="py-3.5 px-2 text-on-surface-variant">BrewLite Hồ Con Rùa</td>
+<td class="py-3.5 px-2 text-right font-bold text-secondary font-mono">+24 điểm</td>
+<td class="py-3.5 px-2 text-right text-on-surface font-semibold font-mono">224</td>
+</tr>
+<!-- Item 3 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="py-3.5 px-2 text-on-surface font-medium">18/10/2025 • 11:22</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-error-container flex items-center justify-center text-error">
+<span class="material-symbols-outlined text-[14px]">remove</span>
+</span>
+<span class="font-semibold text-on-surface">Đổi Voucher COFFEEVIP20</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-mono text-outline">REDEEM-9921</td>
+<td class="py-3.5 px-2 text-on-surface-variant">Cửa hàng Rewards Online</td>
+<td class="py-3.5 px-2 text-right font-bold text-error font-mono">-120 điểm</td>
+<td class="py-3.5 px-2 text-right text-on-surface font-semibold font-mono">200</td>
+</tr>
+<!-- Item 4 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="py-3.5 px-2 text-on-surface font-medium">15/10/2025 • 08:00</td>
+<td class="py-3.5 px-2">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-primary-fixed flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[14px]">military_tech</span>
+</span>
+<span class="font-semibold text-on-surface">Thưởng duy trì chuỗi tuần Hạng Vàng</span>
+</div>
+</td>
+<td class="py-3.5 px-2 font-mono text-outline">REWARD-WEEKLY</td>
+<td class="py-3.5 px-2 text-on-surface-variant">Hệ thống BrewLite Rewards</td>
+<td class="py-3.5 px-2 text-right font-bold text-secondary font-mono">+20 điểm</td>
+<td class="py-3.5 px-2 text-right text-on-surface font-semibold font-mono">320</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="mt-space-md pt-space-sm flex items-center justify-between text-body-sm text-outline border-t border-surface-container">
+<span>Hiển thị 4 trên 38 giao dịch</span>
+<div class="flex items-center gap-1">
+<button class="w-8 h-8 rounded-lg bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface">1</button>
+<button class="w-8 h-8 rounded-lg hover:bg-surface-container flex items-center justify-center text-on-surface-variant">2</button>
+<button class="w-8 h-8 rounded-lg hover:bg-surface-container flex items-center justify-center text-on-surface-variant">3</button>
+<span class="px-1">...</span>
+<button class="w-8 h-8 rounded-lg hover:bg-surface-container flex items-center justify-center text-on-surface-variant">9</button>
+</div>
+</div>
+</div>
+</div>
+<!-- 5. Bottom Compact Membership Rules & FAQs -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter mt-space-sm">
+<div class="p-space-md rounded-xl bg-surface-container-lowest shadow-sm flex items-start gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0">
+<span class="material-symbols-outlined text-[20px]">verified</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold">Hạn sử dụng điểm</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Điểm BrewPoints có giá trị trong 12 tháng kể từ ngày tích lũy phát sinh gần nhất.</p>
+</div>
+</div>
+<div class="p-space-md rounded-xl bg-surface-container-lowest shadow-sm flex items-start gap-3">
+<div class="w-10 h-10 rounded-lg bg-secondary-fixed flex items-center justify-center text-secondary flex-shrink-0">
+<span class="material-symbols-outlined text-[20px]">sync_saved_locally</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold">Tự động áp dụng</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Voucher sau khi đổi sẽ nằm trong ví và tự gợi ý khi bạn tiến hành đặt món.</p>
+</div>
+</div>
+<div class="p-space-md rounded-xl bg-surface-container-lowest shadow-sm flex items-start gap-3">
+<div class="w-10 h-10 rounded-lg bg-tertiary-fixed flex items-center justify-center text-tertiary flex-shrink-0">
+<span class="material-symbols-outlined text-[20px]">phone_in_talk</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm text-on-surface font-bold">Hỗ trợ Hội viên VIP</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Đường dây nóng độc quyền: 1900 6868 (Phím 2) hỗ trợ kiểm tra quyền lợi tức thì.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- QR Membership Modal (Hidden by default) -->
+<div class="fixed inset-0 z-50 bg-inverse-surface/60 backdrop-blur-sm hidden items-center justify-center p-4" id="qr-modal">
+<div class="bg-surface-container-lowest rounded-2xl max-w-sm w-full p-space-lg shadow-2xl relative flex flex-col items-center text-center">
+<button class="absolute top-4 right-4 text-on-surface-variant hover:text-on-surface p-1 rounded-full hover:bg-surface-container" id="close-qr-modal">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+<span class="px-3 py-1 rounded-full bg-primary-fixed text-primary font-label-md text-label-md font-bold mb-3">
+        Thẻ Hội Viên Điện Tử
+      </span>
+<h3 class="font-title-md text-title-md text-on-surface font-bold">Nguyễn Hải Đăng</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Mã thẻ: BL-8942-GLD (Hạng Vàng)</p>
+<!-- Simulated QR Code -->
+<div class="my-space-md p-4 bg-white rounded-xl shadow-inner border border-surface-container flex items-center justify-center">
+<!-- Generative SVG QR Code Style -->
+<svg class="w-48 h-48 text-on-surface" fill="currentColor" viewbox="0 0 100 100">
+<path d="M0 0h30v30H0zm5 5h20v20H5zM70 0h30v30H70zm5 5h20v20H75zM0 70h30v30H0zm5 5h20v20H5zM10 10h10v10H10zM80 10h10v10H80zM10 80h10v10H10zM40 0h10v20H40zm20 10h10v20H60zm-20 30h20v10H40zm-10 10h10v20H30zm40 10h20v10H70zm-20 10h10v20H50zm30 10h10v20H80zm-40 20h20v10H40z"></path>
+</svg>
+</div>
+<p class="font-body-sm text-body-sm text-outline">
+        Đưa mã này cho thu ngân tại quầy thanh toán trước khi in hóa đơn để tích 8% điểm.
+      </p>
+<button class="mt-space-md w-full py-2.5 rounded-lg bg-surface-container text-on-surface font-label-lg text-label-lg hover:bg-surface-container-high transition-colors" id="close-qr-btn">
+        Đóng cửa sổ
+      </button>
+</div>
+</div>
+<!-- Toast Notification Box -->
+<div class="fixed bottom-6 right-6 z-50 bg-on-surface text-surface-container-lowest px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 transform translate-y-24 opacity-0 transition-all duration-300 pointer-events-none" id="toast">
+<span class="material-symbols-outlined text-secondary-fixed text-[20px]" id="toast-icon">check_circle</span>
+<span class="font-body-md text-body-md" id="toast-message">Đã sao chép mã thành công!</span>
+</div>
+<!-- Interactive JavaScript logic -->
+<script>
+    function switchTab(tabId) {
+      // Hide all panes
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.add('hidden'));
+      
+      // Reset button styles
+      document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('bg-primary', 'text-on-primary', 'shadow-sm');
+        btn.classList.add('text-on-surface-variant');
+      });
+
+      // Show selected pane
+      const pane = document.getElementById(tabId + '-content');
+      if (pane) pane.classList.remove('hidden');
+
+      // Highlight button
+      const activeBtn = document.getElementById(
+        tabId === 'wallet-tab' ? 'tab-btn-wallet' :
+        tabId === 'exchange-tab' ? 'tab-btn-exchange' : 'tab-btn-history'
+      );
+      if (activeBtn) {
+        activeBtn.classList.add('bg-primary', 'text-on-primary', 'shadow-sm');
+        activeBtn.classList.remove('text-on-surface-variant');
+      }
+    }
+
+    function showToast(message, isSuccess = true) {
+      const toast = document.getElementById('toast');
+      const msg = document.getElementById('toast-message');
+      const icon = document.getElementById('toast-icon');
+      
+      msg.textContent = message;
+      icon.textContent = isSuccess ? 'check_circle' : 'info';
+      toast.classList.remove('translate-y-24', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+
+      setTimeout(() => {
+        toast.classList.add('translate-y-24', 'opacity-0');
+        toast.classList.remove('translate-y-0', 'opacity-100');
+      }, 3000);
+    }
+
+    function copyCode(code) {
+      navigator.clipboard.writeText(code).then(() => {
+        showToast('Đã sao chép mã voucher: ' + code);
+      }).catch(() => {
+        showToast('Đã sao chép mã: ' + code);
+      });
+    }
+
+    function applyManualCode() {
+      const input = document.getElementById('input-promo-code');
+      const val = input.value.trim();
+      if (!val) {
+        showToast('Vui lòng nhập mã ưu đãi hợp lệ', false);
+        return;
+      }
+      showToast('Đã lưu mã ' + val.toUpperCase() + ' vào ví voucher của bạn!');
+      input.value = '';
+    }
+
+    function confirmRedeem(rewardName, points) {
+      const confirmed = confirm('Bạn có chắc chắn muốn dùng ' + points + ' BrewPoints để đổi [' + rewardName + ']?');
+      if (confirmed) {
+        showToast('Đổi quà thành công! Đã chuyển vào Kho Voucher của bạn.');
+      }
+    }
+
+    // Modal triggers
+    const qrModal = document.getElementById('qr-modal');
+    const openQrBtn = document.getElementById('open-qr-modal');
+    const closeQrModal = document.getElementById('close-qr-modal');
+    const closeQrBtn = document.getElementById('close-qr-btn');
+
+    if (openQrBtn && qrModal) {
+      openQrBtn.addEventListener('click', () => {
+        qrModal.classList.remove('hidden');
+        qrModal.classList.add('flex');
+      });
+
+      const closeHandler = () => {
+        qrModal.classList.add('hidden');
+        qrModal.classList.remove('flex');
+      };
+
+      closeQrModal.addEventListener('click', closeHandler);
+      closeQrBtn.addEventListener('click', closeHandler);
+      qrModal.addEventListener('click', (e) => {
+        if (e.target === qrModal) closeHandler();
+      });
+    }
+  </script>
+</div></main><footer class="w-full bg-surface-container-low mt-space-xl shadow-[0_-1px_6px_rgba(0,0,0,0.02)]"><div class="max-w-[1320px] mx-auto px-margin py-space-xl"><div class="grid grid-cols-12 gap-gutter"><div class="col-span-12 lg:col-span-4 flex flex-col gap-space-sm"><div class="flex items-center gap-space-sm"><span class="font-headline-md text-headline-md text-primary tracking-tight">BrewLite</span></div><p class="font-body-md text-body-md text-on-surface-variant max-w-sm">Trải nghiệm cà phê đặc sản thủ công tuyển chọn từ nông trại Cầu Đất và Đắk Lắk. Mỗi tách cà phê là một câu chuyện tôn vinh giá trị nguyên bản.</p><div class="flex items-center gap-2 mt-2"><span class="material-symbols-outlined text-primary text-[20px]">support_agent</span><span class="font-label-lg text-label-lg text-on-surface">Hotline CSKH:</span><span class="font-title-sm text-title-sm text-primary font-bold">1900 6868</span></div></div><div class="col-span-12 sm:col-span-6 lg:col-span-4 flex flex-col gap-space-sm"><h4 class="font-title-sm text-title-sm text-on-surface">Hệ thống chi nhánh</h4><ul class="space-y-2 text-on-surface-variant font-body-sm text-body-sm"><li class="flex items-start gap-2"><span class="material-symbols-outlined text-primary text-[18px] flex-shrink-0">pin_drop</span><span>BrewLite Saigon Center: Tầng B2, 65 Lê Lợi, P. Bến Nghé, Quận 1, TP. HCM</span></li><li class="flex items-start gap-2"><span class="material-symbols-outlined text-primary text-[18px] flex-shrink-0">pin_drop</span><span>BrewLite Hồ Con Rùa: 02 Công Xã Paris, P. Bến Nghé, Quận 1, TP. HCM</span></li><li class="flex items-start gap-2"><span class="material-symbols-outlined text-primary text-[18px] flex-shrink-0">pin_drop</span><span>BrewLite Thảo Điền: 38 Xuân Thủy, P. Thảo Điền, TP. Thủ Đức</span></li></ul></div><div class="col-span-12 sm:col-span-6 lg:col-span-4 flex flex-col gap-space-sm"><h4 class="font-title-sm text-title-sm text-on-surface">Liên kết nhanh</h4><div class="grid grid-cols-2 gap-2 font-body-sm text-body-sm text-on-surface-variant"><a class="hover:text-primary transition-colors" data-path="thuc-don" href="#">Thực đơn đặc sản</a><a class="hover:text-primary transition-colors" data-path="doi-diem-thuong-kho-voucher" href="#">Khuyến mãi &amp; Đổi quà</a><a class="hover:text-primary transition-colors" data-path="ve-brewlite" href="#">Câu chuyện hạt cà phê</a><a class="hover:text-primary transition-colors" data-path="lich-su-don-hang" href="#">Kiểm tra đơn hàng</a><a class="hover:text-primary transition-colors" href="#">Chính sách bảo mật</a><a class="hover:text-primary transition-colors" href="#">Điều khoản dịch vụ</a></div></div></div><div class="mt-space-xl pt-space-lg flex flex-col sm:flex-row items-center justify-between gap-4"><p class="font-body-sm text-body-sm text-on-surface-variant">© 2025 BrewLite Specialty Coffee Co. Mọi quyền được bảo lưu.</p><p class="font-body-sm text-body-sm text-on-surface-variant">Thiết kế cho người yêu cà phê nguyên bản Việt Nam.</p></div></div></footer></body></html>

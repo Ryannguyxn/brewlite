@@ -46,9 +46,9 @@ export class ProductsService {
           };
         }),
       };
-    } catch (error) {
-      this.logger.error('Failed to retrieve product list', error);
-      throw new InternalServerErrorException();
+    } catch {
+      this.logger.error('Failed to retrieve product list');
+      throw new InternalServerErrorException('Internal server error');
     }
   }
 

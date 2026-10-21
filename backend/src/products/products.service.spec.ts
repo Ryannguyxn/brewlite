@@ -17,6 +17,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 
 describe('ProductsService', () => {
   let service: ProductsService;
+  const loggerError = vi.fn();
 
   const prisma = {
     product: {
@@ -38,7 +39,7 @@ describe('ProductsService', () => {
 
   beforeEach(async () => {
     vi.resetAllMocks();
-    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(loggerError);
 
     prisma.product.findUnique.mockResolvedValue(product);
     prisma.product.findMany.mockResolvedValue([]);
@@ -218,7 +219,7 @@ describe('ProductsService', () => {
         'Internal server error',
       );
 
-      expect(Logger.prototype.error).toHaveBeenCalledWith(
+      expect(loggerError).toHaveBeenCalledWith(
         'Failed to retrieve product list',
       );
     });

@@ -53,13 +53,20 @@ Kết quả mong đợi:
 - db:validate: Schema hợp lệ.
 - db:generate: Sinh Prisma Client tại src/generated/prisma/.
 Kiểm tra kết nối PostgreSQL bằng Prisma:
-npx prisma migrate status
+npx prisma migrate status --config prisma7.config.ts
 
 
-Nếu chưa có migration, thông báo No migration found là bình thường. Khi migration của nhóm đã được merge, thành viên sẽ cần áp dụng migration theo hướng dẫn riêng.
+Áp dụng migration đã có của nhóm lên database phát triển và nạp dữ liệu mẫu:
+
+npm run db:migrate
+npm run db:seed
+
+db:migrate áp dụng migration hiện có, không tạo migration mới. db:seed thêm hoặc cập nhật 8 đồ uống và 5 topping mẫu; dùng với database phát triển của bạn.
 Bước 7. Kiểm tra backend
 npm run build
 npm run start:dev
 
 
 Nếu backend khởi động bình thường và không báo lỗi cấu hình, môi trường đã sẵn sàng để phát triển.
+
+Hướng dẫn đọc code và thử GET /products/:id: [Product_Detail_Implementation.md](../../docs/api/Product_Detail_Implementation.md).

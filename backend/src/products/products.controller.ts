@@ -1,4 +1,10 @@
-import { Controller, Get, Inject, Param, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiInternalServerErrorResponse,
@@ -9,27 +15,69 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ProductsService } from './products.service.js';
+import { GetProductsResponseDto } from './dto/get-products-response.dto.js';
 import { ProductDetailDto } from './dto/product-detail.dto.js';
 
 @ApiTags('Products')
 @Controller('products')
 export class ProductsController {
   constructor(
-    @Inject(ProductsService) private readonly productsService: ProductsService,
+    @Inject(ProductsService)
+    private readonly productsService: ProductsService,
   ) {}
 
   @Get()
-  findAll() {
+  @ApiOperation({
+    summary: 'Lấy danh sách đồ uống (public, không phân trang)',
+  })
+  @ApiOkResponse({
+    description: 'Danh sách sản phẩm; items rỗng khi không có sản phẩm',
+    type: GetProductsResponseDto,
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Lỗi phía server',
+    schema: {
+      type: 'object',
+      required: ['statusCode', 'message', 'error'],
+      properties: {
+        statusCode: {
+          type: 'integer',
+          example: 500,
+        },
+        message: {
+          type: 'string',
+          example: 'Internal server error',
+        },
+        error: {
+          type: 'string',
+          example: 'Internal Server Error',
+        },
+      },
+    },
+  })
+  findAll(): Promise<GetProductsResponseDto> {
     return this.productsService.findAll();
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Lấy chi tiết đồ uống, size và topping' })
-  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiOperation({
+    summary: 'Lấy chi tiết đồ uống, size và topping',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    format: 'uuid',
+  })
   @ApiOkResponse({ type: ProductDetailDto })
-  @ApiBadRequestResponse({ description: 'Product ID sai định dạng UUID' })
-  @ApiNotFoundResponse({ description: 'Không tìm thấy sản phẩm' })
-  @ApiInternalServerErrorResponse({ description: 'Lỗi phía server' })
+  @ApiBadRequestResponse({
+    description: 'Product ID sai định dạng UUID',
+  })
+  @ApiNotFoundResponse({
+    description: 'Không tìm thấy sản phẩm',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Lỗi phía server',
+  })
   findOne(
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<ProductDetailDto> {

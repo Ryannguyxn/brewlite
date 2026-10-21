@@ -47,7 +47,6 @@ export class ProductsService {
         }),
       };
     } catch (error) {
-      console.error('CHI TIẾT LỖI PRISMA:', error);
       this.logger.error('Failed to retrieve product list', error);
       throw new InternalServerErrorException();
     }

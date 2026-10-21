@@ -29,7 +29,7 @@ BrewLite giúp khách hàng xem menu, chọn size/topping, thêm đồ uống v�
 | -------------- | ---------------------------------------- | ---------------------------------------------------- |
 | Frontend       | Next.js, React, TypeScript, Tailwind CSS | Next.js bắt buộc; các thành phần khác theo gợi ý đề  |
 | Backend        | NestJS, TypeScript, REST API             | NestJS bắt buộc                                      |
-| Auth           | JWT, bcrypt, class-validator             | Yêu cầu theo task                                    |
+| Auth           | JWT, Argon2id, class-validator             | Yêu cầu theo task                                    |
 | Database / ORM | PostgreSQL + Prisma                      | **Đề xuất**, cần chốt với nhóm (đề cho phép TypeORM) |
 | Giỏ hàng       | Zustand hoặc React Context               | **Chưa chốt**                                        |
 | Thanh toán     | Mock Payment Service (Ví/Thẻ)            | Giả lập, không giao dịch thật                        |
@@ -64,7 +64,7 @@ Backend tổ chức thành module chức năng như `auth`, `products`, `orders`
 | 4    | Chi tiết sản phẩm, size S/M/L, topping, tính giá                      | Sprint 1     |
 | 5    | Giỏ hàng thêm/sửa/xóa, tổng tiền                                      | Sprint 2     |
 | 6    | `POST /orders`, validate, lưu `PENDING`                               | Sprint 2     |
-| 7    | Đăng ký, đăng nhập, bcrypt, JWT Guard                                 | Sprint 2     |
+| 7    | Đăng ký, đăng nhập, Argon2id, JWT Guard                                 | Sprint 2     |
 | 8    | Mock thanh toán Ví/Thẻ, `PAID`/`PAYMENT_FAILED`                       | Sprint 3     |
 | 9    | Xác nhận đơn, `GET /orders/me`, Docker Compose, demo                  | Sprint 3     |
 | 10   | State machine, idempotency, concurrency stock, coupon/loyalty và test | Sprint 3     |

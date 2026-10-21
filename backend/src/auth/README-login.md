@@ -1,7 +1,7 @@
 # SCRUM-39 — Login and JWT
 
 Public endpoint: `POST /auth/login`, API Contract v2 section 7.
-This branch builds on SCRUM-38 at b6a1645. If Register is not merged yet,
+This branch builds on SCRUM-38 at e8dff67. If Register is not merged yet,
 review this PR against SCRUM-38 first, then target dev after Register merges.
 Do not apply this patch on a Product-only branch.
 
@@ -59,17 +59,20 @@ JWT uses HS256 and contains only sub (database User UUID), iat and exp. Its actu
 expiration matches the returned 3600 seconds. No password/hash, role, email,
 loyalty points, secret or refresh token is returned in the response or JWT.
 Email is trimmed/lowercased. Password is required, nonempty and preserved as
-submitted, without a registration minimum/max check. Login uses bcrypt.compare
-with the stored hash. Unknown email still performs bcrypt comparison using a
+submitted, without a registration minimum/max check. Login uses Argon2id verifyPassword
+with the stored hash. Unknown email still performs Argon2id verification using a
 dummy hash, and returns the same response as an incorrect password.
 
 Invalid input: 400 VALIDATION_ERROR. Unknown email/wrong password:
 401 INVALID_CREDENTIALS (`Invalid email or password`). Unexpected failures:
 sanitized 500 Internal Server Error. No credentials or raw errors are logged.
 
-Register's agreed no-maximum policy is unchanged. Standard bcrypt uses only
-the first 72 UTF-8 bytes; different suffixes after that boundary do not affect
-verification. No prehash or incompatible password transformation is added.
+Register's agreed no-maximum policy is unchanged. Argon2id hashes and verifies
+the complete password, including bytes after byte 72. Passwords sharing only
+the first 72 bytes do not verify interchangeably. Both endpoints use the
+shared password-hash.ts utility with memoryCost=19456 KiB, timeCost=2 and
+parallelism=1. Existing bcrypt test accounts need new registration or a proper
+password reset; no automatic conversion or bcrypt fallback is implemented.
 
 ## Using the Guard in Orders
 
@@ -93,8 +96,8 @@ SCRUM-39 provides reusable authentication, without implementing Orders.
 ## Verification
 
 Prisma validate/generate, lint and build passed against the shared User schema.
-39 unit tests and 63 HTTP/E2E tests passed, including existing Register/Products.
-New tests exercise real bcrypt, JWT signing/verification, token lifetime,
+45 unit tests and 70 HTTP/E2E tests passed, including existing Register/Products.
+New tests exercise real Argon2id, JWT signing/verification, token lifetime,
 Register-to-Login hash compatibility, normalization, invalid credentials,
 validation, safe errors, secret validation and a test-only guarded route with
 missing, malformed, expired, wrong-key, wrong-algorithm and invalid-claim tokens.

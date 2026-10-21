@@ -4,7 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { ApiBearerAuth, DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import * as bcrypt from 'bcrypt';
+import { hashPassword } from '../src/auth/password-hash.js';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import {
@@ -61,7 +61,7 @@ describe('Login and JWT guard (HTTP)', () => {
   };
 
   beforeAll(async () => {
-    passwordHash = await bcrypt.hash(password, 12);
+    passwordHash = await hashPassword(password);
   });
 
   beforeEach(async () => {
@@ -146,14 +146,30 @@ describe('Login and JWT guard (HTTP)', () => {
     expect(response.body).toEqual(credentialsError);
   });
 
-  it('uses the existing bcrypt behavior for long registered passwords', async () => {
+  it('uses the Argon2id behavior for long registered passwords', async () => {
     const longPassword = 'é'.repeat(40);
     prisma.user.findUnique.mockResolvedValueOnce({
       id: userId,
-      passwordHash: await bcrypt.hash(longPassword, 12),
+      passwordHash: await hashPassword(longPassword),
     });
     expect((await login({ email, password: longPassword })).status).toBe(200);
   });
+
+  it.each(['a'.repeat(72), 'é'.repeat(36)])(
+    'rejects a password that differs only after byte 72',
+    async (prefix) => {
+      const original = prefix + 'A';
+      const different = prefix + 'B';
+      prisma.user.findUnique.mockResolvedValue({
+        id: userId,
+        passwordHash: await hashPassword(original),
+      });
+      expect((await login({ email, password: original })).status).toBe(200);
+      const response = await login({ email, password: different });
+      expect(response.status).toBe(401);
+      expect(response.body).toEqual(credentialsError);
+    },
+  );
 
   it.each([
     ['missing email', { password }],

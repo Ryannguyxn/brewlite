@@ -9,8 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthService } from './auth.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
-const compare = vi.hoisted(() => vi.fn());
-vi.mock('bcrypt', () => ({ compare, hash: vi.fn() }));
+const verify = vi.hoisted(() => vi.fn());
+vi.mock('./password-hash.js', () => ({
+  verifyPassword: verify,
+  hashPassword: vi.fn(),
+}));
 
 describe('AuthService.login', () => {
   let service: AuthService;
@@ -27,7 +30,7 @@ describe('AuthService.login', () => {
       id,
       passwordHash: 'stored-hash',
     });
-    compare.mockResolvedValue(true);
+    verify.mockResolvedValue(true);
     jwt.signAsync.mockResolvedValue('signed-token');
     const module = await Test.createTestingModule({
       providers: [
@@ -50,9 +53,9 @@ describe('AuthService.login', () => {
       where: { email: 'customer@example.com' },
       select: { id: true, passwordHash: true },
     });
-    expect(compare).toHaveBeenCalledExactlyOnceWith(
-      dto.password,
+    expect(verify).toHaveBeenCalledExactlyOnceWith(
       'stored-hash',
+      dto.password,
     );
     expect(jwt.signAsync).toHaveBeenCalledExactlyOnceWith({ sub: id });
   });
@@ -62,28 +65,28 @@ describe('AuthService.login', () => {
     await expect(service.login(dto)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
-    expect(compare).toHaveBeenCalledExactlyOnceWith(
+    expect(verify).toHaveBeenCalledExactlyOnceWith(
+      expect.stringMatching(/^\$argon2id\$/),
       dto.password,
-      expect.stringMatching(/^\$2b\$12\$/),
     );
     expect(jwt.signAsync).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
   });
 
   it('never signs a token for an incorrect password', async () => {
-    compare.mockResolvedValue(false);
+    verify.mockResolvedValue(false);
     await expect(service.login(dto)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
     expect(jwt.signAsync).not.toHaveBeenCalled();
   });
 
-  it.each(['lookup', 'compare', 'sign'])(
+  it.each(['lookup', 'verify', 'sign'])(
     'sanitizes a %s failure without logging credentials or raw errors',
     async (stage) => {
       const error = new Error('private SQL / password / JWT secret');
       if (stage === 'lookup') prisma.user.findUnique.mockRejectedValue(error);
-      if (stage === 'compare') compare.mockRejectedValue(error);
+      if (stage === 'verify') verify.mockRejectedValue(error);
       if (stage === 'sign') jwt.signAsync.mockRejectedValue(error);
       await expect(service.login(dto)).rejects.toBeInstanceOf(
         InternalServerErrorException,

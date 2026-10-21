@@ -7,7 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { hashPassword } from './password-hash.js';
+import { hashPassword, verifyPassword } from './password-hash.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { RegisterDto } from './dto/register.dto.js';
@@ -16,10 +16,10 @@ import type { LoginDto } from './dto/login.dto.js';
 import type { LoginResponseDto } from './dto/login-response.dto.js';
 import { ACCESS_TOKEN_TTL_SECONDS } from './jwt.config.js';
 
-// Public dummy hash, not an account credential. Keep the bcrypt cost equal to registration
+// Public dummy hash, not an account credential. Keep the Argon2id work factors equal to registration
 // so an unknown email still performs a password comparison.
 const DUMMY_PASSWORD_HASH =
-  '$2b$12$GuZNPHOCQGtbICya815YWuE7RIyNM.ckMg3NldkzmxTIQc0g9Is2O';
+  '$argon2id$v=19$m=19456,p=1,t=2$mG7PSvxFcBnes/A6uf4Bxg$jN4wfxF0HsF54rHgyOd7a8Jce4+8xpTe/FuALxO+iJ4';
 
 @Injectable()
 export class AuthService {
@@ -36,9 +36,9 @@ export class AuthService {
         where: { email: dto.email.trim().toLowerCase() },
         select: { id: true, passwordHash: true },
       });
-      const matches = await bcrypt.compare(
-        dto.password,
+      const matches = await verifyPassword(
         user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+        dto.password,
       );
       if (!user || !matches) {
         throw new UnauthorizedException({

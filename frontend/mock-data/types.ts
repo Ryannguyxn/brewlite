@@ -3,7 +3,12 @@
 // Đồng봉 với BrewLite_API_Contract_v1.0.md (Mục 3 & 5.1)
 // ============================================================================
 
-export type CategoryId = "all" | "traditional" | "espresso" | "tea";
+export type CategoryId =
+  | "all"
+  | "traditional"
+  | "espresso"
+  | "tea"
+  | "bakery";
 
 export interface CategoryOption {
   id: CategoryId;

@@ -1,14 +1,9 @@
 // ============================================================================
 // ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES / INTERFACES) CHO BREWLITE FRONTEND
-// Đồng đội Backend/Frontend có thể đối chiếu trực tiếp với DTO của NestJS/Prisma
+// Đồng봉 với BrewLite_API_Contract_v1.0.md (Mục 3 & 5.1)
 // ============================================================================
 
-export type CategoryId =
-  | "all"
-  | "traditional"
-  | "espresso"
-  | "tea"
-  | "bakery";
+export type CategoryId = "all" | "traditional" | "espresso" | "tea";
 
 export interface CategoryOption {
   id: CategoryId;
@@ -20,51 +15,37 @@ export interface SelectOption {
   label: string;
 }
 
-export interface ProductItem {
+/**
+ * Cấu trúc 1 đồ uống trong danh sách thực đơn (`GET /products` — API Contract Mục 3.2 & 5.1)
+ */
+export interface ProductListItem {
+  /** UUID của sản phẩm */
   id: string;
+  /** Tên hiển thị của đồ uống */
   name: string;
-  category: CategoryId;
+  /** Đường dẫn ảnh sản phẩm */
+  imageUrl: string;
+  /** Giá gốc ứng với Size S (100%), số nguyên VND > 0, bội số của 5.000đ (AC-US-CAT-05-04) */
+  basePriceVnd: number;
+  /** `true` = còn hàng, `false` = tạm hết hàng (US-CAT-04) */
+  isAvailable: boolean;
+
+  // Các trường hiển thị UI trên thẻ sản phẩm (Catalog Card)
+  category: Exclude<CategoryId, "all">;
   rating: string;
   reviews: string;
   description: string;
-  price: number;
-  image: string;
   imageAlt: string;
   badge?: "Best Seller" | "Mới";
-  outOfStock?: boolean;
 }
 
-export interface CartCustomization {
-  text: string;
-  dotColor: string;
-  muted?: boolean;
-}
+export type ProductItem = ProductListItem;
 
-export interface CartItem {
-  id: string;
-  name: string;
-  unitPrice: number;
-  qty: number;
-  image: string;
-  imageAlt: string;
-  customizations: CartCustomization[];
-}
-
-export interface UpsellOffer {
-  id: string;
-  title: string;
-  subtitle: string;
-  item: CartItem;
-}
-
-export interface CartConfig {
-  freeshipThreshold: number;
-  defaultShippingFee: number;
-  defaultVoucherCode: string;
-  defaultMemberDiscount: number;
-  pickupBranchName: string;
-  pickupTimeNotice: string;
-  taxNotice: string;
+/**
+ * Response chuẩn của `GET /products` theo API Contract Mục 3.3
+ */
+export interface ProductListResponse {
+  items: ProductListItem[];
 }
 
 export interface UserProfile {
@@ -118,69 +99,4 @@ export interface SiteConfigData {
   totalCatalogCount: number;
   branches: BranchInfo[];
   quickLinks: QuickLink[];
-  rewardsBanner: {
-    title: string;
-    description: string;
-    inputPlaceholder: string;
-    buttonLabel: string;
-  };
-}
-
-export interface VoucherTicket {
-  id: string;
-  category: "cash" | "shipping" | "gift";
-  badgeLabel: string;
-  mainValue: string;
-  subValue: string;
-  conditionNote: string;
-  title: string;
-  expiryBadge: string;
-  expiryUrgent?: boolean;
-  description: string;
-  code: string;
-  expiryDate: string;
-  variant: "primary" | "secondary" | "tertiary" | "gift";
-  iconName?: string;
-}
-
-export interface RewardCatalogItem {
-  id: string;
-  tag: string;
-  popular?: boolean;
-  physical?: boolean;
-  points: number;
-  title: string;
-  description: string;
-  stockText: string;
-  image: string;
-  imageAlt: string;
-}
-
-export interface PointTransaction {
-  id: string;
-  timestamp: string;
-  title: string;
-  reference: string;
-  source: string;
-  deltaText: string;
-  balanceAfter: number;
-  type: "earn" | "spend" | "bonus";
-}
-
-export interface MembershipPerk {
-  id: string;
-  icon: string;
-  iconBgClass: string;
-  iconTextClass: string;
-  title: string;
-  description: string;
-}
-
-export interface MembershipRule {
-  id: string;
-  icon: string;
-  iconBgClass: string;
-  iconTextClass: string;
-  title: string;
-  description: string;
 }

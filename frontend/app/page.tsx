@@ -1,42 +1,36 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import HeroBanner from "@/components/HeroBanner";
 import CategoryFilterBar from "@/components/CategoryFilterBar";
 import ProductCard from "@/components/ProductCard";
 import PaginationBar from "@/components/PaginationBar";
-import RewardsBanner from "@/components/RewardsBanner";
-import CartDrawer from "@/components/CartDrawer";
 
 import {
-  MOCK_CART_CONFIG,
   MOCK_CATALOG_PRODUCTS,
   MOCK_CATEGORIES,
   MOCK_HERO_BANNER,
-  MOCK_INITIAL_CART_ITEMS,
   MOCK_PRICE_FILTER_OPTIONS,
   MOCK_SITE_CONFIG,
   MOCK_SORT_OPTIONS,
-  MOCK_UPSELL_OFFER,
-  type CartConfig,
-  type CartItem,
   type CategoryId,
   type CategoryOption,
   type HeroBannerData,
   type ProductItem,
   type SelectOption,
   type SiteConfigData,
-  type UpsellOffer,
 } from "@/mock-data";
-import { fetchCartData, fetchCatalogData } from "@/services/api.service";
+import { fetchCatalogData } from "@/services/api.service";
 
 export default function HomePage() {
   // ==========================================================================
   // PHẦN 1: QUẢN LÝ STATE & GỌI DỮ LIỆU TỪ SERVICE (LOGIC TÁCH BIỆT UI)
   // ==========================================================================
-  const [products, setProducts] = useState<ProductItem[]>(MOCK_CATALOG_PRODUCTS);
+  const [products, setProducts] = useState<ProductItem[]>(
+    MOCK_CATALOG_PRODUCTS
+  );
   const [categories, setCategories] =
     useState<CategoryOption[]>(MOCK_CATEGORIES);
   const [sortOptions, setSortOptions] =
@@ -55,33 +49,20 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  const [isCartOpen, setIsCartOpen] = useState(false);
-  const [cartItems, setCartItems] = useState<CartItem[]>(
-    MOCK_INITIAL_CART_ITEMS
-  );
-  const [upsellOffer, setUpsellOffer] =
-    useState<UpsellOffer>(MOCK_UPSELL_OFFER);
-  const [cartConfig, setCartConfig] = useState<CartConfig>(MOCK_CART_CONFIG);
-
-  const [cartBounceKey, setCartBounceKey] = useState(0);
-  const [addedToast, setAddedToast] = useState<{
+  // Toast thông báo nhẹ khi người dùng tương tác các tính năng ngoài scope Sprint 1
+  const [featureToast, setFeatureToast] = useState<{
     visible: boolean;
-    productName: string;
-    image: string;
-  }>({ visible: false, productName: "", image: "" });
+    title: string;
+    subtitle: string;
+    imageUrl?: string;
+  }>({ visible: false, title: "", subtitle: "" });
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Gọi hàm giả lập API khi khởi tạo trang
   useEffect(() => {
     let isMounted = true;
 
     async function loadInitialData() {
-      // TODO: Thay thế fetchCatalogData() & fetchCartData() trong services/api.service.ts
-      // bằng axios.get('http://localhost:3001/products') khi ghép nối Backend thật.
-      const [catalogRes, cartRes] = await Promise.all([
-        fetchCatalogData(),
-        fetchCartData(),
-      ]);
-
+      const catalogRes = await fetchCatalogData();
       if (!isMounted) return;
       setProducts(catalogRes.products);
       setCategories(catalogRes.categories);
@@ -89,23 +70,16 @@ export default function HomePage() {
       setPriceFilterOptions(catalogRes.priceFilterOptions);
       setHeroBanner(catalogRes.heroBanner);
       setSiteConfig(catalogRes.siteConfig);
-
-      setCartItems(cartRes.items);
-      setUpsellOffer(cartRes.upsellOffer);
-      setCartConfig(cartRes.cartConfig);
     }
 
     loadInitialData();
     return () => {
       isMounted = false;
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
     };
   }, []);
-
-  // Tính tổng số lượng sản phẩm trong giỏ
-  const totalCartQty = useMemo(
-    () => cartItems.reduce((sum, item) => sum + item.qty, 0),
-    [cartItems]
-  );
 
   // Lọc và sắp xếp danh sách sản phẩm theo state người dùng chọn
   const filteredProducts = useMemo(() => {
@@ -125,17 +99,19 @@ export default function HomePage() {
     }
 
     if (priceRange === "under-45") {
-      list = list.filter((p) => p.price < 45000);
+      list = list.filter((p) => p.basePriceVnd < 45000);
     } else if (priceRange === "45-60") {
-      list = list.filter((p) => p.price >= 45000 && p.price <= 60000);
+      list = list.filter(
+        (p) => p.basePriceVnd >= 45000 && p.basePriceVnd <= 60000
+      );
     } else if (priceRange === "above-60") {
-      list = list.filter((p) => p.price > 60000);
+      list = list.filter((p) => p.basePriceVnd > 60000);
     }
 
     if (sortBy === "price-asc") {
-      list.sort((a, b) => a.price - b.price);
+      list.sort((a, b) => a.basePriceVnd - b.basePriceVnd);
     } else if (sortBy === "price-desc") {
-      list.sort((a, b) => b.price - a.price);
+      list.sort((a, b) => b.basePriceVnd - a.basePriceVnd);
     } else if (sortBy === "newest") {
       list.sort(
         (a, b) => (b.badge === "Mới" ? 1 : 0) - (a.badge === "Mới" ? 1 : 0)
@@ -145,79 +121,38 @@ export default function HomePage() {
     return list;
   }, [products, activeCategory, searchQuery, priceRange, sortBy]);
 
-  // Các hàm xử lý sự kiện Giỏ hàng (Handlers)
-  const handleAddToCart = (product: ProductItem) => {
-    setCartItems((prev) => {
-      const existing = prev.find((item) => item.name === product.name);
-      if (existing) {
-        return prev.map((item) =>
-          item.name === product.name ? { ...item, qty: item.qty + 1 } : item
-        );
-      }
-      return [
-        ...prev,
-        {
-          id: `cart-${product.id}`,
-          name: product.name,
-          unitPrice: product.price,
-          qty: 1,
-          image: product.image,
-          imageAlt: product.imageAlt,
-          customizations: [
-            {
-              text: "Size M (Tiêu chuẩn) • 70% đường",
-              dotColor: "bg-primary/60",
-            },
-          ],
-        },
-      ];
-    });
-
-    setCartBounceKey((prev) => prev + 1);
-    setAddedToast({
+  const showPendingToast = (
+    title: string,
+    subtitle: string,
+    imageUrl?: string
+  ) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    setFeatureToast({
       visible: true,
-      productName: product.name,
-      image: product.image,
+      title,
+      subtitle,
+      imageUrl,
     });
-    setTimeout(() => {
-      setAddedToast((prev) => ({ ...prev, visible: false }));
-    }, 2800);
+    toastTimerRef.current = setTimeout(() => {
+      setFeatureToast((prev) => ({ ...prev, visible: false }));
+    }, 2600);
   };
 
-  const handleUpdateQty = (id: string, delta: number) => {
-    setCartItems((prev) =>
-      prev
-        .map((item) =>
-          item.id === id ? { ...item, qty: item.qty + delta } : item
-        )
-        .filter((item) => item.qty > 0)
+  const handleAddToCartClick = (product: ProductItem) => {
+    showPendingToast(
+      "Tính năng đang hoàn thiện",
+      `Giỏ hàng cho "${product.name}" sẽ được mở ở Sprint tiếp theo.`,
+      product.imageUrl
     );
   };
 
-  const handleRemoveItem = (id: string) => {
-    setCartItems((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const handleClearCart = () => {
-    setCartItems([]);
-  };
-
-  const handleRestoreDefaultCart = () => {
-    setCartItems(MOCK_INITIAL_CART_ITEMS);
-  };
-
-  const handleAddUpsell = () => {
-    const upsellItem = upsellOffer.item;
-    setCartItems((prev) => {
-      const existing = prev.find((i) => i.id === upsellItem.id);
-      if (existing) {
-        return prev.map((i) =>
-          i.id === upsellItem.id ? { ...i, qty: i.qty + 1 } : i
-        );
-      }
-      return [...prev, { ...upsellItem }];
-    });
-    setCartBounceKey((prev) => prev + 1);
+  const handleHeaderFeatureNotice = (featureLabel: string) => {
+    showPendingToast(
+      "Tính năng đang hoàn thiện",
+      `Chức năng "${featureLabel}" sẽ được cập nhật ở Sprint tiếp theo.`
+    );
   };
 
   // ==========================================================================
@@ -226,9 +161,9 @@ export default function HomePage() {
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface">
       <Header
-        cartCount={totalCartQty}
-        cartBounceKey={cartBounceKey}
-        onOpenCart={() => setIsCartOpen(true)}
+        cartCount={0}
+        onOpenCart={() => handleHeaderFeatureNotice("Giỏ hàng")}
+        onFeatureNotice={handleHeaderFeatureNotice}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeNav="thuc-don"
@@ -276,7 +211,7 @@ export default function HomePage() {
                 >
                   <ProductCard
                     product={product}
-                    onAddToCart={handleAddToCart}
+                    onAddToCart={handleAddToCartClick}
                   />
                 </div>
               ))}
@@ -284,67 +219,52 @@ export default function HomePage() {
 
             <PaginationBar
               currentPage={currentPage}
-              totalPages={3}
+              totalPages={1}
               showingCount={filteredProducts.length}
               totalItems={siteConfig.totalCatalogCount}
               onPageChange={setCurrentPage}
             />
           </section>
-
-          <RewardsBanner bannerData={siteConfig.rewardsBanner} />
         </div>
       </main>
 
-      {/* Added to Cart Toast Notification */}
+      {/* Toast thông báo nhẹ khi bấm vào nút Thêm vào giỏ / + / các tính năng chưa thuộc Sprint 1 */}
       <div
+        role="status"
+        aria-live="polite"
         className={`fixed bottom-6 right-6 z-40 bg-on-surface text-surface-container-lowest p-3 pr-4 rounded-xl shadow-2xl flex items-center gap-3 transform transition-all duration-300 ${
-          addedToast.visible
+          featureToast.visible
             ? "translate-y-0 opacity-100"
             : "translate-y-24 opacity-0 pointer-events-none"
         }`}
       >
-        {addedToast.image && (
+        {featureToast.imageUrl && (
           <img
-            src={addedToast.image}
-            alt={addedToast.productName}
+            src={featureToast.imageUrl}
+            alt={featureToast.title}
             className="w-11 h-11 rounded-lg object-cover flex-shrink-0 border border-primary/40"
           />
         )}
         <div className="flex flex-col">
           <span className="font-label-md text-[11px] text-secondary-fixed flex items-center gap-1">
-            <span className="material-symbols-outlined text-[14px]">
-              check_circle
-            </span>
-            Đã thêm vào giỏ hàng
+            <span className="material-symbols-outlined text-[14px]">info</span>
+            {featureToast.title}
           </span>
-          <span className="font-title-sm text-title-sm text-surface-container-lowest font-semibold">
-            {addedToast.productName}
+          <span className="font-body-sm text-body-sm text-surface-container-lowest">
+            {featureToast.subtitle}
           </span>
         </div>
         <button
-          onClick={() => {
-            setAddedToast((prev) => ({ ...prev, visible: false }));
-            setIsCartOpen(true);
-          }}
-          className="ml-2 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md transition-colors cursor-pointer"
+          onClick={() =>
+            setFeatureToast((prev) => ({ ...prev, visible: false }))
+          }
+          className="ml-2 p-1 rounded-lg hover:bg-white/10 text-surface-container-lowest/80 hover:text-surface-container-lowest transition-colors cursor-pointer"
           type="button"
+          aria-label="Đóng thông báo"
         >
-          Xem giỏ
+          <span className="material-symbols-outlined text-[16px]">close</span>
         </button>
       </div>
-
-      <CartDrawer
-        isOpen={isCartOpen}
-        onClose={() => setIsCartOpen(false)}
-        items={cartItems}
-        upsellOffer={upsellOffer}
-        cartConfig={cartConfig}
-        onUpdateQty={handleUpdateQty}
-        onRemoveItem={handleRemoveItem}
-        onClearCart={handleClearCart}
-        onRestoreDefaultCart={handleRestoreDefaultCart}
-        onAddUpsell={handleAddUpsell}
-      />
 
       <Footer siteConfig={siteConfig} />
     </div>

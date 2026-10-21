@@ -50,7 +50,7 @@ export const MOCK_SITE_CONFIG: SiteConfigData = {
   copyright: "© 2025 BrewLite Specialty Coffee Co. Mọi quyền được bảo lưu.",
   tagline: "Thiết kế cho người yêu cà phê nguyên bản Việt Nam.",
   deliveryHighlight: "Giao nhanh trong 20 phút tại nội thành",
-  totalCatalogCount: 24,
+  totalCatalogCount: 8,
   branches: [
     {
       id: "branch-1",
@@ -72,17 +72,10 @@ export const MOCK_SITE_CONFIG: SiteConfigData = {
   ],
   quickLinks: [
     { label: "Thực đơn đặc sản", href: "/" },
-    { label: "Ưu đãi thành viên", href: "/voucher" },
+    { label: "Ưu đãi thành viên", href: "#footer" },
     { label: "Câu chuyện hạt cà phê", href: "#footer" },
-    { label: "Kiểm tra đơn hàng", href: "#" },
-    { label: "Chính sách bảo mật", href: "#" },
-    { label: "Điều khoản dịch vụ", href: "#" },
+    { label: "Kiểm tra đơn hàng", href: "#footer" },
+    { label: "Chính sách bảo mật", href: "#footer" },
+    { label: "Điều khoản dịch vụ", href: "#footer" },
   ],
-  rewardsBanner: {
-    title: "Đăng ký thành viên BrewLite Rewards",
-    description:
-      "Tích 1 điểm cho mỗi 10.000đ. Đổi ngay ly cà phê miễn phí và ưu đãi sinh nhật độc quyền.",
-    inputPlaceholder: "Nhập số điện thoại của bạn...",
-    buttonLabel: "Nhận Ưu Đãi",
-  },
 };

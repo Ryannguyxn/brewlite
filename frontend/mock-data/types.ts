@@ -1,6 +1,8 @@
 // ============================================================================
 // ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES / INTERFACES) CHO BREWLITE FRONTEND
-// Đồng đội Backend/Frontend có thể đối chiếu trực tiếp với DTO của NestJS/Prisma
+// Đối chiếu chuẩn 100% với:
+// - docs/api/BrewLite_API_Contract_v1.0.md (Mục 2, 3, 4, 5.1)
+// - docs/requirements/BrewLite_Requirements_Specification.docx (BR-011 .. BR-017)
 // ============================================================================
 
 export type CategoryId =
@@ -20,51 +22,87 @@ export interface SelectOption {
   label: string;
 }
 
-export interface ProductItem {
+/**
+ * Kích cỡ đồ uống hợp lệ theo API Contract Mục 4.2 & BR-011:
+ * - S: 100% giá gốc (Mặc định)
+ * - M: 120% giá gốc
+ * - L: 140% giá gốc
+ */
+export type DrinkSize = "S" | "M" | "L";
+
+export type SizeMultiplierPercent = 100 | 120 | 140;
+
+/**
+ * 1 phần tử đồ uống trả về từ `GET /products` (API Contract Mục 3.2 & 5.1)
+ * - 5 trường bắt buộc theo API Contract: `id`, `name`, `imageUrl`, `basePriceVnd`, `isAvailable`
+ * - Các trường phụ trợ UI (`category`, `rating`, `reviews`, `description`, `badge`, `imageAlt`)
+ *   để dạng optional (`?`) nhằm giữ nguyên giao diện thẻ sản phẩm của trang cũ khi đọc từ mock-data
+ *   nhưng vẫn tương thích 100% khi ghép nối response thật từ Backend.
+ */
+export interface ProductListItem {
+  /** UUID v4 của sản phẩm */
   id: string;
+  /** Tên hiển thị của đồ uống */
   name: string;
-  category: CategoryId;
-  rating: string;
-  reviews: string;
-  description: string;
-  price: number;
-  image: string;
-  imageAlt: string;
+  /** Đường dẫn ảnh sản phẩm (API Contract Mục 3.2) */
+  imageUrl: string;
+  /** Giá gốc ứng với Size S (100%), số nguyên VND > 0, bội số của 5.000đ (AC-US-CAT-05-04) */
+  basePriceVnd: number;
+  /** `true` = còn hàng, `false` = tạm hết hàng (US-CAT-04) */
+  isAvailable: boolean;
+
+  // Các trường UI bổ trợ (optional để không bắt buộc Backend phải trả về)
+  category?: CategoryId;
+  rating?: string;
+  reviews?: string;
+  description?: string;
   badge?: "Best Seller" | "Mới";
-  outOfStock?: boolean;
+  imageAlt?: string;
 }
 
-export interface CartCustomization {
-  text: string;
-  dotColor: string;
-  muted?: boolean;
+/** Alias tương thích cho các component gọi ProductItem */
+export type ProductItem = ProductListItem;
+
+/**
+ * Response 200 OK của `GET /products` (API Contract Mục 3.3 & 3.7)
+ */
+export interface ProductListResponse {
+  items: ProductListItem[];
 }
 
-export interface CartItem {
+/**
+ * Cấu hình kích cỡ trong `GET /products/:id` (API Contract Mục 4.2 & 5.1 — dành cho Task 4)
+ */
+export interface ProductSizeOption {
+  size: DrinkSize;
+  multiplierPercent: SizeMultiplierPercent;
+}
+
+/**
+ * Cấu hình topping trong `GET /products/:id` (API Contract Mục 4.2 & 5.1 — dành cho Task 4)
+ */
+export interface ToppingOption {
   id: string;
   name: string;
-  unitPrice: number;
-  qty: number;
-  image: string;
-  imageAlt: string;
-  customizations: CartCustomization[];
+  priceVnd: number;
+  isAvailable: boolean;
 }
 
-export interface UpsellOffer {
-  id: string;
-  title: string;
-  subtitle: string;
-  item: CartItem;
+/**
+ * Response 200 OK của `GET /products/:id` (API Contract Mục 4.2 & 4.4 — dành cho Task 4)
+ */
+export interface ProductDetail extends ProductListItem {
+  sizes: ProductSizeOption[];
+  toppings: ToppingOption[];
 }
 
-export interface CartConfig {
-  freeshipThreshold: number;
-  defaultShippingFee: number;
-  defaultVoucherCode: string;
-  defaultMemberDiscount: number;
-  pickupBranchName: string;
-  pickupTimeNotice: string;
-  taxNotice: string;
+/**
+ * Cấu trúc lỗi HTTP mặc định của NestJS (API Contract Mục 1.4 & 5.1)
+ */
+export interface ApiErrorResponse {
+  statusCode: number;
+  message: string | string[];
+  error?: string;
 }
 
 export interface UserProfile {
@@ -118,69 +156,4 @@ export interface SiteConfigData {
   totalCatalogCount: number;
   branches: BranchInfo[];
   quickLinks: QuickLink[];
-  rewardsBanner: {
-    title: string;
-    description: string;
-    inputPlaceholder: string;
-    buttonLabel: string;
-  };
-}
-
-export interface VoucherTicket {
-  id: string;
-  category: "cash" | "shipping" | "gift";
-  badgeLabel: string;
-  mainValue: string;
-  subValue: string;
-  conditionNote: string;
-  title: string;
-  expiryBadge: string;
-  expiryUrgent?: boolean;
-  description: string;
-  code: string;
-  expiryDate: string;
-  variant: "primary" | "secondary" | "tertiary" | "gift";
-  iconName?: string;
-}
-
-export interface RewardCatalogItem {
-  id: string;
-  tag: string;
-  popular?: boolean;
-  physical?: boolean;
-  points: number;
-  title: string;
-  description: string;
-  stockText: string;
-  image: string;
-  imageAlt: string;
-}
-
-export interface PointTransaction {
-  id: string;
-  timestamp: string;
-  title: string;
-  reference: string;
-  source: string;
-  deltaText: string;
-  balanceAfter: number;
-  type: "earn" | "spend" | "bonus";
-}
-
-export interface MembershipPerk {
-  id: string;
-  icon: string;
-  iconBgClass: string;
-  iconTextClass: string;
-  title: string;
-  description: string;
-}
-
-export interface MembershipRule {
-  id: string;
-  icon: string;
-  iconBgClass: string;
-  iconTextClass: string;
-  title: string;
-  description: string;
 }

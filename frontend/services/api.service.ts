@@ -1,44 +1,59 @@
 import {
-  MOCK_CART_CONFIG,
-  MOCK_CATALOG_PRODUCTS,
   MOCK_CATEGORIES,
-  MOCK_GOLD_PERKS,
   MOCK_HERO_BANNER,
-  MOCK_INITIAL_CART_ITEMS,
-  MOCK_MEMBERSHIP_RULES,
-  MOCK_POINT_TRANSACTIONS,
   MOCK_PRICE_FILTER_OPTIONS,
-  MOCK_REWARD_CATALOG,
+  MOCK_PRODUCT_DETAILS,
+  MOCK_PRODUCTS_RESPONSE,
   MOCK_SITE_CONFIG,
   MOCK_SORT_OPTIONS,
-  MOCK_UPSELL_OFFER,
-  MOCK_USER_PROFILE,
-  MOCK_VOUCHERS,
-  type CartConfig,
-  type CartItem,
+  type ApiErrorResponse,
   type CategoryOption,
   type HeroBannerData,
-  type MembershipPerk,
-  type MembershipRule,
-  type PointTransaction,
-  type ProductItem,
-  type RewardCatalogItem,
+  type ProductDetail,
+  type ProductListItem,
+  type ProductListResponse,
   type SelectOption,
   type SiteConfigData,
-  type UpsellOffer,
-  type UserProfile,
-  type VoucherTicket,
 } from "@/mock-data";
 
 // ============================================================================
-// GIẢ LẬP GỌI API BACKEND (MOCK API SERVICE)
-// Khi ghép nối NestJS Backend, đồng đội chỉ cần thay nội dung bên trong các hàm
-// bên dưới bằng fetch() hoặc axios.get() / axios.post() tới REST API thật.
+// BREWLITE API SERVICE — CHUẨN BREWLITE API CONTRACT v1.0 (SPRINT 1)
+// Base URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
 // ============================================================================
+
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+const DEFAULT_USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_API !== "false";
+
+export const FALLBACK_DRINK_IMAGE = "/images/fallback-drink.jpg";
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export class ApiContractError extends Error {
+  public readonly statusCode: number;
+  public readonly error?: string;
+  public readonly payload: ApiErrorResponse;
+
+  constructor(payload: ApiErrorResponse) {
+    const msg = Array.isArray(payload.message)
+      ? payload.message.join("; ")
+      : payload.message;
+    super(msg);
+    this.name = "ApiContractError";
+    this.statusCode = payload.statusCode;
+    this.error = payload.error;
+    this.payload = payload;
+  }
+}
 
 const SIMULATED_NETWORK_DELAY_MS = 180;
 
-function simulateDelay<T>(data: T, ms = SIMULATED_NETWORK_DELAY_MS): Promise<T> {
+function simulateDelay<T>(
+  data: T,
+  ms = SIMULATED_NETWORK_DELAY_MS
+): Promise<T> {
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve(structuredClone(data));
@@ -47,122 +62,163 @@ function simulateDelay<T>(data: T, ms = SIMULATED_NETWORK_DELAY_MS): Promise<T> 
 }
 
 /**
- * Lấy danh sách sản phẩm và bộ lọc trang Thực đơn (Catalog)
+ * Kiểm tra UUID hợp lệ (khớp với ParseUUIDPipe của NestJS — API Contract Mục 4.2 & 4.6)
  */
-export async function fetchCatalogData(): Promise<{
-  products: ProductItem[];
+export function isValidUuid(value: string): boolean {
+  return UUID_REGEX.test(value.trim());
+}
+
+/**
+ * Định dạng số nguyên VND sang chuỗi hiển thị trên UI (API Contract Mục 2.1)
+ */
+export function formatVnd(amountVnd: number): string {
+  return `${Math.round(amountVnd).toLocaleString("vi-VN")} đ`;
+}
+
+/**
+ * Sắp xếp danh sách sản phẩm theo đúng quy tắc BR-017 & API Contract Mục 3.5:
+ * Theo `name` tăng dần (A -> Z), nếu trùng tên thì theo `id` tăng dần.
+ */
+export function sortProductsByContract(
+  items: ProductListItem[]
+): ProductListItem[] {
+  return [...items].sort((a, b) => {
+    const byName = a.name.localeCompare(b.name, "vi");
+    if (byName !== 0) return byName;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Endpoint 1 (Task 2 & Task 3): `GET /products`
+ * Lấy toàn bộ danh sách đồ uống trong menu (API Contract Mục 3)
+ * Response 200 OK: `{ items: ProductListItem[] }`
+ */
+export async function getProducts(options?: {
+  useMock?: boolean;
+}): Promise<ProductListResponse> {
+  const useMock = options?.useMock ?? DEFAULT_USE_MOCK;
+
+  if (!useMock) {
+    const response = await fetch(`${API_BASE_URL}/products`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      let errorPayload: ApiErrorResponse = {
+        statusCode: response.status,
+        message: "Internal server error",
+      };
+      try {
+        errorPayload = (await response.json()) as ApiErrorResponse;
+      } catch {
+        // Giữ nguyên fallback lỗi mặc định
+      }
+      throw new ApiContractError(errorPayload);
+    }
+
+    const data = (await response.json()) as ProductListResponse;
+    return {
+      items: Array.isArray(data?.items)
+        ? sortProductsByContract(data.items)
+        : [],
+    };
+  }
+
+  const res = await simulateDelay(MOCK_PRODUCTS_RESPONSE);
+  return {
+    items: sortProductsByContract(res.items),
+  };
+}
+
+/**
+ * Endpoint 2 (Task 2 & Task 4): `GET /products/:id`
+ * Dành cho teammate phát triển phần Chi tiết sản phẩm & Tùy chọn Size/Topping
+ */
+export async function getProductById(
+  id: string,
+  options?: { useMock?: boolean }
+): Promise<ProductDetail> {
+  const useMock = options?.useMock ?? DEFAULT_USE_MOCK;
+  const trimmedId = (id || "").trim();
+
+  if (!isValidUuid(trimmedId)) {
+    throw new ApiContractError({
+      statusCode: 400,
+      message: "Validation failed (uuid is expected)",
+      error: "Bad Request",
+    });
+  }
+
+  if (!useMock) {
+    const response = await fetch(`${API_BASE_URL}/products/${trimmedId}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      let errorPayload: ApiErrorResponse = {
+        statusCode: response.status,
+        message:
+          response.status === 404
+            ? `Product with ID ${trimmedId} not found`
+            : "Internal server error",
+        error:
+          response.status === 404
+            ? "Not Found"
+            : response.status === 400
+              ? "Bad Request"
+              : undefined,
+      };
+      try {
+        errorPayload = (await response.json()) as ApiErrorResponse;
+      } catch {
+        // Giữ nguyên fallback lỗi
+      }
+      throw new ApiContractError(errorPayload);
+    }
+
+    return (await response.json()) as ProductDetail;
+  }
+
+  const detail = MOCK_PRODUCT_DETAILS[trimmedId];
+  if (!detail) {
+    throw new ApiContractError({
+      statusCode: 404,
+      message: `Product with ID ${trimmedId} not found`,
+      error: "Not Found",
+    });
+  }
+
+  return simulateDelay(detail);
+}
+
+/**
+ * Hàm lấy dữ liệu trang Thực đơn (gọi `getProducts()` từ API Contract kết hợp cấu hình giao diện)
+ */
+export async function fetchCatalogData(options?: {
+  useMock?: boolean;
+}): Promise<{
+  products: ProductListItem[];
   categories: CategoryOption[];
   sortOptions: SelectOption[];
   priceFilterOptions: SelectOption[];
   heroBanner: HeroBannerData;
   siteConfig: SiteConfigData;
 }> {
-  // TODO: Thay thế hàm fetchCatalogData này bằng axios.get('http://localhost:3001/products')
-  // Ví dụ:
-  // const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/products`);
-  // return res.data;
-  return simulateDelay({
-    products: MOCK_CATALOG_PRODUCTS,
+  const productListResponse = await getProducts(options);
+  return {
+    products: productListResponse.items,
     categories: MOCK_CATEGORIES,
     sortOptions: MOCK_SORT_OPTIONS,
     priceFilterOptions: MOCK_PRICE_FILTER_OPTIONS,
     heroBanner: MOCK_HERO_BANNER,
-    siteConfig: MOCK_SITE_CONFIG,
-  });
-}
-
-/**
- * Lấy dữ liệu giỏ hàng hiện tại của người dùng & cấu hình tính phí
- */
-export async function fetchCartData(): Promise<{
-  items: CartItem[];
-  upsellOffer: UpsellOffer;
-  cartConfig: CartConfig;
-}> {
-  // TODO: Thay thế hàm fetchCartData này bằng axios.get('http://localhost:3001/cart') hoặc lấy từ Zustand / Context
-  return simulateDelay({
-    items: MOCK_INITIAL_CART_ITEMS,
-    upsellOffer: MOCK_UPSELL_OFFER,
-    cartConfig: MOCK_CART_CONFIG,
-  });
-}
-
-/**
- * Giả lập gửi đơn hàng mới lên Backend (Task 6: POST /orders)
- */
-export async function createOrderMock(payload: {
-  items: CartItem[];
-  voucherCode?: string;
-  totalAmount: number;
-}): Promise<{ orderId: string; status: "PENDING" }> {
-  // TODO: Thay thế hàm createOrderMock này bằng axios.post('http://localhost:3001/orders', payload)
-  return simulateDelay({
-    orderId: `BL-${Math.floor(10000 + Math.random() * 90000)}`,
-    status: "PENDING",
-  });
-}
-
-/**
- * Lấy toàn bộ dữ liệu trang Đổi điểm tích lũy & Kho Voucher (Task 10: Loyalty & Coupon)
- */
-export async function fetchVoucherAndRewardsData(): Promise<{
-  userProfile: UserProfile;
-  vouchers: VoucherTicket[];
-  rewardCatalog: RewardCatalogItem[];
-  transactions: PointTransaction[];
-  goldPerks: MembershipPerk[];
-  membershipRules: MembershipRule[];
-}> {
-  // TODO: Thay thế hàm fetchVoucherAndRewardsData này bằng:
-  // const [profileRes, vouchersRes, rewardsRes, txRes] = await Promise.all([
-  //   axios.get('http://localhost:3001/loyalty/me'),
-  //   axios.get('http://localhost:3001/vouchers/me'),
-  //   axios.get('http://localhost:3001/loyalty/rewards'),
-  //   axios.get('http://localhost:3001/loyalty/transactions'),
-  // ]);
-  return simulateDelay({
-    userProfile: MOCK_USER_PROFILE,
-    vouchers: MOCK_VOUCHERS,
-    rewardCatalog: MOCK_REWARD_CATALOG,
-    transactions: MOCK_POINT_TRANSACTIONS,
-    goldPerks: MOCK_GOLD_PERKS,
-    membershipRules: MOCK_MEMBERSHIP_RULES,
-  });
-}
-
-/**
- * Giả lập đổi điểm BrewPoints nhận Voucher / Quà tặng
- */
-export async function redeemRewardMock(reward: RewardCatalogItem): Promise<{
-  newVoucher: VoucherTicket;
-  newTransaction: PointTransaction;
-}> {
-  // TODO: Thay thế hàm redeemRewardMock này bằng axios.post('http://localhost:3001/loyalty/redeem', { rewardId: reward.id })
-  const generatedCode = `REWARD${reward.points}`;
-  return simulateDelay({
-    newVoucher: {
-      id: `v-redeem-${Date.now()}`,
-      category: reward.tag === "Vận Chuyển" ? "shipping" : "cash",
-      badgeLabel: "ĐỔI ĐIỂM",
-      mainValue: `${reward.points}P`,
-      subValue: "REWARD",
-      conditionNote: "Đổi từ BrewPoints",
-      title: reward.title,
-      expiryBadge: "Còn 30 ngày",
-      description: reward.description,
-      code: generatedCode,
-      expiryDate: "HSD: 30/11/2025",
-      variant: "secondary",
+    siteConfig: {
+      ...MOCK_SITE_CONFIG,
+      totalCatalogCount: productListResponse.items.length,
     },
-    newTransaction: {
-      id: `tx-${Date.now()}`,
-      timestamp: "Vừa xong",
-      title: `Đổi quà: ${reward.title}`,
-      reference: `REDEEM-${Math.floor(1000 + Math.random() * 9000)}`,
-      source: "Cửa hàng Rewards Online",
-      deltaText: `-${reward.points} điểm`,
-      balanceAfter: 0,
-      type: "spend",
-    },
-  });
+  };
 }

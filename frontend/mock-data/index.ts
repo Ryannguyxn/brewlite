@@ -1,9 +1,7 @@
 // ============================================================================
-// BARREL EXPORT TOÀN BỘ MOCK DATA & TYPES
+// BARREL EXPORT MOCK DATA & TYPES (SPRINT 1 — MENU & PRODUCTS)
 // ============================================================================
 
 export * from "./types";
 export * from "./site.mock";
 export * from "./products.mock";
-export * from "./cart.mock";
-export * from "./voucher.mock";

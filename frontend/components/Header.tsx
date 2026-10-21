@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Link from "next/link";
 import {
   MOCK_SITE_CONFIG,
@@ -11,8 +11,6 @@ import {
 
 interface HeaderProps {
   cartCount?: number;
-  cartBounceKey?: number;
-  onOpenCart?: () => void;
   searchQuery?: string;
   onSearchChange?: (value: string) => void;
   activeNav?: "thuc-don" | "khuyen-mai" | "lich-su-don-hang" | "ve-brewlite";
@@ -21,29 +19,13 @@ interface HeaderProps {
 }
 
 export default function Header({
-  cartCount = 3,
-  cartBounceKey = 0,
-  onOpenCart,
+  cartCount = 0,
   searchQuery = "",
   onSearchChange,
   activeNav = "thuc-don",
   userProfile = MOCK_USER_PROFILE,
   siteConfig = MOCK_SITE_CONFIG,
 }: HeaderProps) {
-  const [isBouncing, setIsBouncing] = useState(false);
-
-  useEffect(() => {
-    if (cartBounceKey > 0) {
-      setIsBouncing(false);
-      const startTimer = setTimeout(() => setIsBouncing(true), 10);
-      const endTimer = setTimeout(() => setIsBouncing(false), 850);
-      return () => {
-        clearTimeout(startTimer);
-        clearTimeout(endTimer);
-      };
-    }
-  }, [cartBounceKey]);
-
   return (
     <header className="fixed top-0 left-0 right-0 w-full z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
       <div className="h-20 max-w-[1320px] mx-auto px-margin flex items-center justify-between gap-gutter">
@@ -102,22 +84,24 @@ export default function Header({
           >
             Thực đơn
           </Link>
-          <Link
-            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors ${
+          <button
+            type="button"
+            onClick={() => {}}
+            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors cursor-pointer ${
               activeNav === "khuyen-mai"
                 ? "bg-primary text-on-primary shadow-sm font-semibold"
                 : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
             }`}
-            href="/voucher"
           >
             Khuyến mãi
-          </Link>
-          <a
-            className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors"
-            href="#"
+          </button>
+          <button
+            type="button"
+            onClick={() => {}}
+            className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors cursor-pointer"
           >
             Lịch sử đơn hàng
-          </a>
+          </button>
           <a
             className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors"
             href="#footer"
@@ -129,43 +113,25 @@ export default function Header({
         <div className="flex items-center gap-space-md flex-shrink-0">
           <button
             id="header-cart-btn"
-            onClick={onOpenCart}
-            className={`relative flex items-center gap-space-xs px-3.5 py-2 rounded-lg transition-all cursor-pointer ${
-              isBouncing
-                ? "animate-cart-shake bg-primary-fixed ring-2 ring-primary shadow-md text-on-primary-fixed"
-                : "bg-surface-container-low hover:bg-surface-container-high text-on-surface"
-            }`}
+            onClick={() => {}}
+            className="relative flex items-center gap-space-xs px-3.5 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface transition-all cursor-pointer"
             type="button"
           >
-            {isBouncing && (
-              <span
-                key={cartBounceKey}
-                className="animate-float-plus absolute -top-2 right-1 z-50 px-1.5 py-0.5 rounded-full bg-tertiary text-on-tertiary font-label-md text-[11px] font-bold shadow-md pointer-events-none"
-              >
-                +1
-              </span>
-            )}
-            <span
-              className={`material-symbols-outlined text-[22px] text-primary transition-transform ${
-                isBouncing ? "scale-110" : ""
-              }`}
-            >
+            <span className="material-symbols-outlined text-[22px] text-primary">
               shopping_bag
             </span>
             <span className="font-label-md text-label-md hidden sm:inline">
               Giỏ hàng
             </span>
-            <span
-              className={`flex items-center justify-center px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-md text-[11px] leading-tight ${
-                isBouncing ? "animate-badge-pop" : ""
-              }`}
-            >
+            <span className="flex items-center justify-center px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-md text-[11px] leading-tight">
               {cartCount} món
             </span>
           </button>
-          <Link
-            className="flex items-center gap-space-sm pl-2 group"
-            href="/voucher"
+
+          <button
+            type="button"
+            onClick={() => {}}
+            className="flex items-center gap-space-sm pl-2 group cursor-pointer"
           >
             <img
               alt="Profile"
@@ -185,7 +151,7 @@ export default function Header({
                 </span>
               </div>
             </div>
-          </Link>
+          </button>
         </div>
       </div>
     </header>

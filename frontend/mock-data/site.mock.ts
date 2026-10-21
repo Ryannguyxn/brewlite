@@ -5,7 +5,8 @@ import type {
 } from "./types";
 
 // ============================================================================
-// MOCK DATA: THÔNG TIN USER HỘI VIÊN, HEADER, HERO BANNER & FOOTER
+// MOCK DATA GIAO DIỆN CHUNG: HEADER, HERO BANNER & FOOTER
+// (Giữ nguyên toàn bộ hình ảnh Logo & Avatar từ trang trước)
 // ============================================================================
 
 export const MOCK_USER_PROFILE: UserProfile = {
@@ -35,7 +36,7 @@ export const MOCK_HERO_BANNER: HeroBannerData = {
     "Tận hưởng bộ sưu tập cà phê phin truyền thống phối trộn Robusta mật ong Buôn Ma Thuột cùng dòng Arabica Bourbon trứ danh, pha chế theo tỉ lệ vàng chuẩn gu người Việt.",
   featuredLabel: "Món pha chế hôm nay",
   featuredDrinkName: "Cà Phê Muối Cố Đô",
-  featuredPromoText: "Ưu đãi 15% cho thành viên",
+  featuredPromoText: "Size S (100%) • Size M (120%) • Size L (140%)",
 };
 
 export const MOCK_SITE_CONFIG: SiteConfigData = {
@@ -49,8 +50,8 @@ export const MOCK_SITE_CONFIG: SiteConfigData = {
     "Trải nghiệm cà phê đặc sản thủ công tuyển chọn từ nông trại Cầu Đất và Đắk Lắk. Mỗi tách cà phê là một câu chuyện tôn vinh giá trị nguyên bản.",
   copyright: "© 2025 BrewLite Specialty Coffee Co. Mọi quyền được bảo lưu.",
   tagline: "Thiết kế cho người yêu cà phê nguyên bản Việt Nam.",
-  deliveryHighlight: "Giao nhanh trong 20 phút tại nội thành",
-  totalCatalogCount: 24,
+  deliveryHighlight: "Phục vụ nhanh chóng • Chuẩn vị cà phê thủ công",
+  totalCatalogCount: 8,
   branches: [
     {
       id: "branch-1",
@@ -72,17 +73,10 @@ export const MOCK_SITE_CONFIG: SiteConfigData = {
   ],
   quickLinks: [
     { label: "Thực đơn đặc sản", href: "/" },
-    { label: "Ưu đãi thành viên", href: "/voucher" },
+    { label: "Ưu đãi thành viên", href: "#" },
     { label: "Câu chuyện hạt cà phê", href: "#footer" },
     { label: "Kiểm tra đơn hàng", href: "#" },
     { label: "Chính sách bảo mật", href: "#" },
     { label: "Điều khoản dịch vụ", href: "#" },
   ],
-  rewardsBanner: {
-    title: "Đăng ký thành viên BrewLite Rewards",
-    description:
-      "Tích 1 điểm cho mỗi 10.000đ. Đổi ngay ly cà phê miễn phí và ưu đãi sinh nhật độc quyền.",
-    inputPlaceholder: "Nhập số điện thoại của bạn...",
-    buttonLabel: "Nhận Ưu Đãi",
-  },
 };

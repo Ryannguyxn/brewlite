@@ -253,9 +253,9 @@ function ProductDetailModalContent({
   // PHẦN 4: GIAO DIỆN HIỂN THỊ CHI TIẾT SẢN PHẨM (THEO THIẾT KẾ STITCH)
   // ==========================================================================
   return (
-    // Đây là lớp nền mờ (Backdrop Overlay) bao phủ phía sau hộp thoại chi tiết sản phẩm
+    // Đây là lớp nền mờ (Backdrop Overlay) bao phủ phía dưới Header, canh giữa hộp thoại chi tiết sản phẩm
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-on-surface/50 backdrop-blur-md transition-opacity duration-300"
+      className="fixed inset-x-0 top-20 bottom-0 z-40 flex items-center justify-center p-2 sm:p-3 bg-on-surface/50 backdrop-blur-md transition-opacity duration-300"
       id="product-modal-backdrop"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -263,21 +263,21 @@ function ProductDetailModalContent({
         }
       }}
     >
-      {/* Đây là khung hộp thoại chính của trang Chi tiết sản phẩm (rộng tối đa 850px, chia 2 cột) */}
+      {/* Đây là khung hộp thoại chính của trang Chi tiết sản phẩm (vừa khít 100% màn hình chuẩn không cần thu nhỏ 75%) */}
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="product-detail-title"
-        className="relative w-full max-w-[850px] bg-surface-container-lowest rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[942px]"
+        className="relative w-full max-w-[760px] max-h-[calc(100vh-5.75rem)] bg-surface-container-lowest rounded-xl shadow-2xl overflow-hidden flex flex-col"
       >
         {/* Đây là nút Đóng (X) ở góc trên bên phải để quay lại trang Product Gallery */}
         <button
           aria-label="Đóng cửa sổ và quay lại thực đơn"
           onClick={onClose}
-          className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface flex items-center justify-center transition-colors shadow-sm focus:outline-none cursor-pointer"
+          className="absolute top-2.5 right-2.5 z-20 w-8 h-8 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface flex items-center justify-center transition-colors shadow-sm focus:outline-none cursor-pointer"
           type="button"
         >
-          <span className="material-symbols-outlined text-[20px]">close</span>
+          <span className="material-symbols-outlined text-[18px]">close</span>
         </button>
 
         {/* Bố cục lưới 12 cột: Cột trái (5 cột) + Cột phải (7 cột) */}
@@ -285,10 +285,10 @@ function ProductDetailModalContent({
           {/* ================================================================
               CỘT BÊN TRÁI (5 CỘT): HÌNH ẢNH SẢN PHẨM, NHÃN NỔI BẬT & HỒ SƠ HƯƠNG VỊ
              ================================================================ */}
-          <div className="col-span-12 md:col-span-5 bg-surface-container-low p-space-lg flex flex-col justify-between">
-            <div className="flex flex-col gap-space-md">
+          <div className="col-span-12 md:col-span-5 bg-surface-container-low p-3.5 flex flex-col justify-between">
+            <div className="flex flex-col gap-2.5">
               {/* Đây là khung chứa Hình ảnh chính của sản phẩm */}
-              <div className="relative w-full aspect-[4/5] rounded-lg overflow-hidden shadow-sm bg-surface-container">
+              <div className="relative w-full h-[195px] rounded-lg overflow-hidden shadow-sm bg-surface-container">
                 {/* Đây là hình ảnh sản phẩm (có tự động chuyển sang ảnh dự phòng nếu lỗi link ảnh) */}
                 <img
                   className={`w-full h-full object-cover ${
@@ -305,10 +305,10 @@ function ProductDetailModalContent({
                 />
 
                 {/* Đây là cụm Nhãn (Badges) đè lên góc trái trên của ảnh: "Bán chạy nhất" / "Mới" & vùng nguyên liệu */}
-                <div className="absolute top-3 left-3 flex flex-col gap-1.5 items-start z-10">
+                <div className="absolute top-2 left-2 flex flex-col gap-1 items-start z-10">
                   {product.badge && (
-                    <span className="px-2.5 py-1 rounded-full bg-primary text-on-primary font-label-md text-label-md shadow-sm flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]">
+                    <span className="px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-md text-[10.5px] shadow-sm flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[12px]">
                         local_fire_department
                       </span>
                       {product.badge === "Best Seller"
@@ -316,7 +316,7 @@ function ProductDetailModalContent({
                         : product.badge}
                     </span>
                   )}
-                  <span className="px-2.5 py-1 rounded-full bg-surface-container-lowest/90 backdrop-blur-sm text-on-surface font-label-md text-label-md shadow-sm">
+                  <span className="px-2 py-0.5 rounded-full bg-surface-container-lowest/90 backdrop-blur-sm text-on-surface font-label-md text-[10.5px] shadow-sm">
                     {product.originBadge || "Rang mộc Đắk Lắk"}
                   </span>
                 </div>
@@ -324,8 +324,8 @@ function ProductDetailModalContent({
                 {/* Đây là lớp phủ báo "Tạm hết hàng" đè lên ảnh khi sản phẩm có isAvailable = false */}
                 {!product.isAvailable && (
                   <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-[2px] flex items-center justify-center">
-                    <span className="px-3.5 py-1.5 rounded-full font-label-md text-label-md bg-surface text-error font-semibold shadow-md flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px]">
+                    <span className="px-3 py-1 rounded-full font-label-md text-[11px] bg-surface text-error font-semibold shadow-md flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px]">
                         remove_shopping_cart
                       </span>
                       Tạm hết hàng
@@ -335,50 +335,50 @@ function ProductDetailModalContent({
               </div>
 
               {/* Đây là thẻ Hồ sơ hương vị (Flavor Notes) & Thông số hạt cà phê */}
-              <div className="bg-surface-container-lowest p-space-md rounded-lg shadow-sm flex flex-col gap-2">
+              <div className="bg-surface-container-lowest p-2.5 rounded-lg shadow-sm flex flex-col gap-1">
                 {/* Tiêu đề mục Hồ sơ hương vị */}
-                <div className="flex items-center gap-1.5 text-primary">
-                  <span className="material-symbols-outlined text-[18px]">
+                <div className="flex items-center gap-1 text-primary">
+                  <span className="material-symbols-outlined text-[15px]">
                     verified
                   </span>
-                  <span className="font-label-lg text-label-lg">
+                  <span className="font-label-lg text-[12.5px] font-semibold">
                     Hồ sơ hương vị (Flavor Notes)
                   </span>
                 </div>
 
                 {/* Đoạn mô tả chi tiết hương vị của sản phẩm */}
-                <p className="font-body-md text-body-md text-on-surface-variant">
+                <p className="font-body-md text-[12px] leading-snug text-on-surface-variant">
                   {product.flavorNotes ||
                     product.description ||
                     "Hương vị sô-cô-la đen, đắng dịu êm ái, hậu ngọt mật ong đậm đà hòa quyện cùng sữa đặc béo ngậy chuẩn gu Sài Thành."}
                 </p>
 
                 {/* Đây là 3 ô thông số kỹ thuật của đồ uống: Độ đậm - Loại hạt - Phương pháp chế biến */}
-                <div className="grid grid-cols-3 gap-2 mt-2 pt-2 bg-surface-container-low rounded p-2 text-center">
+                <div className="grid grid-cols-3 gap-1 mt-1 bg-surface-container-low rounded p-1.5 text-center">
                   {/* Ô 1: Độ đậm */}
                   <div className="flex flex-col">
-                    <span className="font-body-sm text-[11px] text-outline">
+                    <span className="font-body-sm text-[10px] text-outline">
                       Độ đậm
                     </span>
-                    <span className="font-label-md text-label-md text-tertiary">
+                    <span className="font-label-md text-[11px] text-tertiary">
                       {product.intensity || "4/5 • Đậm"}
                     </span>
                   </div>
                   {/* Ô 2: Loại hạt */}
                   <div className="flex flex-col">
-                    <span className="font-body-sm text-[11px] text-outline">
+                    <span className="font-body-sm text-[10px] text-outline">
                       Hạt
                     </span>
-                    <span className="font-label-md text-label-md text-on-surface">
+                    <span className="font-label-md text-[11px] text-on-surface">
                       {product.beanType || "Robusta"}
                     </span>
                   </div>
                   {/* Ô 3: Phương pháp chế biến */}
                   <div className="flex flex-col">
-                    <span className="font-body-sm text-[11px] text-outline">
+                    <span className="font-body-sm text-[10px] text-outline">
                       Chế biến
                     </span>
-                    <span className="font-label-md text-label-md text-on-surface">
+                    <span className="font-label-md text-[11px] text-on-surface">
                       {product.processMethod || "Honey"}
                     </span>
                   </div>
@@ -387,8 +387,8 @@ function ProductDetailModalContent({
             </div>
 
             {/* Đây là dòng ghi chú tiêu chuẩn canh tác bền vững ở dưới cùng cột trái */}
-            <div className="flex items-center gap-2 pt-space-md text-outline font-body-sm text-body-sm">
-              <span className="material-symbols-outlined text-[18px]">eco</span>
+            <div className="flex items-center gap-1.5 pt-2 text-outline font-body-sm text-[11px]">
+              <span className="material-symbols-outlined text-[15px]">eco</span>
               <span>
                 {product.sustainabilityNote ||
                   "Hạt canh tác bền vững theo tiêu chuẩn UTZ"}
@@ -399,22 +399,22 @@ function ProductDetailModalContent({
           {/* ================================================================
               CỘT BÊN PHẢI (7 CỘT): TÊN SP, GIÁ, CHỌN SIZE, CHỌN TOPPING, GHI CHÚ & SỐ LƯỢNG
              ================================================================ */}
-          <div className="col-span-12 md:col-span-7 p-space-lg flex flex-col justify-between bg-surface-container-lowest">
-            <div className="flex flex-col gap-space-lg pr-1">
+          <div className="col-span-12 md:col-span-7 p-3.5 lg:px-5 lg:py-3.5 flex flex-col justify-between bg-surface-container-lowest">
+            <div className="flex flex-col gap-2 pr-0.5">
               {/* ------------------------------------------------------------
                   MỤC 1 (CỘT PHẢI): NHÃN CÔNG THỨC, TÊN SẢN PHẨM & GIÁ CƠ BẢN
                  ------------------------------------------------------------ */}
-              <div className="flex flex-col gap-1 pb-space-sm">
+              <div className="flex flex-col gap-0.5 pr-6">
                 {/* Đây là hàng nhãn phân loại công thức, cách phục vụ và trạng thái Còn hàng / Hết hàng */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-label-md text-label-md text-primary bg-primary-fixed px-2 py-0.5 rounded-full">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-label-md text-[10.5px] text-primary bg-primary-fixed px-2 py-0.5 rounded-full">
                     {product.recipeTag || "Công thức Độc Quyền"}
                   </span>
-                  <span className="font-body-sm text-body-sm text-outline">
+                  <span className="font-body-sm text-[11px] text-outline">
                     • {product.servingNote || "Phục vụ lạnh"}
                   </span>
                   <span
-                    className={`px-2 py-0.5 rounded-full font-label-md text-[11px] ${
+                    className={`px-2 py-0.5 rounded-full font-label-md text-[10px] ${
                       product.isAvailable
                         ? "bg-secondary-fixed text-on-secondary-fixed"
                         : "bg-error-container text-on-error-container"
@@ -427,18 +427,18 @@ function ProductDetailModalContent({
                 {/* Đây là Tên sản phẩm */}
                 <h2
                   id="product-detail-title"
-                  className="font-headline-lg text-headline-lg text-on-surface"
+                  className="font-headline-lg text-[20px] leading-tight font-bold text-on-surface"
                 >
                   {product.name}
                 </h2>
 
                 {/* Đây là Giá sản phẩm (hiển thị giá theo Size đang chọn và chú thích giá gốc Size S) */}
-                <div className="flex items-baseline gap-2 mt-1">
-                  <span className="font-price-lg text-headline-md text-primary">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-price-lg text-[18px] leading-tight font-bold text-primary">
                     {formatVnd(sizeAdjustedPriceVnd)}
                   </span>
                   {activeSizeOption.multiplierPercent > 100 && (
-                    <span className="font-body-sm text-body-sm text-outline">
+                    <span className="font-body-sm text-[11px] text-outline">
                       (Giá gốc Size S: {formatVnd(product.basePriceVnd)})
                     </span>
                   )}
@@ -448,19 +448,19 @@ function ProductDetailModalContent({
               {/* ------------------------------------------------------------
                   MỤC 2 (CỘT PHẢI): CHỌN KÍCH CỠ LY (SIZE S = 100%, M = 120%, L = 140%)
                  ------------------------------------------------------------ */}
-              <div className="flex flex-col gap-space-xs">
+              <div className="flex flex-col gap-1">
                 {/* Tiêu đề mục chọn Size */}
                 <div className="flex items-center justify-between">
-                  <span className="font-title-sm text-title-sm text-on-surface">
+                  <span className="font-title-sm text-[13px] font-semibold text-on-surface">
                     Chọn Kích cỡ (Size)
                   </span>
-                  <span className="font-label-md text-label-md text-primary">
+                  <span className="font-label-md text-[11px] text-primary">
                     Bắt buộc chọn 1
                   </span>
                 </div>
 
                 {/* Đây là 3 ô chọn Size: Size S, Size M, Size L */}
-                <div className="grid grid-cols-3 gap-space-sm mt-1">
+                <div className="grid grid-cols-3 gap-2">
                   {product.sizes.map((sizeOption) => {
                     const isSelected = selectedSize === sizeOption.size;
                     const extraPriceVnd = calculateSizeExtraVnd(
@@ -472,7 +472,7 @@ function ProductDetailModalContent({
                       // Đây là thẻ chọn từng Size (S / M / L)
                       <label
                         key={sizeOption.size}
-                        className={`relative flex flex-col items-center justify-center p-3 rounded-xl transition-all ${
+                        className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-lg transition-all ${
                           !product.isAvailable
                             ? "opacity-60 cursor-not-allowed"
                             : "cursor-pointer hover:bg-surface-container"
@@ -491,36 +491,35 @@ function ProductDetailModalContent({
                           type="radio"
                           value={sizeOption.size}
                         />
-                        <div className="w-full flex flex-col items-center gap-0.5 text-center">
+                        <div className="w-full flex flex-col items-center text-center">
                           {/* Tên Size (Size S / Size M / Size L) */}
                           <span
-                            className={`font-title-sm text-title-sm ${
+                            className={`font-title-sm text-[13px] font-semibold leading-tight ${
                               isSelected ? "text-primary" : "text-on-surface"
                             }`}
                           >
                             Size {sizeOption.size}
                           </span>
                           {/* Dung tích & phần trăm hệ số giá (100% / 120% / 140%) */}
-                          <span className="font-body-sm text-[12px] text-on-surface-variant">
-                            {SIZE_VOLUME_LABELS[sizeOption.size]} (
-                            {sizeOption.multiplierPercent}%)
+                          <span className="font-body-sm text-[10.5px] leading-tight text-on-surface-variant">
+                            {SIZE_VOLUME_LABELS[sizeOption.size]}
                           </span>
                           {/* Số tiền cộng thêm của Size đó so với Size S */}
-                          <span className="font-label-md text-label-md text-tertiary mt-1">
+                          <span className="font-label-md text-[11px] text-tertiary mt-0.5">
                             {extraPriceVnd === 0
                               ? "0 đ"
                               : `+${formatVnd(extraPriceVnd)}`}
                           </span>
                         </div>
                         <div
-                          className={`absolute inset-0 rounded-xl bg-primary/10 pointer-events-none transition-opacity ${
+                          className={`absolute inset-0 rounded-lg bg-primary/10 pointer-events-none transition-opacity ${
                             isSelected ? "opacity-100" : "opacity-0"
                           }`}
                         />
                         {/* Biểu tượng dấu tích xanh/nâu khi Size đang được chọn */}
                         {isSelected && (
-                          <div className="absolute top-2 right-2 text-primary">
-                            <span className="material-symbols-outlined text-[18px]">
+                          <div className="absolute top-1 right-1.5 text-primary">
+                            <span className="material-symbols-outlined text-[14px]">
                               check_circle
                             </span>
                           </div>
@@ -534,22 +533,22 @@ function ProductDetailModalContent({
               {/* ------------------------------------------------------------
                   MỤC 3 (CỘT PHẢI): CHỌN TOPPING YÊU THÍCH (TỐI ĐA 3 LOẠI KHÁC NHAU)
                  ------------------------------------------------------------ */}
-              <div className="flex flex-col gap-space-xs">
+              <div className="flex flex-col gap-0.5">
                 {/* Tiêu đề mục chọn Topping & Huy hiệu đếm số lượng topping đã chọn (X/3) */}
                 <div className="flex items-center justify-between">
-                  <span className="font-title-sm text-title-sm text-on-surface">
+                  <span className="font-title-sm text-[13px] font-semibold text-on-surface">
                     Chọn Topping yêu thích
                   </span>
                   {/* Đây là huy hiệu hiển thị số lượng topping đã chọn trên tổng số tối đa 3 món */}
                   <span
-                    className="font-label-md text-label-md px-2.5 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed"
+                    className="font-label-md text-[10.5px] px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed"
                     id="topping-counter-badge"
                   >
                     Đã chọn: {selectedToppingIds.length}/{MAX_TOPPINGS_PER_ITEM}{" "}
                     món thêm
                   </span>
                 </div>
-                <p className="font-body-sm text-body-sm text-outline">
+                <p className="font-body-sm text-[11px] leading-tight text-outline">
                   Tối đa {MAX_TOPPINGS_PER_ITEM} loại topping để đảm bảo hương
                   vị cân bằng nhất.
                 </p>
@@ -558,9 +557,9 @@ function ProductDetailModalContent({
                 {toppingWarning && (
                   <p
                     role="alert"
-                    className="font-label-md text-label-md text-error flex items-center gap-1 mt-0.5"
+                    className="font-label-md text-[11px] text-error flex items-center gap-1"
                   >
-                    <span className="material-symbols-outlined text-[16px]">
+                    <span className="material-symbols-outlined text-[13px]">
                       error
                     </span>
                     {toppingWarning}
@@ -569,40 +568,40 @@ function ProductDetailModalContent({
 
                 {/* Đây là danh sách các dòng lựa chọn Topping (Checkbox + Tên Topping + Giá cố định) */}
                 {product.toppings.length === 0 ? (
-                  <p className="font-body-sm text-body-sm text-outline italic py-2">
+                  <p className="font-body-sm text-[11.5px] text-outline italic py-1">
                     Sản phẩm này hiện không có topping đi kèm.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-2 mt-1">
+                  <div className="flex flex-col gap-1 mt-0.5">
                     {product.toppings.map((topping) => {
                       const isChecked = selectedToppingIds.includes(topping.id);
                       return (
                         // Đây là từng hàng Topping trong danh sách
                         <label
                           key={topping.id}
-                          className={`flex items-center justify-between p-3 rounded-xl bg-surface-container-low transition-colors group ${
+                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-surface-container-low transition-colors group ${
                             !product.isAvailable
                               ? "opacity-60 cursor-not-allowed"
                               : "hover:bg-surface-container cursor-pointer"
                           }`}
                         >
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
                             {/* Ô tích chọn Topping */}
                             <input
                               checked={isChecked}
                               disabled={!product.isAvailable}
                               onChange={() => handleToggleTopping(topping.id)}
-                              className="topping-cb w-4 h-4 rounded text-primary accent-primary cursor-pointer"
+                              className="topping-cb w-3.5 h-3.5 rounded text-primary accent-primary cursor-pointer"
                               type="checkbox"
                               value={topping.priceVnd}
                             />
                             {/* Tên Topping */}
-                            <span className="font-body-md text-body-md text-on-surface group-hover:text-primary transition-colors">
+                            <span className="font-body-md text-[12.5px] text-on-surface group-hover:text-primary transition-colors">
                               {topping.name}
                             </span>
                           </div>
                           {/* Giá tiền cố định của Topping */}
-                          <span className="font-label-lg text-label-lg text-tertiary">
+                          <span className="font-label-lg text-[12.5px] font-semibold text-tertiary">
                             +{formatVnd(topping.priceVnd)}
                           </span>
                         </label>
@@ -615,13 +614,13 @@ function ProductDetailModalContent({
               {/* ------------------------------------------------------------
                   MỤC 4 (CỘT PHẢI): Ô NHẬP GHI CHÚ PHA CHẾ (YÊU CẦU ĐẶC BIỆT)
                  ------------------------------------------------------------ */}
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1">
                 <label
-                  className="font-title-sm text-title-sm text-on-surface flex items-center justify-between"
+                  className="font-title-sm text-[13px] font-semibold text-on-surface flex items-center justify-between"
                   htmlFor="order-notes"
                 >
                   <span>Yêu cầu đặc biệt (Ghi chú pha chế)</span>
-                  <span className="font-body-sm text-body-sm text-outline">
+                  <span className="font-body-sm text-[10.5px] font-normal text-outline">
                     Không bắt buộc
                   </span>
                 </label>
@@ -629,16 +628,16 @@ function ProductDetailModalContent({
                 <div className="relative">
                   <textarea
                     disabled={!product.isAvailable}
-                    className="w-full p-3 bg-surface-container-low rounded-xl text-on-surface placeholder:text-outline font-body-sm text-body-sm focus:outline-none focus:bg-surface-container transition-all resize-none disabled:opacity-60"
+                    className="w-full py-1.5 pl-2.5 pr-11 bg-surface-container-low rounded-lg text-on-surface placeholder:text-outline font-body-sm text-[12px] focus:outline-none focus:bg-surface-container transition-all resize-none disabled:opacity-60"
                     id="order-notes"
                     maxLength={100}
                     placeholder="Ví dụ: Ít ngọt 50%, nhiều đá, để đá riêng..."
-                    rows={2}
+                    rows={1}
                     value={note}
                     onChange={(e) => setNote(e.target.value.slice(0, 100))}
                   />
                   {/* Bộ đếm số ký tự đã nhập (tối đa 100) */}
-                  <span className="absolute bottom-2.5 right-3 text-[11px] font-body-sm text-outline">
+                  <span className="absolute bottom-1.5 right-2.5 text-[10px] font-body-sm text-outline">
                     {note.length}/100
                   </span>
                 </div>
@@ -648,27 +647,27 @@ function ProductDetailModalContent({
             {/* ------------------------------------------------------------
                 MỤC 5 (CỘT PHẢI - DƯỚI CÙNG): CHỈNH SỐ LƯỢNG, TẠM TÍNH & NÚT THÊM VÀO GIỎ
                ------------------------------------------------------------ */}
-            <div className="pt-space-md mt-space-md bg-surface-container-lowest">
+            <div className="pt-2 mt-1.5 border-t border-surface-container bg-surface-container-lowest">
               {/* Cảnh báo khi người dùng nhập số lượng vượt quá giới hạn 10 ly */}
               {quantityWarning && (
                 <p
                   role="alert"
-                  className="font-label-md text-label-md text-error flex items-center gap-1 mb-2"
+                  className="font-label-md text-[11px] text-error flex items-center gap-1 mb-1"
                 >
-                  <span className="material-symbols-outlined text-[15px]">
+                  <span className="material-symbols-outlined text-[13px]">
                     info
                   </span>
                   {quantityWarning}
                 </p>
               )}
 
-              <div className="flex items-center justify-between gap-space-md">
+              <div className="flex items-center justify-between gap-3">
                 {/* Đây là cụm điều chỉnh Số lượng sản phẩm (gồm nút -, ô nhập số trực tiếp, và nút +) */}
-                <div className="flex flex-col gap-1">
-                  <span className="font-body-sm text-[11px] text-outline">
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-body-sm text-[10px] text-outline">
                     Số lượng (1–{MAX_ORDER_QUANTITY})
                   </span>
-                  <div className="flex items-center bg-surface-container-low rounded-lg p-1 shadow-sm">
+                  <div className="flex items-center bg-surface-container-low rounded-lg p-0.5 shadow-sm">
                     {/* Đây là nút Giảm số lượng (-) */}
                     <button
                       aria-label="Giảm số lượng"
@@ -676,11 +675,11 @@ function ProductDetailModalContent({
                         !product.isAvailable || quantity <= MIN_ORDER_QUANTITY
                       }
                       onClick={handleDecreaseQty}
-                      className="w-8 h-8 rounded-md bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container-high transition-colors focus:outline-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-7 h-7 rounded-md bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container-high transition-colors focus:outline-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       id="btn-qty-minus"
                       type="button"
                     >
-                      <span className="material-symbols-outlined text-[18px]">
+                      <span className="material-symbols-outlined text-[16px]">
                         remove
                       </span>
                     </button>
@@ -700,7 +699,7 @@ function ProductDetailModalContent({
                           e.currentTarget.blur();
                         }
                       }}
-                      className="font-title-md text-title-md text-on-surface w-12 h-8 text-center font-bold bg-transparent rounded-md focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary transition-all disabled:opacity-50"
+                      className="font-title-md text-[14px] text-on-surface w-9 h-7 text-center font-bold bg-transparent rounded-md focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary transition-all disabled:opacity-50"
                     />
 
                     {/* Đây là nút Tăng số lượng (+) */}
@@ -710,11 +709,11 @@ function ProductDetailModalContent({
                         !product.isAvailable || quantity >= MAX_ORDER_QUANTITY
                       }
                       onClick={handleIncreaseQty}
-                      className="w-8 h-8 rounded-md bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container-high transition-colors focus:outline-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-7 h-7 rounded-md bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container-high transition-colors focus:outline-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       id="btn-qty-plus"
                       type="button"
                     >
-                      <span className="material-symbols-outlined text-[18px]">
+                      <span className="material-symbols-outlined text-[16px]">
                         add
                       </span>
                     </button>
@@ -724,12 +723,12 @@ function ProductDetailModalContent({
                 {/* Đây là khu vực hiển thị Tổng tiền tạm tính & Nút "Thêm vào giỏ hàng" */}
                 <div className="flex-1 flex flex-col items-end">
                   {/* Dòng hiển thị công thức và Tổng tiền Tạm tính */}
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">
+                  <div className="flex items-baseline gap-1.5 mb-0.5">
+                    <span className="font-body-sm text-[11px] text-on-surface-variant">
                       Tạm tính ({quantity} ly × {formatVnd(unitPriceVnd)}):
                     </span>
                     <span
-                      className="font-title-md text-title-md text-primary font-bold"
+                      className="font-title-md text-[14px] text-primary font-bold"
                       id="temp-total-display"
                     >
                       {formatVnd(lineTotalVnd)}
@@ -740,7 +739,7 @@ function ProductDetailModalContent({
                   <button
                     disabled={!product.isAvailable}
                     onClick={handleSubmitAddToCart}
-                    className={`w-full flex items-center justify-center gap-space-xs py-3.5 px-space-lg rounded-lg font-title-sm text-title-sm shadow-md transition-all focus:outline-none ${
+                    className={`w-full flex items-center justify-center gap-1.5 py-2 px-4 rounded-lg font-title-sm text-[13.5px] font-semibold shadow-md transition-all focus:outline-none ${
                       product.isAvailable
                         ? "bg-primary hover:bg-secondary text-on-primary active:scale-[0.99] cursor-pointer"
                         : "bg-surface-container-high text-outline cursor-not-allowed"
@@ -748,7 +747,7 @@ function ProductDetailModalContent({
                     id="btn-add-cart"
                     type="button"
                   >
-                    <span className="material-symbols-outlined text-[20px]">
+                    <span className="material-symbols-outlined text-[17px]">
                       {product.isAvailable
                         ? "shopping_bag"
                         : "remove_shopping_cart"}

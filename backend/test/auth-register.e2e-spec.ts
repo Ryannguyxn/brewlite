@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import * as bcrypt from 'bcrypt';
+import * as argon2 from 'argon2';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,11 +67,14 @@ describe('POST /auth/register (e2e)', () => {
       });
     const data = prisma.user.create.mock.calls[0][0].data;
     expect(data.passwordHash).not.toBe(valid.password);
-    expect(bcrypt.getRounds(data.passwordHash)).toBe(12);
-    expect(await bcrypt.compare(valid.password, data.passwordHash)).toBe(true);
-    expect(await bcrypt.compare('WrongPassword', data.passwordHash)).toBe(
-      false,
-    );
+    expect(data.passwordHash).toMatch(/^\$argon2id\$v=19\$/);
+    expect(data.passwordHash.split('$')[3].split(',').sort()).toEqual([
+      'm=19456',
+      'p=1',
+      't=2',
+    ]);
+    expect(await argon2.verify(data.passwordHash, valid.password)).toBe(true);
+    expect(await argon2.verify(data.passwordHash, 'WrongPassword')).toBe(false);
     expect(data).not.toHaveProperty('password');
   });
 
@@ -95,7 +98,7 @@ describe('POST /auth/register (e2e)', () => {
       'fullName',
       'passwordHash',
     ]);
-    expect(await bcrypt.compare(valid.password, data.passwordHash)).toBe(true);
+    expect(await argon2.verify(data.passwordHash, valid.password)).toBe(true);
   });
 
   it('accepts an omitted full name and never returns a token', async () => {
@@ -113,10 +116,8 @@ describe('POST /auth/register (e2e)', () => {
       .send({ ...valid, password })
       .expect(201);
     const data = prisma.user.create.mock.calls[0][0].data;
-    expect(await bcrypt.compare(password, data.passwordHash)).toBe(true);
-    expect(await bcrypt.compare(password.trim(), data.passwordHash)).toBe(
-      false,
-    );
+    expect(await argon2.verify(data.passwordHash, password)).toBe(true);
+    expect(await argon2.verify(data.passwordHash, password.trim())).toBe(false);
   });
 
   it.each([
@@ -148,7 +149,7 @@ describe('POST /auth/register (e2e)', () => {
     expect(JSON.stringify(response.body)).not.toContain(valid.password);
   });
 
-  it.each(['a'.repeat(73), 'é'.repeat(37)])(
+  it.each(['a'.repeat(73), 'é'.repeat(37), 'x'.repeat(4096)])(
     'accepts a long password without a maximum-length validation error',
     async (password) => {
       await request(app.getHttpServer())
@@ -156,11 +157,51 @@ describe('POST /auth/register (e2e)', () => {
         .send({ ...valid, password })
         .expect(201);
       expect(
-        await bcrypt.compare(
-          password,
+        await argon2.verify(
           prisma.user.create.mock.calls[0][0].data.passwordHash,
+          password,
         ),
       ).toBe(true);
+    },
+  );
+
+  it.each(['abcdefgh', '12345678'])(
+    'accepts exactly 8 characters without an extra complexity rule',
+    async (password) => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ ...valid, password })
+        .expect(201);
+      expect(
+        await argon2.verify(
+          prisma.user.create.mock.calls[0][0].data.passwordHash,
+          password,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each(['a'.repeat(72), 'é'.repeat(36)])(
+    'stores full passwords and rejects cross-verification after byte 72',
+    async (prefix) => {
+      expect(Buffer.byteLength(prefix, 'utf8')).toBe(72);
+      const first = prefix + 'A';
+      const second = prefix + 'B';
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ ...valid, password: first })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ ...valid, email: 'second@example.com', password: second })
+        .expect(201);
+      const firstHash = prisma.user.create.mock.calls[0][0].data.passwordHash;
+      const secondHash = prisma.user.create.mock.calls[1][0].data.passwordHash;
+      expect(await argon2.verify(firstHash, first)).toBe(true);
+      expect(await argon2.verify(secondHash, second)).toBe(true);
+      expect(await argon2.verify(firstHash, second)).toBe(false);
+      expect(await argon2.verify(secondHash, first)).toBe(false);
+      expect(await argon2.verify(firstHash, prefix)).toBe(false);
     },
   );
 
@@ -172,9 +213,9 @@ describe('POST /auth/register (e2e)', () => {
       .send({ ...valid, password, fullName })
       .expect(201);
     expect(
-      await bcrypt.compare(
-        password,
+      await argon2.verify(
         prisma.user.create.mock.calls[0][0].data.passwordHash,
+        password,
       ),
     ).toBe(true);
   });

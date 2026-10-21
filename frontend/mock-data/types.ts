@@ -2,6 +2,7 @@
 // ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES / INTERFACES) CHO BREWLITE FRONTEND
 // Đối chiếu chuẩn 100% với:
 // - docs/api/BrewLite_API_Contract_v1.0.md (Mục 2, 3, 4, 5.1)
+// - docs/api/BrewLite_API_Contract_v2.0.md (Mục 3, 4, 5, 8)
 // - docs/requirements/BrewLite_Requirements_Specification.docx (BR-011 .. BR-017)
 // ============================================================================
 
@@ -35,7 +36,7 @@ export type SizeMultiplierPercent = 100 | 120 | 140;
 /**
  * 1 phần tử đồ uống trả về từ `GET /products` (API Contract Mục 3.2 & 5.1)
  * - 5 trường bắt buộc theo API Contract: `id`, `name`, `imageUrl`, `basePriceVnd`, `isAvailable`
- * - Các trường phụ trợ UI (`category`, `rating`, `reviews`, `description`, `badge`, `imageAlt`)
+ * - Các trường phụ trợ UI (`category`, `rating`, `reviews`, `description`, `badge`, `imageAlt`, ...)
  *   để dạng optional (`?`) nhằm giữ nguyên giao diện thẻ sản phẩm của trang cũ khi đọc từ mock-data
  *   nhưng vẫn tương thích 100% khi ghép nối response thật từ Backend.
  */
@@ -58,6 +59,14 @@ export interface ProductListItem {
   description?: string;
   badge?: "Best Seller" | "Mới";
   imageAlt?: string;
+  originBadge?: string;
+  recipeTag?: string;
+  servingNote?: string;
+  flavorNotes?: string;
+  intensity?: string;
+  beanType?: string;
+  processMethod?: string;
+  sustainabilityNote?: string;
 }
 
 /** Alias tương thích cho các component gọi ProductItem */
@@ -85,7 +94,7 @@ export interface ToppingOption {
   id: string;
   name: string;
   priceVnd: number;
-  isAvailable: boolean;
+  isAvailable?: boolean;
 }
 
 /**

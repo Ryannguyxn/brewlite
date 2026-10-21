@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import type { ProductListItem } from "@/mock-data";
 import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 
@@ -12,10 +13,7 @@ interface ProductCardProps {
   onAddToCart?: (product: ProductListItem) => void;
 }
 
-export default function ProductCard({
-  product,
-  onAddToCart,
-}: ProductCardProps) {
+export default function ProductCard({ product }: ProductCardProps) {
   const formattedPrice = formatVnd(product.basePriceVnd);
   const altText = product.imageAlt || product.name;
   const ratingText = product.rating || "4.9";
@@ -23,11 +21,17 @@ export default function ProductCard({
   const descriptionText =
     product.description ||
     "Tùy chọn kích cỡ Size S (100%), Size M (120%), Size L (140%) và tối đa 3 loại topping.";
+  const detailHref = `/products/${product.id}`;
 
   // Trạng thái Hết hàng (`isAvailable === false` theo API Contract Mục 3.2 & US-CAT-04)
+  // Nhấn vào bất kỳ vị trí nào trên thẻ vẫn mở trang Product Detail (nút Thêm vào giỏ trong trang Detail sẽ bị khóa)
   if (!product.isAvailable) {
     return (
-      <div className="group relative rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-all duration-300 flex flex-col h-full opacity-75">
+      <Link
+        href={detailHref}
+        aria-label={`Xem chi tiết ${product.name} (Tạm hết hàng)`}
+        className="group relative rounded-xl bg-surface-container-lowest p-space-md shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full opacity-75 cursor-pointer"
+      >
         <div className="relative w-full aspect-[4/3] rounded-lg overflow-hidden bg-surface-container mb-space-md">
           <img
             className="w-full h-full object-cover filter grayscale-[40%]"
@@ -52,7 +56,7 @@ export default function ProductCard({
         <div className="flex flex-col flex-1 justify-between">
           <div>
             <div className="flex items-center justify-between gap-1 mb-1">
-              <h3 className="font-title-md text-title-md text-on-surface">
+              <h3 className="font-title-md text-title-md text-on-surface group-hover:text-primary transition-colors">
                 {product.name}
               </h3>
               <div className="flex items-center gap-1 text-outline flex-shrink-0">
@@ -83,26 +87,28 @@ export default function ProductCard({
                 {formattedPrice}
               </span>
             </div>
-            <button
-              aria-label="Sản phẩm tạm hết hàng"
-              title="Sản phẩm tạm hết hàng"
-              disabled
-              className="w-9 h-9 rounded-lg bg-surface-container-high text-outline flex items-center justify-center cursor-not-allowed"
-              type="button"
+            <span
+              aria-hidden="true"
+              className="w-9 h-9 rounded-lg bg-surface-container-high text-outline flex items-center justify-center"
             >
               <span className="material-symbols-outlined text-[20px]">
                 block
               </span>
-            </button>
+            </span>
           </div>
         </div>
-      </div>
+      </Link>
     );
   }
 
   // Trạng thái Còn hàng (`isAvailable === true` theo API Contract Mục 3.2 & US-CAT-01)
+  // Toàn bộ thẻ là một <Link> dẫn tới `/products/${product.id}`
   return (
-    <div className="group relative rounded-xl bg-surface-container-lowest p-space-md shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col h-full transform hover:-translate-y-1">
+    <Link
+      href={detailHref}
+      aria-label={`Xem chi tiết ${product.name}`}
+      className="group relative rounded-xl bg-surface-container-lowest p-space-md shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col h-full transform hover:-translate-y-1 cursor-pointer"
+    >
       <div className="relative w-full aspect-[4/3] rounded-lg overflow-hidden bg-surface-container mb-space-md">
         <img
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -129,17 +135,12 @@ export default function ProductCard({
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
-          <button
-            onClick={() => onAddToCart?.(product)}
-            title="Tính năng đang hoàn thiện"
-            className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-title-sm text-title-sm shadow-md flex items-center justify-center gap-1.5 hover:bg-primary-container active:scale-[0.98] transition-all cursor-pointer"
-            type="button"
-          >
+          <span className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-title-sm text-title-sm shadow-md flex items-center justify-center gap-1.5 group-hover:bg-primary-container transition-all">
             <span className="material-symbols-outlined text-[18px]">
               shopping_cart
             </span>
             Thêm vào giỏ
-          </button>
+          </span>
         </div>
       </div>
 
@@ -178,17 +179,14 @@ export default function ProductCard({
               {formattedPrice}
             </span>
           </div>
-          <button
-            aria-label={`Thêm nhanh ${product.name}`}
-            title="Tính năng đang hoàn thiện"
-            onClick={() => onAddToCart?.(product)}
-            className="w-9 h-9 rounded-lg flex items-center justify-center transition-all shadow-sm cursor-pointer bg-surface-container hover:bg-primary hover:text-on-primary active:scale-95 text-on-surface"
-            type="button"
+          <span
+            aria-hidden="true"
+            className="w-9 h-9 rounded-lg flex items-center justify-center transition-all shadow-sm bg-surface-container group-hover:bg-primary group-hover:text-on-primary text-on-surface"
           >
             <span className="material-symbols-outlined text-[20px]">add</span>
-          </button>
+          </span>
         </div>
       </div>
-    </div>
+    </Link>
   );
 }

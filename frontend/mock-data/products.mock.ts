@@ -9,14 +9,16 @@ import type {
 } from "./types";
 
 // ============================================================================
-// MOCK DATA SẢN PHẨM THỰC ĐƠN:
+// MOCK DATA SẢN PHẨM THỰC ĐƠN & CHI TIẾT ĐỒ UỐNG (DÙNG CHUNG CHO GALLERY & DETAIL):
 // - Giữ nguyên toàn bộ hình ảnh sản phẩm (URL ảnh gốc đúng loại sản phẩm)
-// - Trường dữ liệu tuân thủ đúng API Contract v1.0 (`GET /products`):
+// - Trường dữ liệu tuân thủ đúng API Contract v1.0 & v2.0 (`GET /products` & `GET /products/:id`):
 //   + `id`: UUID hợp lệ
 //   + `name`: Tên sản phẩm
 //   + `imageUrl`: Link ảnh sản phẩm
 //   + `basePriceVnd`: Giá gốc VND (bội số của 5.000đ theo AC-US-CAT-05-04)
 //   + `isAvailable`: true (Còn hàng) / false (Hết hàng) theo US-CAT-04
+//   + `sizes`: S (100%), M (120%), L (140%)
+//   + `toppings`: Danh sách topping dùng chung có giá cố định (VND)
 // ============================================================================
 
 export const MOCK_CATEGORIES: CategoryOption[] = [
@@ -56,6 +58,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
       "Hòa quyện giữa sữa tươi thơm lừng, kem whipping béo ngậy và chút cà phê phin mộc dịu dàng.",
     imageAlt:
       "Traditional Vietnamese Bac Xiu layered iced coffee with distinct condensed milk bottom, rich cream layer and aromatic coffee top layer in a tall fluted glass, cafe ambiance.",
+    originBadge: "Phin Truyền Thống",
+    recipeTag: "Công thức Độc Quyền",
+    servingNote: "Phục vụ lạnh",
+    flavorNotes:
+      "Ba tầng hương vị rõ nét: sữa đặc ngọt dịu, kem béo mịn màng và lớp bọt cà phê phin thơm nồng nàn chuẩn vị Sài Gòn.",
+    intensity: "2/5 • Dịu nhẹ",
+    beanType: "Robusta & Arabica",
+    processMethod: "Natural",
+    sustainabilityNote: "Hạt canh tác bền vững theo tiêu chuẩn UTZ",
   },
   {
     id: "11111111-1111-4111-8111-111111111102",
@@ -71,6 +82,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
       "Chiết xuất cà phê rang mộc đậm đà hương vị nguyên bản Tây Nguyên, hậu vị ngọt sâu.",
     imageAlt:
       "Artisanal Vietnamese dark roasted coffee from Cau Dat with rich crema and roasted coffee beans on a warm oak cafe table.",
+    originBadge: "Rang mộc Cầu Đất",
+    recipeTag: "Nguyên Bản Tây Nguyên",
+    servingNote: "Phục vụ lạnh",
+    flavorNotes:
+      "Đậm vị cà phê rang mộc nguyên chất, hương khói nhẹ đặc trưng cùng hậu vị ngọt thanh kéo dài nơi cuống họng.",
+    intensity: "5/5 • Rất đậm",
+    beanType: "Robusta",
+    processMethod: "Full Washed",
+    sustainabilityNote: "Hạt canh tác bền vững theo tiêu chuẩn UTZ",
   },
   {
     id: "11111111-1111-4111-8111-111111111103",
@@ -87,6 +107,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
     badge: "Best Seller",
     imageAlt:
       "Traditional Hue salted cream coffee in vintage ceramic mug, thick savory sweet cream layer on dark robusta coffee, sprinkle of cocoa powder, serene atmospheric daylight.",
+    originBadge: "Đặc sản Cố Đô",
+    recipeTag: "Công thức Độc Quyền",
+    servingNote: "Phục vụ lạnh",
+    flavorNotes:
+      "Lớp kem muối biển mặn dịu béo ngậy hòa quyện hoàn hảo cùng nền cà phê phin Buôn Ma Thuột đắng êm hậu ngọt.",
+    intensity: "4/5 • Đậm",
+    beanType: "Robusta",
+    processMethod: "Honey",
+    sustainabilityNote: "Hạt canh tác bền vững theo tiêu chuẩn UTZ",
   },
   {
     id: "11111111-1111-4111-8111-111111111104",
@@ -103,6 +132,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
     badge: "Best Seller",
     imageAlt:
       "A cold glass of authentic Vietnamese iced milk coffee with condensation droplets, dark roasted Robusta layered with sweet condensed milk, ice cubes, shot on natural oak cafe table in soft morning light.",
+    originBadge: "Rang mộc Đắk Lắk",
+    recipeTag: "Công thức Độc Quyền",
+    servingNote: "Phục vụ lạnh",
+    flavorNotes:
+      "Hương vị sô-cô-la đen, đắng dịu êm ái, hậu ngọt mật ong đậm đà hòa quyện cùng sữa đặc béo ngậy chuẩn gu Sài Thành.",
+    intensity: "4/5 • Đậm",
+    beanType: "Robusta",
+    processMethod: "Honey",
+    sustainabilityNote: "Hạt canh tác bền vững theo tiêu chuẩn UTZ",
   },
   {
     id: "11111111-1111-4111-8111-111111111105",
@@ -119,6 +157,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
     badge: "Mới",
     imageAlt:
       "Artisanal glass carafe of cold brew coffee infused with fresh orange slice and lemongrass stalk, crystalline clear ice, warm ambient light on polished stone cafe surface.",
+    originBadge: "Ủ lạnh 16 giờ",
+    recipeTag: "Cold Brew Đặc Sản",
+    servingNote: "Phục vụ lạnh",
+    flavorNotes:
+      "Vị thanh mát của cam vàng tươi hòa quyện tinh dầu sả thảo mộc và nền Cold Brew Arabica Cầu Đất êm mượt ít axit.",
+    intensity: "3/5 • Thanh mát",
+    beanType: "Arabica",
+    processMethod: "Cold Steep",
+    sustainabilityNote: "Hạt canh tác bền vững theo tiêu chuẩn UTZ",
   },
   {
     id: "11111111-1111-4111-8111-111111111106",
@@ -134,6 +181,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
       "Nốt hương trái vải thơm ngát cùng chiết xuất cánh hoa hồng Damask chưng cất tự nhiên.",
     imageAlt:
       "Cold brew coffee infused with lychee and dried rose petals in a modern stemless glass, delicate red botanical notes, soft cinematic cafe studio shot.",
+    originBadge: "Ủ lạnh 18 giờ",
+    recipeTag: "Signature Floral",
+    servingNote: "Phục vụ lạnh",
+    flavorNotes:
+      "Sự kết hợp tinh tế giữa vị ngọt thanh của vải thiều chín mọng, hương hoa hồng Damask dịu nhẹ và Cold Brew Arabica.",
+    intensity: "3/5 • Dịu êm",
+    beanType: "Arabica",
+    processMethod: "Cold Steep",
+    sustainabilityNote: "Hạt canh tác bền vững theo tiêu chuẩn UTZ",
   },
   {
     id: "11111111-1111-4111-8111-111111111107",
@@ -149,6 +205,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
       "Shot đôi Arabica Cầu Đất cùng lớp bọt sữa mịn màng, phủ sốt caramel muối béo thơm.",
     imageAlt:
       "Espresso Macchiato in a minimal artisanal ceramic cup with delicate micro-foam, delicate caramel swirl drizzled on top, velvety texture against a clean beige aesthetic background.",
+    originBadge: "Arabica Cầu Đất",
+    recipeTag: "Pha Máy Thủ Công",
+    servingNote: "Phục vụ nóng / lạnh",
+    flavorNotes:
+      "Hương caramel cháy dịu, chua thanh nhẹ của Arabica Cầu Đất kết hợp lớp bọt sữa micro-foam mịn như nhung.",
+    intensity: "3/5 • Cân bằng",
+    beanType: "Arabica",
+    processMethod: "Washed",
+    sustainabilityNote: "Hạt canh tác bền vững theo tiêu chuẩn UTZ",
   },
   {
     id: "11111111-1111-4111-8111-111111111108",
@@ -164,6 +229,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
       "Trà ô long thượng hạng ủ lạnh kết hợp đào miếng giòn ngọt, tinh dầu sả tươi và cam vàng.",
     imageAlt:
       "Vibrant peach iced tea with orange slice and fresh lemongrass in a highball glass, golden hour backlight highlighting juicy peach chunks and glistening condensation.",
+    originBadge: "Ô Long Bảo Lộc",
+    recipeTag: "Trà Trái Cây Tươi",
+    servingNote: "Phục vụ lạnh",
+    flavorNotes:
+      "Nền trà Ô Long Bảo Lộc chát nhẹ hậu ngọt, quyện cùng đào ngâm giòn, cam vàng mọng nước và hương sả tươi mát.",
+    intensity: "2/5 • Thanh dịu",
+    beanType: "Ô Long",
+    processMethod: "Cold Brew Tea",
+    sustainabilityNote: "Nguyên liệu tuyển chọn từ nông trại Bảo Lộc",
   },
   {
     id: "11111111-1111-4111-8111-111111111109",
@@ -179,6 +253,15 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
       "Vỏ ngàn lớp giòn rụm nướng nóng hổi mỗi sáng, dùng bơ Isigny Pháp thơm ngậy cao cấp.",
     imageAlt:
       "Golden crisp French buttery croissant fresh from the oven on a ceramic plate beside hot espresso, flaky layers, artisan cafe bakery lighting.",
+    originBadge: "Bơ Isigny Pháp",
+    recipeTag: "Bánh Nướng Trong Ngày",
+    servingNote: "Phục vụ nóng giòn",
+    flavorNotes:
+      "Lớp vỏ ngàn lớp vàng ươm giòn tan, bên trong mềm ẩm dậy mùi bơ Isigny AOP Pháp thượng hạng.",
+    intensity: "4/5 • Béo thơm",
+    beanType: "Bơ Isigny",
+    processMethod: "Ủ bột 24h",
+    sustainabilityNote: "Nướng tươi mới mỗi sáng tại quầy BrewLite",
   },
 ];
 
@@ -190,7 +273,7 @@ export const MOCK_PRODUCTS_RESPONSE: ProductListResponse = {
 };
 
 /**
- * Dữ liệu Size S/M/L và Topping chuẩn API Contract Mục 4 (để sẵn cho teammate làm Task 4 `GET /products/:id`)
+ * Dữ liệu Size S/M/L và Topping chuẩn API Contract Mục 4 (`GET /products/:id`)
  */
 export const MOCK_PRODUCT_SIZES: ProductSizeOption[] = [
   { size: "S", multiplierPercent: 100 },
@@ -244,7 +327,7 @@ export const MOCK_PRODUCT_DETAILS: Record<string, ProductDetail> =
       {
         ...product,
         sizes: MOCK_PRODUCT_SIZES,
-        toppings: MOCK_TOPPINGS.filter((t) => t.isAvailable),
+        toppings: MOCK_TOPPINGS.filter((t) => t.isAvailable !== false),
       },
     ])
   );

@@ -1,0 +1,34 @@
+// BrewLite - SCRUM-21: Product Catalog migration schema
+// Source: database/schema.dbml (approved ERD)
+// Scope: products, toppings only.
+// Other models and enums are introduced in future migrations.
+// CHECK constraints must be added to the migration SQL.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(255)
+  basePriceVnd BigInt   @map("base_price_vnd")
+  imageUrl     String   @map("image_url") @db.VarChar(2048)
+  stock        Int
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("products")
+}
+
+model Topping {
+  id       String @id @default(uuid()) @db.Uuid
+  code     String @unique @db.VarChar(50)
+  name     String @db.VarChar(255)
+  priceVnd BigInt @map("price_vnd")
+
+  @@map("toppings")
+}

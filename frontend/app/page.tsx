@@ -28,34 +28,29 @@ export default function HomePage() {
   const [priceRange, setPriceRange] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Thông báo nhẹ khi tương tác với nút "Thêm vào giỏ" / "+" (chưa thuộc scope Sprint này)
-  const [toastInfo, setToastInfo] = useState<{
-    visible: boolean;
-    productName: string;
-  }>({
-    visible: false,
-    productName: "",
-  });
+  // Thông báo khi tương tác với nút "Thêm vào giỏ" hoặc ô "Giỏ hàng"
+  const [toastVisible, setToastVisible] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleAddToCart = (product: ProductListItem) => {
+  const showCartUnderConstructionNotice = () => {
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
     }
-    setToastInfo({
-      visible: true,
-      productName: product.name,
-    });
+    setToastVisible(true);
     toastTimerRef.current = setTimeout(() => {
-      setToastInfo((prev) => ({ ...prev, visible: false }));
-    }, 2500);
+      setToastVisible(false);
+    }, 3000);
+  };
+
+  const handleAddToCart = (_product: ProductListItem) => {
+    showCartUnderConstructionNotice();
   };
 
   const handleDismissToast = () => {
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
     }
-    setToastInfo((prev) => ({ ...prev, visible: false }));
+    setToastVisible(false);
   };
 
   // Lọc và sắp xếp danh sách sản phẩm theo đúng trường chuẩn của API Contract (`basePriceVnd`, `name`, `id`, `isAvailable`)
@@ -120,6 +115,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface">
       <Header
+        onCartClick={showCartUnderConstructionNotice}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeNav="thuc-don"
@@ -177,12 +173,12 @@ export default function HomePage() {
         </div>
       </main>
 
-      {/* Toast thông báo tính năng đang hoàn thiện */}
+      {/* Toast thông báo mục giỏ hàng đang trong quá trình xây dựng */}
       <div
         role="status"
         aria-live="polite"
         className={`fixed bottom-6 right-6 z-50 bg-on-surface text-surface-container-lowest px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 transition-all duration-300 ${
-          toastInfo.visible
+          toastVisible
             ? "translate-y-0 opacity-100"
             : "translate-y-8 opacity-0 pointer-events-none"
         }`}
@@ -190,17 +186,9 @@ export default function HomePage() {
         <span className="material-symbols-outlined text-[20px] text-secondary-fixed">
           info
         </span>
-        <div className="flex flex-col">
-          <span className="font-title-sm text-title-sm text-surface-container-lowest">
-            Tính năng đang hoàn thiện
-          </span>
-          {toastInfo.productName && (
-            <span className="font-body-sm text-body-sm text-surface-variant">
-              Giỏ hàng cho món &ldquo;{toastInfo.productName}&rdquo; sẽ sớm ra
-              mắt.
-            </span>
-          )}
-        </div>
+        <span className="font-title-sm text-title-sm text-surface-container-lowest">
+          Mục giỏ hàng hiện đang trong quá trình xây dựng
+        </span>
         <button
           type="button"
           onClick={handleDismissToast}

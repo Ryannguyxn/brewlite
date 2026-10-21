@@ -11,6 +11,7 @@ import {
 
 interface HeaderProps {
   cartCount?: number;
+  onCartClick?: () => void;
   searchQuery?: string;
   onSearchChange?: (value: string) => void;
   activeNav?: "thuc-don" | "khuyen-mai" | "lich-su-don-hang" | "ve-brewlite";
@@ -20,6 +21,7 @@ interface HeaderProps {
 
 export default function Header({
   cartCount = 0,
+  onCartClick,
   searchQuery = "",
   onSearchChange,
   activeNav = "thuc-don",
@@ -113,7 +115,7 @@ export default function Header({
         <div className="flex items-center gap-space-md flex-shrink-0">
           <button
             id="header-cart-btn"
-            onClick={() => {}}
+            onClick={() => onCartClick?.()}
             className="relative flex items-center gap-space-xs px-3.5 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface transition-all cursor-pointer"
             type="button"
           >

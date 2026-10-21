@@ -183,3 +183,11 @@
   animation: floatPlusOne 0.85s ease-out forwards;
 }
 
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}

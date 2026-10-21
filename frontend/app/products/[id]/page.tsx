@@ -5,11 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import ProductDetailModal, {
-  type AddToCartSelectionPayload,
-} from "@/components/ProductDetailModal";
+import ProductDetailModal from "@/components/ProductDetailModal";
 import {
-  formatVnd,
   getCatalogData,
   lookupProductDetailById,
 } from "@/services/api.service";
@@ -32,19 +29,8 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   // Tra cứu chi tiết sản phẩm theo ID (trả về status 200, 400 hoặc 404 theo API Contract)
   const lookupResult = useMemo(() => lookupProductDetailById(id), [id]);
 
-  // State lưu số lượng món trên biểu tượng Giỏ hàng ở Header
-  const [cartCount, setCartCount] = useState<number>(3);
-
-  // State hiển thị thông báo (Toast) góc dưới phải khi bấm "Thêm vào giỏ hàng"
-  const [toastData, setToastData] = useState<{
-    visible: boolean;
-    title: string;
-    subtitle: string;
-  }>({
-    visible: false,
-    title: "",
-    subtitle: "",
-  });
+  // State hiển thị thông báo (Toast) góc dưới phải khi bấm "Thêm vào giỏ hàng" hoặc bấm vào ô "Giỏ hàng"
+  const [toastVisible, setToastVisible] = useState<boolean>(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Hàm đóng cửa sổ chi tiết và điều hướng quay lại trang Product Gallery (/)
@@ -52,35 +38,33 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     router.push("/");
   };
 
-  // Hàm nhận dữ liệu món vừa chọn từ ProductDetailModal khi nhấn "Thêm vào giỏ hàng"
-  const handleAddToCart = (payload: AddToCartSelectionPayload) => {
-    setCartCount((prev) => prev + payload.quantity);
-
+  // Hàm hiển thị thông báo: "Mục giỏ hàng hiện đang trong quá trình xây dựng"
+  const showCartUnderConstructionNotice = () => {
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
     }
 
-    const toppingSummary =
-      payload.toppings.length > 0
-        ? ` • Topping: ${payload.toppings.map((t) => t.name).join(", ")}`
-        : "";
-
-    setToastData({
-      visible: true,
-      title: `Đã thêm ${payload.quantity}x ${payload.productName}`,
-      subtitle: `Size ${payload.size} (${payload.sizeMultiplierPercent}%)${toppingSummary} • ${formatVnd(payload.lineTotalVnd)}`,
-    });
+    setToastVisible(true);
 
     toastTimerRef.current = setTimeout(() => {
-      setToastData((prev) => ({ ...prev, visible: false }));
+      setToastVisible(false);
     }, 3000);
+  };
+
+  // Hàm đóng thông báo (Toast) thủ công
+  const handleDismissToast = () => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    setToastVisible(false);
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface antialiased">
       {/* Đây là thanh Header điều hướng trên cùng (dùng chung với trang Product Gallery) */}
       <Header
-        cartCount={cartCount}
+        cartCount={0}
+        onCartClick={showCartUnderConstructionNotice}
         activeNav="thuc-don"
         siteConfig={siteConfig}
       />
@@ -137,7 +121,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             <ProductDetailModal
               product={lookupResult.data}
               onClose={handleCloseModal}
-              onAddToCart={handleAddToCart}
+              onAddToCart={showCartUnderConstructionNotice}
             />
           ) : (
             // Đây là khung thông báo lỗi khi URL truyền ID sai định dạng UUID (400) hoặc không tìm thấy sản phẩm (404)
@@ -176,27 +160,30 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         </div>
       </main>
 
-      {/* Đây là hộp thông báo nổi (Toast) xác nhận khi thêm sản phẩm vào giỏ hàng thành công */}
+      {/* Đây là hộp thông báo nổi (Toast) khi nhấn "Thêm vào giỏ hàng" hoặc nhấn vào ô "Giỏ hàng" */}
       <div
         role="status"
         aria-live="polite"
         className={`fixed bottom-6 right-6 z-[60] bg-on-surface text-surface-container-lowest px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 transition-all duration-300 ${
-          toastData.visible
+          toastVisible
             ? "translate-y-0 opacity-100"
             : "translate-y-8 opacity-0 pointer-events-none"
         }`}
       >
         <span className="material-symbols-outlined text-[20px] text-secondary-fixed">
-          check_circle
+          info
         </span>
-        <div className="flex flex-col">
-          <span className="font-title-sm text-title-sm text-surface-container-lowest">
-            {toastData.title}
-          </span>
-          <span className="font-body-sm text-body-sm text-surface-variant">
-            {toastData.subtitle}
-          </span>
-        </div>
+        <span className="font-title-sm text-title-sm text-surface-container-lowest">
+          Mục giỏ hàng hiện đang trong quá trình xây dựng
+        </span>
+        <button
+          type="button"
+          onClick={handleDismissToast}
+          aria-label="Đóng thông báo"
+          className="ml-2 p-1 rounded-lg text-surface-variant hover:text-surface-container-lowest transition-colors cursor-pointer"
+        >
+          <span className="material-symbols-outlined text-[18px]">close</span>
+        </button>
       </div>
 
       {/* Đây là chân trang Footer (dùng chung với trang Product Gallery) */}

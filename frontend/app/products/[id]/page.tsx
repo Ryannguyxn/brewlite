@@ -1,14 +1,22 @@
 "use client";
 
-import React, { use, useMemo, useRef, useState } from "react";
+import React, {
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import ProductDetailModal from "@/components/ProductDetailModal";
 import {
+  fetchProductDetailById,
   getCatalogData,
-  lookupProductDetailById,
+  type ProductDetailLookupResult,
 } from "@/services/api.service";
 
 interface ProductDetailPageProps {
@@ -20,14 +28,67 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const { id } = use(params);
   const router = useRouter();
 
-  // Lấy dữ liệu danh mục và sản phẩm từ mock-data dùng chung với trang Product Gallery
+  // Lấy dữ liệu cấu hình chung để hiển thị Header, Footer và lớp nền mờ phía sau Modal
   const { products, categories, siteConfig } = useMemo(
     () => getCatalogData(),
     []
   );
 
-  // Tra cứu chi tiết sản phẩm theo ID (trả về status 200, 400 hoặc 404 theo API Contract)
-  const lookupResult = useMemo(() => lookupProductDetailById(id), [id]);
+  // ==========================================================================
+  // PHẦN 1: QUẢN LÝ STATE GỌI API `GET /products/:id` (LOADING / ERROR / NOT-FOUND / 200 OK)
+  // ==========================================================================
+
+  // State kiểm soát trạng thái đang tải dữ liệu từ API (Loading State)
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // State lưu kết quả trả về từ API `GET /products/:id` (200 OK | 400 Bad Request | 404 Not Found | 500 Error)
+  const [lookupResult, setLookupResult] =
+    useState<ProductDetailLookupResult | null>(null);
+
+  // Bộ đếm giúp kích hoạt gọi lại API khi người dùng bấm nút "Thử tải lại" (Retry) ở màn hình Error
+  const [retryTrigger, setRetryTrigger] = useState<number>(0);
+
+  // Hàm kích hoạt tải lại dữ liệu chi tiết sản phẩm từ API
+  const handleRetry = useCallback(() => {
+    setIsLoading(true);
+    setRetryTrigger((prev) => prev + 1);
+  }, []);
+
+  // Gọi API `GET /products/:id` mỗi khi `id` thay đổi hoặc khi người dùng nhấn "Thử tải lại"
+  useEffect(() => {
+    const abortController = new AbortController();
+    let isMounted = true;
+
+    setIsLoading(true);
+
+    fetchProductDetailById(id, abortController.signal)
+      .then((result) => {
+        if (!isMounted) return;
+        setLookupResult(result);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        if (!isMounted || abortController.signal.aborted) return;
+        setLookupResult({
+          status: 500,
+          error: "Internal Server Error",
+          message:
+            err instanceof Error
+              ? err.message
+              : "Đã xảy ra lỗi không xác định khi tải thông tin sản phẩm.",
+        });
+        setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+    };
+  }, [id, retryTrigger]);
+
+  // ==========================================================================
+  // PHẦN 2: QUẢN LÝ THÔNG BÁO GIỎ HÀNG & ĐIỀU HƯỚNG
+  // ==========================================================================
 
   // State hiển thị thông báo (Toast) góc dưới phải khi bấm "Thêm vào giỏ hàng" hoặc bấm vào ô "Giỏ hàng"
   const [toastVisible, setToastVisible] = useState<boolean>(false);
@@ -59,6 +120,9 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     setToastVisible(false);
   };
 
+  // ==========================================================================
+  // PHẦN 3: GIAO DIỆN HIỂN THỊ (LOADING -> 200 OK / 404 NOT FOUND / 400 BAD REQUEST / 500 ERROR)
+  // ==========================================================================
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface antialiased">
       {/* Đây là thanh Header điều hướng trên cùng (dùng chung với trang Product Gallery) */}
@@ -115,17 +179,103 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             </div>
           </div>
 
-          {/* Đây là phần hiển thị Hộp thoại Chi tiết sản phẩm (nếu hợp lệ 200 OK) hoặc Bảng thông báo lỗi (400 / 404) */}
-          {lookupResult.status === 200 ? (
-            // Đây là Component Chi tiết sản phẩm chính
+          {/* ------------------------------------------------------------------
+              TRẠNG THÁI 1: LOADING STATE (ĐANG GỌI API `GET /products/:id`)
+             ------------------------------------------------------------------ */}
+          {isLoading ? (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label="Đang tải chi tiết sản phẩm"
+              id="product-detail-loading"
+              className="fixed inset-x-0 top-20 bottom-0 z-40 flex items-center justify-center p-2 sm:p-3 bg-on-surface/50 backdrop-blur-md"
+            >
+              {/* Khung Skeleton 2 cột mô phỏng bố cục Modal Chi tiết sản phẩm */}
+              <div className="relative w-full max-w-[760px] bg-surface-container-lowest rounded-xl shadow-2xl overflow-hidden flex flex-col animate-pulse">
+                {/* Nút đóng (X) vẫn hoạt động trong lúc đang tải */}
+                <button
+                  aria-label="Đóng cửa sổ và quay lại thực đơn"
+                  onClick={handleCloseModal}
+                  className="absolute top-2.5 right-2.5 z-20 w-8 h-8 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant flex items-center justify-center transition-colors cursor-pointer"
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    close
+                  </span>
+                </button>
+
+                <div className="grid grid-cols-12">
+                  {/* Skeleton Cột Trái (Ảnh & Flavor Notes) */}
+                  <div className="col-span-12 md:col-span-5 bg-surface-container-low p-3.5 flex flex-col justify-between gap-3">
+                    <div className="w-full h-[195px] rounded-lg bg-surface-container-high" />
+                    <div className="bg-surface-container-lowest p-3 rounded-lg flex flex-col gap-2">
+                      <div className="h-4 w-2/3 bg-surface-container-high rounded" />
+                      <div className="h-3 w-full bg-surface-container rounded" />
+                      <div className="h-3 w-4/5 bg-surface-container rounded" />
+                      <div className="grid grid-cols-3 gap-1.5 mt-1">
+                        <div className="h-9 bg-surface-container rounded" />
+                        <div className="h-9 bg-surface-container rounded" />
+                        <div className="h-9 bg-surface-container rounded" />
+                      </div>
+                    </div>
+                    <div className="h-3 w-3/4 bg-surface-container-high rounded" />
+                  </div>
+
+                  {/* Skeleton Cột Phải (Tên SP, Giá, Size, Topping & Nút bấm) */}
+                  <div className="col-span-12 md:col-span-7 p-4 flex flex-col justify-between gap-3 bg-surface-container-lowest">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <div className="h-4 w-32 bg-surface-container rounded-full" />
+                        <div className="h-6 w-3/4 bg-surface-container-high rounded" />
+                        <div className="h-5 w-28 bg-surface-container-high rounded" />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="h-14 bg-surface-container-low rounded-lg" />
+                        <div className="h-14 bg-surface-container-low rounded-lg" />
+                        <div className="h-14 bg-surface-container-low rounded-lg" />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <div className="h-9 bg-surface-container-low rounded-lg" />
+                        <div className="h-9 bg-surface-container-low rounded-lg" />
+                        <div className="h-9 bg-surface-container-low rounded-lg" />
+                      </div>
+
+                      <div className="flex items-center justify-center gap-2 py-2 text-primary font-label-md text-label-md">
+                        <span className="material-symbols-outlined text-[18px] animate-spin">
+                          progress_activity
+                        </span>
+                        <span>Đang tải thông tin sản phẩm từ máy chủ...</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-surface-container flex items-center justify-between gap-3">
+                      <div className="h-9 w-24 bg-surface-container-low rounded-lg" />
+                      <div className="h-10 flex-1 bg-surface-container-high rounded-lg" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : lookupResult?.status === 200 ? (
+            /* ----------------------------------------------------------------
+               TRẠNG THÁI 2: SUCCESS STATE (200 OK — HIỂN THỊ MODAL CHI TIẾT SP)
+               ---------------------------------------------------------------- */
             <ProductDetailModal
               product={lookupResult.data}
               onClose={handleCloseModal}
               onAddToCart={showCartUnderConstructionNotice}
             />
-          ) : (
-            // Đây là khung thông báo lỗi khi URL truyền ID sai định dạng UUID (400) hoặc không tìm thấy sản phẩm (404)
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-on-surface/50 backdrop-blur-md">
+          ) : lookupResult?.status === 404 || lookupResult?.status === 400 ? (
+            /* ----------------------------------------------------------------
+               TRẠNG THÁI 3: NOT-FOUND (404) & BAD-REQUEST (400 UUID KHÔNG HỢP LỆ)
+               ---------------------------------------------------------------- */
+            <div
+              role="alert"
+              id="product-detail-not-found"
+              className="fixed inset-x-0 top-20 bottom-0 z-40 flex items-center justify-center p-4 bg-on-surface/50 backdrop-blur-md"
+            >
               <div className="w-full max-w-md bg-surface-container-lowest rounded-xl shadow-2xl p-space-xl text-center flex flex-col items-center gap-space-md">
                 <div className="w-14 h-14 rounded-full bg-error-container text-on-error-container flex items-center justify-center">
                   <span className="material-symbols-outlined text-[28px]">
@@ -143,7 +293,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                 <p className="font-body-md text-body-md text-on-surface-variant">
                   {lookupResult.status === 400
                     ? "Định dạng Product ID trên đường dẫn không phải là UUID hợp lệ (400 Bad Request)."
-                    : "Sản phẩm bạn đang tìm không tồn tại hoặc đã ngừng phục vụ (404 Not Found)."}
+                    : "Sản phẩm bạn đang tìm không tồn tại trong hệ thống hoặc đã ngừng phục vụ (404 Not Found)."}
                 </p>
                 <Link
                   href="/"
@@ -154,6 +304,59 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                   </span>
                   Quay lại Thực đơn
                 </Link>
+              </div>
+            </div>
+          ) : (
+            /* ----------------------------------------------------------------
+               TRẠNG THÁI 4: ERROR STATE (500 SERVER ERROR HOẶC LỖI KẾT NỐI MẠNG)
+               ---------------------------------------------------------------- */
+            <div
+              role="alert"
+              id="product-detail-error"
+              className="fixed inset-x-0 top-20 bottom-0 z-40 flex items-center justify-center p-4 bg-on-surface/50 backdrop-blur-md"
+            >
+              <div className="w-full max-w-md bg-surface-container-lowest rounded-xl shadow-2xl p-space-xl text-center flex flex-col items-center gap-space-md">
+                <div className="w-14 h-14 rounded-full bg-error-container text-on-error-container flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[28px]">
+                    cloud_off
+                  </span>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-surface-container text-outline font-label-md text-label-md">
+                  HTTP {lookupResult?.status ?? 500} •{" "}
+                  {lookupResult?.error ?? "Internal Server Error"}
+                </span>
+                <h2 className="font-headline-md text-headline-md text-on-surface">
+                  Không thể tải thông tin sản phẩm
+                </h2>
+                <p className="font-body-md text-body-md text-on-surface-variant">
+                  {lookupResult?.message ||
+                    "Đã xảy ra lỗi khi kết nối tới máy chủ Backend (GET /products/:id). Vui lòng thử lại."}
+                </p>
+                <div className="flex items-center gap-3 mt-2 flex-wrap justify-center">
+                  {/* Nút Thử tải lại (gọi lại API GET /products/:id) */}
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    id="btn-retry-product-detail"
+                    className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-on-primary font-title-sm text-title-sm shadow-md transition-colors inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      refresh
+                    </span>
+                    Thử tải lại
+                  </button>
+
+                  {/* Nút Quay lại Thực đơn */}
+                  <Link
+                    href="/"
+                    className="px-5 py-2.5 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface font-title-sm text-title-sm transition-colors inline-flex items-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      arrow_back
+                    </span>
+                    Quay lại Thực đơn
+                  </Link>
+                </div>
               </div>
             </div>
           )}

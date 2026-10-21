@@ -1,41 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="640"
-     height="640"
-     viewBox="0 0 640 640">
-
-  <rect width="640" height="640" fill="#F5EDE3"/>
-
-  <circle cx="320" cy="282" r="166" fill="#E7D2B9"/>
-
-  <path d="M215 220h210v170c0 48-36 84-84 84h-42c-48 0-84-36-84-84V220z"
-        fill="#9C6B48"/>
-
-  <path d="M425 250h28c65 0 65 110 0 110h-28"
-        fill="none"
-        stroke="#9C6B48"
-        stroke-width="25"/>
-
-  <path d="M277 185c-22-31 19-48 0-80M335 185c-22-31 19-48 0-80"
-        fill="none"
-        stroke="#9C6B48"
-        stroke-width="12"
-        stroke-linecap="round"/>
-
-  <text x="320" y="554"
-        font-family="Arial, sans-serif"
-        font-size="38"
-        font-weight="bold"
-        fill="#65452E"
-        text-anchor="middle">
-    BrewLite
-  </text>
-
-  <text x="320" y="586"
-        font-family="Arial, sans-serif"
-        font-size="18"
-        fill="#80644F"
-        text-anchor="middle">
-    Product Image
-  </text>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none">
+  <rect width="400" height="300" fill="#F7F3ED"/>
+  <circle cx="200" cy="145" r="78" fill="#EBE8E2"/>
+  <path d="M160 120H228V162C228 180.778 212.778 196 194 196C175.222 196 160 180.778 160 162V120Z" fill="#8A4C22"/>
+  <path d="M228 128H240C248.837 128 256 135.163 256 144C256 152.837 248.837 160 240 160H228V128Z" stroke="#8A4C22" stroke-width="8"/>
+  <path d="M148 208H240" stroke="#8A4C22" stroke-width="8" stroke-linecap="round"/>
+  <path d="M180 96C180 88 186 84 186 76" stroke="#A86338" stroke-width="5" stroke-linecap="round"/>
+  <path d="M198 96C198 88 204 84 204 76" stroke="#A86338" stroke-width="5" stroke-linecap="round"/>
+  <path d="M216 96C216 88 222 84 222 76" stroke="#A86338" stroke-width="5" stroke-linecap="round"/>
+  <text x="200" y="250" text-anchor="middle" fill="#53443B" font-family="sans-serif" font-size="16" font-weight="600">BrewLite Handcrafted Coffee</text>
 </svg>

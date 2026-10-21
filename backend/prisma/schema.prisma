@@ -62,6 +62,14 @@ enum CouponType {
   @@map("coupon_type")
 }
 
+enum RedemptionStatus {
+  HELD
+  CONSUMED
+  RELEASED
+
+  @@map("redemption_status")
+}
+
 model User {
   id            String   @id @default(uuid()) @db.Uuid
   email         String   @unique @db.VarChar(255)
@@ -69,7 +77,7 @@ model User {
   fullName      String?  @map("full_name") @db.VarChar(255)
   loyaltyPoints Int      @default(0) @map("loyalty_points")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
+  couponRedemptions CouponRedemption[]
   orders Order[]
 
   @@map("users")
@@ -87,6 +95,7 @@ model Coupon {
   usageLimit       Int        @map("usage_limit")
   perUserLimit     Int        @default(1) @map("per_user_limit")
   activeUsageCount Int        @default(0) @map("active_usage_count")
+  redemptions CouponRedemption[]
 
   orders Order[]
 
@@ -108,6 +117,7 @@ model Order {
   expiresAt          DateTime    @map("expires_at") @db.Timestamptz(6)
   paidAt             DateTime?   @map("paid_at") @db.Timestamptz(6)
   cancelledAt        DateTime?   @map("cancelled_at") @db.Timestamptz(6)
+  couponRedemption CouponRedemption?
 
   user   User        @relation(fields: [userId], references: [id], onDelete: Restrict)
   coupon Coupon?     @relation(fields: [couponId], references: [id], onDelete: Restrict)
@@ -154,4 +164,26 @@ model OrderItemTopping {
   @@unique([orderItemId, toppingId], map: "uq_order_item_topping")
   @@unique([orderItemId, toppingCodeSnapshot], map: "uq_order_item_topping_code")
   @@map("order_item_toppings")
+}
+
+
+model CouponRedemption {
+  id         String           @id @default(uuid()) @db.Uuid
+  couponId   String           @map("coupon_id") @db.Uuid
+  orderId    String           @unique(map: "uq_coupon_redemptions_order_id") @map("order_id") @db.Uuid
+  userId     String           @map("user_id") @db.Uuid
+
+  status     RedemptionStatus @default(HELD)
+  heldAt     DateTime         @default(now()) @map("held_at") @db.Timestamptz(6)
+  consumedAt DateTime?        @map("consumed_at") @db.Timestamptz(6)
+  releasedAt DateTime?        @map("released_at") @db.Timestamptz(6)
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([couponId, status], map: "ix_coupon_redemptions_coupon_status")
+  @@index([userId, couponId, status], map: "ix_coupon_redemptions_user_coupon_status")
+  @@map("coupon_redemptions")
 }

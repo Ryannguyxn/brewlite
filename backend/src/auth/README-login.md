@@ -1,13 +1,15 @@
 # SCRUM-39 — Login and JWT
 
 Public endpoint: `POST /auth/login`, API Contract v2 section 7.
-This branch builds on SCRUM-38 at e8dff67. If Register is not merged yet,
+This branch includes dev at a074954 (SCRUM-37 merged) and builds on the
+Argon2id update to SCRUM-38 at e8dff67. If Register is not merged yet,
 review this PR against SCRUM-38 first, then target dev after Register merges.
 Do not apply this patch on a Product-only branch.
 
 ## Database dependency
 
-dev at aac7f14 already contains the User schema and migrations from SCRUM-36.
+dev already contains the User schema and migrations from SCRUM-36 and the
+SCRUM-37 verification script merged in PR #59 (a074954).
 Login needs User.id, unique email and passwordHash. No additional migration is
 required by SCRUM-39. SCRUM-37 at 56d7791 adds a SQL verification script only;
 it does not introduce a new runtime schema dependency for Login.
@@ -101,5 +103,51 @@ New tests exercise real Argon2id, JWT signing/verification, token lifetime,
 Register-to-Login hash compatibility, normalization, invalid credentials,
 validation, safe errors, secret validation and a test-only guarded route with
 missing, malformed, expired, wrong-key, wrong-algorithm and invalid-claim tokens.
-HTTP tests mock PrismaService and do not contact PostgreSQL. Real database
-Login/migrations still need a local smoke test using the commands above.
+The 70 HTTP tests mock PrismaService. A separate suite of 6 integration tests
+uses the real PrismaService and its PostgreSQL driver, with no database mocks.
+
+Additional local verification used a temporary PGlite 0.5.11 instance (embedded
+PostgreSQL via TCP, not a standalone production PostgreSQL server). All four
+shared migrations applied with Prisma migrate deploy. The repository seed
+created 8 products and 5 toppings, and the SCRUM-37 SQL relation/rollback script
+passed. All 6 integration tests passed against that database, including
+actual unique-email violations, persisted Argon2id verification, 7/8-character
+boundaries, ASCII/Unicode passwords differing after byte 72, and Login → Guard.
+PGlite dependencies are temporary tooling only and are not project dependencies.
+The seed was executed with node --import tsx to avoid the runtime's unsupported
+tsx CLI IPC socket; the repository's seed file and configuration are unchanged.
+
+## Run integration tests on standalone PostgreSQL
+
+Create a separate database such as brewlite_migration_test in pgAdmin.
+Set AUTH_TEST_DATABASE_URL in your local backend/.env to its connection URL.
+Keep DATABASE_URL pointing to your ordinary local database. Example test URL
+(replace the password and port with your local values):
+
+```dotenv
+AUTH_TEST_DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5433/brewlite_migration_test?schema=public
+```
+
+To migrate that test database from PowerShell without overwriting your .env:
+
+```powershell
+$savedDatabaseUrl = $env:DATABASE_URL
+$env:DATABASE_URL = "postgresql://postgres:YOUR_PASSWORD@localhost:5433/brewlite_migration_test?schema=public"
+try {
+  npm run db:migrate
+  if ($LASTEXITCODE -ne 0) { throw "Test database migration failed" }
+} finally {
+  if ($null -eq $savedDatabaseUrl) {
+    Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+  } else {
+    $env:DATABASE_URL = $savedDatabaseUrl
+  }
+}
+npm run test:integration
+```
+
+The test route exists only in the integration application, not production.
+The suite creates users with a unique run UUID and removes only those users
+afterwards. It never resets the database, deletes unrelated users or seeds
+over existing products. Re-run this suite on your normal PostgreSQL installation
+to validate that environment before team acceptance.

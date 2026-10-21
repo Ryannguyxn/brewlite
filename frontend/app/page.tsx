@@ -1,76 +1,62 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import HeroBanner from "@/components/HeroBanner";
 import CategoryFilterBar from "@/components/CategoryFilterBar";
 import ProductCard from "@/components/ProductCard";
 
-import {
-  MOCK_CATALOG_PRODUCTS,
-  MOCK_CATEGORIES,
-  MOCK_HERO_BANNER,
-  MOCK_PRICE_FILTER_OPTIONS,
-  MOCK_SITE_CONFIG,
-  MOCK_SORT_OPTIONS,
-  type CategoryId,
-  type CategoryOption,
-  type HeroBannerData,
-  type ProductListItem,
-  type SelectOption,
-  type SiteConfigData,
-} from "@/mock-data";
-import { fetchCatalogData } from "@/services/api.service";
+import { type CategoryId, type ProductListItem } from "@/mock-data";
+import { getCatalogData } from "@/services/api.service";
 
 export default function HomePage() {
   // ==========================================================================
-  // PHẦN 1: QUẢN LÝ STATE & GỌI DỮ LIỆU TỪ SERVICE (CHUẨN API CONTRACT v1.0)
+  // PHẦN 1: QUẢN LÝ STATE & DỮ LIỆU MOCK (SPRINT 1 — SCRUM-26)
   // ==========================================================================
-  const [products, setProducts] = useState<ProductListItem[]>(
-    MOCK_CATALOG_PRODUCTS
-  );
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const [categories, setCategories] =
-    useState<CategoryOption[]>(MOCK_CATEGORIES);
-  const [sortOptions, setSortOptions] =
-    useState<SelectOption[]>(MOCK_SORT_OPTIONS);
-  const [priceFilterOptions, setPriceFilterOptions] = useState<SelectOption[]>(
-    MOCK_PRICE_FILTER_OPTIONS
-  );
-  const [heroBanner, setHeroBanner] =
-    useState<HeroBannerData>(MOCK_HERO_BANNER);
-  const [siteConfig, setSiteConfig] =
-    useState<SiteConfigData>(MOCK_SITE_CONFIG);
+  const {
+    products,
+    categories,
+    sortOptions,
+    priceFilterOptions,
+    heroBanner,
+    siteConfig,
+  } = useMemo(() => getCatalogData(), []);
 
   const [activeCategory, setActiveCategory] = useState<CategoryId>("all");
   const [sortBy, setSortBy] = useState("popular");
   const [priceRange, setPriceRange] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const loadMenuData = useCallback(async () => {
-    setErrorMessage(null);
-    try {
-      // Gọi fetchCatalogData() -> bên trong gọi getProducts() (`GET /products` trả về `{ items: ProductListItem[] }`)
-      const catalogRes = await fetchCatalogData();
-      setProducts(catalogRes.products);
-      setCategories(catalogRes.categories);
-      setSortOptions(catalogRes.sortOptions);
-      setPriceFilterOptions(catalogRes.priceFilterOptions);
-      setHeroBanner(catalogRes.heroBanner);
-      setSiteConfig(catalogRes.siteConfig);
-    } catch {
-      setErrorMessage("Không thể tải thực đơn, vui lòng thử lại");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Thông báo nhẹ khi tương tác với nút "Thêm vào giỏ" / "+" (chưa thuộc scope Sprint này)
+  const [toastInfo, setToastInfo] = useState<{
+    visible: boolean;
+    productName: string;
+  }>({
+    visible: false,
+    productName: "",
+  });
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    loadMenuData();
-  }, [loadMenuData]);
+  const handleAddToCart = (product: ProductListItem) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    setToastInfo({
+      visible: true,
+      productName: product.name,
+    });
+    toastTimerRef.current = setTimeout(() => {
+      setToastInfo((prev) => ({ ...prev, visible: false }));
+    }, 2500);
+  };
+
+  const handleDismissToast = () => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    setToastInfo((prev) => ({ ...prev, visible: false }));
+  };
 
   // Lọc và sắp xếp danh sách sản phẩm theo đúng trường chuẩn của API Contract (`basePriceVnd`, `name`, `id`, `isAvailable`)
   const filteredProducts = useMemo(() => {
@@ -173,50 +159,57 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Trạng thái Lỗi khi không gọi được GET /products (AC-US-CAT-01-03 & API Contract Mục 3.6) */}
-            {errorMessage && (
-              <div className="p-space-xl rounded-xl bg-surface-container-lowest shadow-sm text-center flex flex-col items-center justify-center gap-space-sm mb-space-lg">
-                <span className="material-symbols-outlined text-[36px] text-error">
-                  error
-                </span>
-                <p className="font-title-md text-title-md text-on-surface">
-                  {errorMessage}
-                </p>
-                <button
-                  type="button"
-                  onClick={loadMenuData}
-                  className="mt-2 px-5 py-2 rounded-lg bg-primary text-on-primary font-label-lg text-label-lg hover:bg-primary-container transition-colors cursor-pointer"
-                >
-                  Thử lại
-                </button>
-              </div>
-            )}
-
-            {/* Trạng thái Empty khi thực đơn trống (AC-US-CAT-01-02 & API Contract Mục 3.4) */}
-            {!loading && !errorMessage && products.length === 0 && (
-              <div className="p-space-xl rounded-xl bg-surface-container-lowest shadow-sm text-center">
-                <p className="font-title-md text-title-md text-on-surface">
-                  Hiện chưa có sản phẩm nào trong thực đơn
-                </p>
-              </div>
-            )}
-
             {/* Danh sách thẻ sản phẩm (Product Grid) */}
-            {!errorMessage && filteredProducts.length > 0 && (
-              <div className="grid grid-cols-12 gap-gutter" id="menu-grid">
-                {filteredProducts.map((product) => (
-                  <div
-                    key={product.id}
-                    className="col-span-12 sm:col-span-6 lg:col-span-3"
-                  >
-                    <ProductCard product={product} />
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="grid grid-cols-12 gap-gutter" id="menu-grid">
+              {filteredProducts.map((product) => (
+                <div
+                  key={product.id}
+                  className="col-span-12 sm:col-span-6 lg:col-span-3"
+                >
+                  <ProductCard
+                    product={product}
+                    onAddToCart={handleAddToCart}
+                  />
+                </div>
+              ))}
+            </div>
           </section>
         </div>
       </main>
+
+      {/* Toast thông báo tính năng đang hoàn thiện */}
+      <div
+        role="status"
+        aria-live="polite"
+        className={`fixed bottom-6 right-6 z-50 bg-on-surface text-surface-container-lowest px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 transition-all duration-300 ${
+          toastInfo.visible
+            ? "translate-y-0 opacity-100"
+            : "translate-y-8 opacity-0 pointer-events-none"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[20px] text-secondary-fixed">
+          info
+        </span>
+        <div className="flex flex-col">
+          <span className="font-title-sm text-title-sm text-surface-container-lowest">
+            Tính năng đang hoàn thiện
+          </span>
+          {toastInfo.productName && (
+            <span className="font-body-sm text-body-sm text-surface-variant">
+              Giỏ hàng cho món &ldquo;{toastInfo.productName}&rdquo; sẽ sớm ra
+              mắt.
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleDismissToast}
+          aria-label="Đóng thông báo"
+          className="ml-2 p-1 rounded-lg text-surface-variant hover:text-surface-container-lowest transition-colors cursor-pointer"
+        >
+          <span className="material-symbols-outlined text-[18px]">close</span>
+        </button>
+      </div>
 
       <Footer siteConfig={siteConfig} />
     </div>

@@ -10,7 +10,7 @@ import type {
 
 // ============================================================================
 // MOCK DATA SẢN PHẨM THỰC ĐƠN:
-// - Giữ nguyên toàn bộ hình ảnh sản phẩm (URL ảnh gốc từ trang trước)
+// - Giữ nguyên toàn bộ hình ảnh sản phẩm (URL ảnh gốc đúng loại sản phẩm)
 // - Trường dữ liệu tuân thủ đúng API Contract v1.0 (`GET /products`):
 //   + `id`: UUID hợp lệ
 //   + `name`: Tên sản phẩm
@@ -20,7 +20,7 @@ import type {
 // ============================================================================
 
 export const MOCK_CATEGORIES: CategoryOption[] = [
-  { id: "all", label: "Tất cả (8)" },
+  { id: "all", label: "Tất cả (9)" },
   { id: "traditional", label: "Cà phê truyền thống" },
   { id: "espresso", label: "Espresso & Cold Brew" },
   { id: "tea", label: "Trà & Macchiato" },
@@ -61,16 +61,16 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
     id: "11111111-1111-4111-8111-111111111102",
     name: "Cà Phê Đen Đá Cầu Đất",
     imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuD2GIXbK_gjHDiFDwZkAZAs73C3wK4ab5Lmc5cE75nVHuWfcEhLuEvSSVghnIHrnBle5wifQ_WjdQEJ2_7ZjgUkayLlCY2-YHiHFWHNGzMfraKlZ3FawYmqKam8sGgMRhLqB5AHBd8l1hgTdDQ6c0xDricuCmnTpGO5Sulyvnc8iiwpAce1xHH3aHsDyH6K5_QFaqpjkosbyIuxKlYgLpFutCcXtoPsBMsNXNT3laP64_5AcdFkdaCx",
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuBWVIQjOqtVh8C9EqOs7xdWBS95lyArl3pWpWD6ksginfLTDne3OYFhwVnT317QMxuFegjEw5VlQC1Ep-tPavpkGVapFwKuNSPITGRzm61CuDrKNUqdejYez7lzM47REmolwL2EB4OjvxGNc8IC4iHN1ObQ4GECvwLww8kJLmG0Gu8TODigW2NVT6jcj6hirCjXqmhz6gPr4yUTMMJ38iVsoiZAiDh-8plFQaWhx4q13dJR1R0z7bUn",
     basePriceVnd: 35000,
     isAvailable: true,
-    category: "bakery",
+    category: "traditional",
     rating: "4.6",
     reviews: "420 đánh giá",
     description:
       "Chiết xuất cà phê rang mộc đậm đà hương vị nguyên bản Tây Nguyên, hậu vị ngọt sâu.",
     imageAlt:
-      "Golden crisp French buttery croissant fresh from the oven on a ceramic plate beside hot espresso, flaky layers, artisan cafe bakery lighting.",
+      "Artisanal Vietnamese dark roasted coffee from Cau Dat with rich crema and roasted coffee beans on a warm oak cafe table.",
   },
   {
     id: "11111111-1111-4111-8111-111111111103",
@@ -164,6 +164,21 @@ export const MOCK_CATALOG_PRODUCTS: ProductListItem[] = [
       "Trà ô long thượng hạng ủ lạnh kết hợp đào miếng giòn ngọt, tinh dầu sả tươi và cam vàng.",
     imageAlt:
       "Vibrant peach iced tea with orange slice and fresh lemongrass in a highball glass, golden hour backlight highlighting juicy peach chunks and glistening condensation.",
+  },
+  {
+    id: "11111111-1111-4111-8111-111111111109",
+    name: "Croissant Bơ Pháp Nướng",
+    imageUrl:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuD2GIXbK_gjHDiFDwZkAZAs73C3wK4ab5Lmc5cE75nVHuWfcEhLuEvSSVghnIHrnBle5wifQ_WjdQEJ2_7ZjgUkayLlCY2-YHiHFWHNGzMfraKlZ3FawYmqKam8sGgMRhLqB5AHBd8l1hgTdDQ6c0xDricuCmnTpGO5Sulyvnc8iiwpAce1xHH3aHsDyH6K5_QFaqpjkosbyIuxKlYgLpFutCcXtoPsBMsNXNT3laP64_5AcdFkdaCx",
+    basePriceVnd: 40000,
+    isAvailable: true,
+    category: "bakery",
+    rating: "4.6",
+    reviews: "420 đánh giá",
+    description:
+      "Vỏ ngàn lớp giòn rụm nướng nóng hổi mỗi sáng, dùng bơ Isigny Pháp thơm ngậy cao cấp.",
+    imageAlt:
+      "Golden crisp French buttery croissant fresh from the oven on a ceramic plate beside hot espresso, flaky layers, artisan cafe bakery lighting.",
   },
 ];
 

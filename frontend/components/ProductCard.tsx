@@ -85,8 +85,9 @@ export default function ProductCard({
             </div>
             <button
               aria-label="Sản phẩm tạm hết hàng"
-              onClick={() => {}}
-              className="w-9 h-9 rounded-lg bg-surface-container-high text-outline flex items-center justify-center cursor-pointer"
+              title="Sản phẩm tạm hết hàng"
+              disabled
+              className="w-9 h-9 rounded-lg bg-surface-container-high text-outline flex items-center justify-center cursor-not-allowed"
               type="button"
             >
               <span className="material-symbols-outlined text-[20px]">
@@ -130,7 +131,8 @@ export default function ProductCard({
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
           <button
             onClick={() => onAddToCart?.(product)}
-            className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-title-sm text-title-sm shadow-md flex items-center justify-center gap-1.5 hover:bg-primary-container transition-colors cursor-pointer"
+            title="Tính năng đang hoàn thiện"
+            className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-title-sm text-title-sm shadow-md flex items-center justify-center gap-1.5 hover:bg-primary-container active:scale-[0.98] transition-all cursor-pointer"
             type="button"
           >
             <span className="material-symbols-outlined text-[18px]">
@@ -178,8 +180,9 @@ export default function ProductCard({
           </div>
           <button
             aria-label={`Thêm nhanh ${product.name}`}
+            title="Tính năng đang hoàn thiện"
             onClick={() => onAddToCart?.(product)}
-            className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors shadow-sm cursor-pointer bg-surface-container hover:bg-primary hover:text-on-primary text-on-surface"
+            className="w-9 h-9 rounded-lg flex items-center justify-center transition-all shadow-sm cursor-pointer bg-surface-container hover:bg-primary hover:text-on-primary active:scale-95 text-on-surface"
             type="button"
           >
             <span className="material-symbols-outlined text-[20px]">add</span>

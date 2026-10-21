@@ -53,7 +53,7 @@ schema will correctly report that PrismaService.user does not exist.
 ```
 
 Email is trimmed/lowercased and validated (maximum 255 characters).
-Password is preserved exactly and bcrypt-hashed with cost 12. Full name is
+Password is preserved exactly and hashed with Argon2id. Full name is
 optional and limited to 255 characters. Omission returns fullName: null,
 matching the shared nullable User model.
 
@@ -70,25 +70,51 @@ raw database errors. Products retain their existing Sprint 1 error contract.
 
 ## Password validation
 
-Per API Contract v2.0 and the API owner's decision, the password must be a
+Per the team's PR #58 review decision, the password must be a
 string with at least 8 characters. No maximum character or byte length and no
 complexity rule are added. Passwords are not trimmed or normalized. The
-standard bcrypt hash/compare behavior is used. Tests cover long ASCII and
-multibyte passwords accepted by the endpoint.
+entire password is hashed, including all bytes beyond byte 72. There is no
+72-byte validation rule and no requirement for uppercase, digits or symbols.
+The existing HTTP JSON body-size limit remains in effect; this change adds no
+new password-specific maximum.
+
+The shared password-hash.ts utility uses node-argon2 with explicit Argon2id
+parameters: memoryCost=19456 KiB (19 MiB), timeCost=2, parallelism=1,
+hashLength=32 bytes, and an automatically generated random salt per hash.
+These parameters match an OWASP recommended minimum configuration:
+https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+Each active hash operation uses about 19 MiB for Argon2 memory; concurrency
+and final latency should be measured on the deployment backend before tuning.
+The encoded hash stores the salt and work factors and fits the existing
+passwordHash VARCHAR(255). No Prisma schema change or migration is needed.
+
+SCRUM-39 must call verifyPassword(storedHash, submittedPassword), which uses
+argon2.verify. Bcrypt hashes from earlier local test registrations are not
+converted automatically: their original passwords cannot be recovered from
+the hashes. Use a newly registered test account or a proper password reset
+for those accounts; do not delete shared user data. There is no bcrypt fallback.
+
+API Contract v2.0 still explicitly specifies bcrypt for Register and Login.
+The team needs to update those two statements to Argon2id hash/verify. Request
+and response schemas, statuses, the 8-character minimum and normalization
+rules are unchanged. The reviewer already approved this algorithm change.
 
 ## Verification performed
 
-- Installed dependencies and tested bcrypt's actual native implementation.
+- Replaced bcrypt/@types-bcrypt with argon2, which includes TypeScript types.
+- Tested the actual native Argon2id hash and verify implementation.
 - Validated the shared dev schema after the SCRUM-36 merge.
 - Generated Prisma Client directly from backend/prisma/schema.prisma using the
   repository configuration and unchanged output path.
 - Lint and build passed with that generated client.
-- Unit/HTTP: 28 passed, including 8 new Register tests.
-- E2E: 36 passed, including 24 new Register tests.
+- Unit/HTTP: 34 passed.
+- E2E: 41 passed.
 - E2E requests run through the real AppModule and Register DTO validation,
-  use real bcrypt, and override PrismaService. They do not contact PostgreSQL.
+  use real Argon2id, and override PrismaService. They do not contact PostgreSQL.
 - Register tests cover normalization, allowed fields, password verification,
-  omitted full name, minimum-length/type validation, long passwords, duplicate-email conflicts,
+  omitted full name, 7/8-character boundaries, passwords of more than 72 bytes,
+  ASCII/Unicode suffixes beyond byte 72, unique random salts, stored work factors,
+  duplicate-email conflicts,
   safe failures, Swagger schemas/statuses, and Product API regression.
 
 Apply the shared migrations to your local PostgreSQL with npm run db:migrate,

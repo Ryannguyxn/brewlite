@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
+import { hashPassword } from './password-hash.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { RegisterDto } from './dto/register.dto.js';
@@ -19,7 +19,7 @@ export class AuthService {
 
   async register(dto: RegisterDto): Promise<RegisterResponseDto> {
     try {
-      const passwordHash = await bcrypt.hash(dto.password, 12);
+      const passwordHash = await hashPassword(dto.password);
 
       // The database unique constraint is authoritative, including concurrent requests.
       const user = await this.prisma.user.create({

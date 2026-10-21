@@ -9,10 +9,8 @@ import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuthService } from './auth.service.js';
 
-const hash = vi.hoisted(() =>
-  vi.fn<(password: string, rounds: number) => Promise<string>>(),
-);
-vi.mock('bcrypt', () => ({ hash }));
+const hash = vi.hoisted(() => vi.fn<(password: string) => Promise<string>>());
+vi.mock('./password-hash.js', () => ({ hashPassword: hash }));
 
 describe('AuthService.register', () => {
   let service: AuthService;
@@ -32,7 +30,7 @@ describe('AuthService.register', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
     vi.spyOn(Logger.prototype, 'error').mockImplementation(logError);
-    hash.mockResolvedValue('bcrypt-hash');
+    hash.mockResolvedValue('argon2id-hash');
     prisma.user.create.mockResolvedValue(user);
     const module = await Test.createTestingModule({
       providers: [AuthService, { provide: PrismaService, useValue: prisma }],
@@ -44,11 +42,11 @@ describe('AuthService.register', () => {
 
   it('hashes the original password and only writes allowed fields', async () => {
     await expect(service.register(dto)).resolves.toEqual(user);
-    expect(hash).toHaveBeenCalledWith('Password123', 12);
+    expect(hash).toHaveBeenCalledWith('Password123');
     expect(prisma.user.create).toHaveBeenCalledWith({
       data: {
         email: dto.email,
-        passwordHash: 'bcrypt-hash',
+        passwordHash: 'argon2id-hash',
         fullName: dto.fullName,
       },
       select: { id: true, email: true, fullName: true },

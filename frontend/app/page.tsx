@@ -51,7 +51,10 @@ export default function HomePage() {
   const [priceRange, setPriceRange] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Thông báo khi tương tác với nút "Thêm vào giỏ" hoặc ô "Giỏ hàng"
+  // Thông báo toast khi tương tác với nút "Thêm vào giỏ", ô "Giỏ hàng" hoặc các chức năng chưa cập nhật
+  const [toastMessage, setToastMessage] = useState(
+    "Mục giỏ hàng hiện đang trong quá trình xây dựng"
+  );
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -122,18 +125,29 @@ export default function HomePage() {
     setReloadKey((prev) => prev + 1);
   };
 
-  const showCartUnderConstructionNotice = () => {
+  const showToastNotice = (message: string) => {
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
     }
+    setToastMessage(message);
     setToastVisible(true);
     toastTimerRef.current = setTimeout(() => {
       setToastVisible(false);
     }, 3000);
   };
 
+  const handleCartClick = () => {
+    showToastNotice("Mục giỏ hàng hiện đang trong quá trình xây dựng");
+  };
+
+  const handleFeatureNotice = (featureLabel: string) => {
+    showToastNotice(
+      `Chức năng "${featureLabel}" đang hoàn thiện và sẽ ra mắt ở Sprint tiếp theo.`
+    );
+  };
+
   const handleAddToCart = () => {
-    showCartUnderConstructionNotice();
+    handleCartClick();
   };
 
   const handleDismissToast = () => {
@@ -205,7 +219,8 @@ export default function HomePage() {
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface">
       <Header
-        onCartClick={showCartUnderConstructionNotice}
+        onCartClick={handleCartClick}
+        onFeatureNotice={handleFeatureNotice}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeNav="thuc-don"
@@ -338,7 +353,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      {/* Toast thông báo mục giỏ hàng đang trong quá trình xây dựng */}
+      {/* Toast thông báo chức năng đang trong quá trình xây dựng */}
       <div
         role="status"
         aria-live="polite"
@@ -352,7 +367,7 @@ export default function HomePage() {
           info
         </span>
         <span className="font-title-sm text-title-sm text-surface-container-lowest">
-          Mục giỏ hàng hiện đang trong quá trình xây dựng
+          {toastMessage}
         </span>
         <button
           type="button"

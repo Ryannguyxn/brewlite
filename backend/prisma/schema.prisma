@@ -1,7 +1,8 @@
-// BrewLite database schema
-// Source of truth: database/schema.dbml (approved ERD)
-// PostgreSQL CHECK constraints and partial unique indexes are added in SQL migrations.
-// Cart is client-side only; drink sizes are represented by an enum.
+// BrewLite - SCRUM-21: Product Catalog migration schema
+// Source: database/schema.dbml (approved ERD)
+// Scope: products, toppings only.
+// Other models and enums are introduced in future migrations.
+// CHECK constraints must be added to the migration SQL.
 
 generator client {
   provider = "prisma-client"
@@ -12,85 +13,6 @@ datasource db {
   provider = "postgresql"
 }
 
-enum OrderStatus {
-  PENDING
-  PAYMENT_FAILED
-  PAID
-  PREPARING
-  READY
-  COMPLETED
-  CANCELLED
-
-  @@map("order_status")
-}
-
-enum DrinkSize {
-  S
-  M
-  L
-
-  @@map("drink_size")
-}
-
-enum PaymentMethod {
-  WALLET
-  CARD
-
-  @@map("payment_method")
-}
-
-enum PaymentStatus {
-  SUCCESS
-  FAILED
-
-  @@map("payment_status")
-}
-
-enum CouponType {
-  PERCENT
-  FIXED
-
-  @@map("coupon_type")
-}
-
-enum RedemptionStatus {
-  HELD
-  CONSUMED
-  RELEASED
-
-  @@map("redemption_status")
-}
-
-enum InventoryMovementType {
-  RESERVE
-  RELEASE
-
-  @@map("inventory_movement_type")
-}
-
-enum InventoryMovementReason {
-  ORDER
-  CANCEL
-  EXPIRED
-
-  @@map("inventory_movement_reason")
-}
-
-model User {
-  id            String   @id @default(uuid()) @db.Uuid
-  email         String   @unique @db.VarChar(255)
-  passwordHash  String   @map("password_hash") @db.VarChar(255)
-  fullName      String?  @map("full_name") @db.VarChar(255)
-  loyaltyPoints Int      @default(0) @map("loyalty_points")
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  orders            Order[]
-  payments          Payment[]
-  couponRedemptions CouponRedemption[]
-
-  @@map("users")
-}
-
 model Product {
   id           String   @id @default(uuid()) @db.Uuid
   name         String   @db.VarChar(255)
@@ -98,9 +20,6 @@ model Product {
   imageUrl     String   @map("image_url") @db.VarChar(2048)
   stock        Int
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  orderItems         OrderItem[]
-  inventoryMovements InventoryMovement[]
 
   @@map("products")
 }
@@ -111,152 +30,5 @@ model Topping {
   name     String @db.VarChar(255)
   priceVnd BigInt @map("price_vnd")
 
-  orderItemToppings OrderItemTopping[]
-
   @@map("toppings")
-}
-
-model Coupon {
-  id               String     @id @default(uuid()) @db.Uuid
-  code             String     @unique @db.VarChar(30)
-  type             CouponType
-  value            Int
-  minSubtotalVnd   BigInt     @default(0) @map("min_subtotal_vnd")
-  maxDiscountVnd   BigInt?    @map("max_discount_vnd")
-  startsAt         DateTime   @map("starts_at") @db.Timestamptz(6)
-  expiresAt        DateTime   @map("expires_at") @db.Timestamptz(6)
-  usageLimit       Int        @map("usage_limit")
-  perUserLimit     Int        @default(1) @map("per_user_limit")
-  activeUsageCount Int        @default(0) @map("active_usage_count")
-
-  orders            Order[]
-  couponRedemptions CouponRedemption[]
-
-  @@map("coupons")
-}
-
-model Order {
-  id                 String      @id @default(uuid()) @db.Uuid
-  userId             String      @map("user_id") @db.Uuid
-  couponId           String?     @map("coupon_id") @db.Uuid
-  couponCodeSnapshot String?     @map("coupon_code_snapshot") @db.VarChar(30)
-  status             OrderStatus @default(PENDING)
-  subtotalVnd        BigInt      @map("subtotal_vnd")
-  discountVnd        BigInt      @default(0) @map("discount_vnd")
-  totalVnd           BigInt      @map("total_vnd")
-  pointsEarned       Int         @default(0) @map("points_earned")
-  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
-  expiresAt          DateTime    @map("expires_at") @db.Timestamptz(6)
-  paidAt             DateTime?   @map("paid_at") @db.Timestamptz(6)
-  cancelledAt        DateTime?   @map("cancelled_at") @db.Timestamptz(6)
-
-  user               User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  coupon             Coupon?             @relation(fields: [couponId], references: [id], onDelete: Restrict)
-  items              OrderItem[]
-  payments           Payment[]
-  couponRedemption   CouponRedemption?
-  inventoryMovements InventoryMovement[]
-
-  @@index([userId], map: "ix_orders_user_id")
-  @@index([userId, createdAt], map: "ix_orders_user_created")
-  // SQL migration: uq_orders_one_active_per_user (status IN PENDING, PAYMENT_FAILED).
-  @@map("orders")
-}
-
-model OrderItem {
-  id                   String    @id @default(uuid()) @db.Uuid
-  orderId              String    @map("order_id") @db.Uuid
-  productId            String    @map("product_id") @db.Uuid
-  productNameSnapshot  String    @map("product_name_snapshot") @db.VarChar(255)
-  size                 DrinkSize
-  sizePercentSnapshot  Int       @map("size_percent_snapshot")
-  basePriceSnapshotVnd BigInt    @map("base_price_snapshot_vnd")
-  unitPriceVnd         BigInt    @map("unit_price_vnd")
-  quantity             Int
-  lineTotalVnd         BigInt    @map("line_total_vnd")
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  order    Order              @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  product  Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
-  toppings OrderItemTopping[]
-
-  @@index([orderId], map: "ix_order_items_order_id")
-  @@index([productId], map: "ix_order_items_product_id")
-  @@map("order_items")
-}
-
-model OrderItemTopping {
-  id                      String @id @default(uuid()) @db.Uuid
-  orderItemId             String @map("order_item_id") @db.Uuid
-  toppingId               String @map("topping_id") @db.Uuid
-  toppingCodeSnapshot     String @map("topping_code_snapshot") @db.VarChar(50)
-  toppingNameSnapshot     String @map("topping_name_snapshot") @db.VarChar(255)
-  toppingPriceSnapshotVnd BigInt @map("topping_price_snapshot_vnd")
-
-  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
-  topping   Topping   @relation(fields: [toppingId], references: [id], onDelete: Restrict)
-
-  @@unique([orderItemId, toppingId], map: "uq_order_item_topping")
-  @@unique([orderItemId, toppingCodeSnapshot], map: "uq_order_item_topping_code")
-  @@map("order_item_toppings")
-}
-
-model Payment {
-  id               String        @id @default(uuid()) @db.Uuid
-  orderId          String        @map("order_id") @db.Uuid
-  userId           String        @map("user_id") @db.Uuid
-  idempotencyKey   String        @map("idempotency_key") @db.VarChar(64)
-  requestHash      String        @map("request_hash") @db.VarChar(128)
-  amountVnd        BigInt        @map("amount_vnd")
-  method           PaymentMethod
-  status           PaymentStatus
-  mockReference    String?       @map("mock_reference") @db.VarChar(255)
-  methodLast4      String?       @map("method_last4") @db.VarChar(4)
-  responseSnapshot Json          @map("response_snapshot") @db.JsonB
-  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
-
-  @@unique([userId, idempotencyKey], map: "uq_payments_user_idempotency")
-  @@index([orderId], map: "ix_payments_order_id")
-  // SQL migration: uq_payments_one_success_per_order (status = SUCCESS).
-  @@map("payments")
-}
-
-model CouponRedemption {
-  id         String           @id @default(uuid()) @db.Uuid
-  couponId   String           @map("coupon_id") @db.Uuid
-  orderId    String           @unique @map("order_id") @db.Uuid
-  userId     String           @map("user_id") @db.Uuid
-  status     RedemptionStatus
-  heldAt     DateTime         @map("held_at") @db.Timestamptz(6)
-  consumedAt DateTime?        @map("consumed_at") @db.Timestamptz(6)
-  releasedAt DateTime?        @map("released_at") @db.Timestamptz(6)
-  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Restrict)
-  order  Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
-
-  @@index([couponId, userId, status], map: "ix_coupon_user_status")
-  @@map("coupon_redemptions")
-}
-
-// Optional audit ledger from FR-INV-004 (SHOULD), present in the approved DBML.
-model InventoryMovement {
-  id            String                  @id @default(uuid()) @db.Uuid
-  productId     String                  @map("product_id") @db.Uuid
-  orderId       String                  @map("order_id") @db.Uuid
-  type          InventoryMovementType
-  reason        InventoryMovementReason
-  quantityDelta Int                     @map("quantity_delta")
-  createdAt     DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
-
-  @@unique([orderId, productId, type], map: "uq_inventory_order_product_type")
-  @@map("inventory_movements")
 }

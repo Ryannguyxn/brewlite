@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
 import {
   ConflictException,
   InternalServerErrorException,
@@ -35,7 +36,11 @@ describe('AuthService.register', () => {
     hash.mockResolvedValue('bcrypt-hash');
     prisma.user.create.mockResolvedValue(user);
     const module = await Test.createTestingModule({
-      providers: [AuthService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AuthService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: JwtService, useValue: { signAsync: vi.fn() } },
+      ],
     }).compile();
     service = module.get(AuthService);
   });

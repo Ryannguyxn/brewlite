@@ -10,6 +10,7 @@ async function bootstrap() {
     .setTitle('BrewLite API')
     .setDescription('REST API documentation for BrewLite')
     .setVersion('1.0')
+    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

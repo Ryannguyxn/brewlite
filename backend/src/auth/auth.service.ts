@@ -4,18 +4,62 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { hashPassword } from './password-hash.js';
+import { JwtService } from '@nestjs/jwt';
+import { hashPassword, verifyPassword } from './password-hash.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { RegisterDto } from './dto/register.dto.js';
 import type { RegisterResponseDto } from './dto/register-response.dto.js';
+import type { LoginDto } from './dto/login.dto.js';
+import type { LoginResponseDto } from './dto/login-response.dto.js';
+import { ACCESS_TOKEN_TTL_SECONDS } from './jwt.config.js';
+
+// Public dummy hash, not an account credential. Keep the Argon2id work factors equal to registration
+// so an unknown email still performs a password comparison.
+const DUMMY_PASSWORD_HASH =
+  '$argon2id$v=19$m=19456,p=1,t=2$mG7PSvxFcBnes/A6uf4Bxg$jN4wfxF0HsF54rHgyOd7a8Jce4+8xpTe/FuALxO+iJ4';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(JwtService) private readonly jwt: JwtService,
+  ) {}
+
+  async login(dto: LoginDto): Promise<LoginResponseDto> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { email: dto.email.trim().toLowerCase() },
+        select: { id: true, passwordHash: true },
+      });
+      const matches = await verifyPassword(
+        user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+        dto.password,
+      );
+      if (!user || !matches) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          message: 'Invalid email or password',
+          error: 'Unauthorized',
+          code: 'INVALID_CREDENTIALS',
+        });
+      }
+      const accessToken = await this.jwt.signAsync({ sub: user.id });
+      return {
+        accessToken,
+        tokenType: 'Bearer',
+        expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      this.logger.error('Failed to log in customer');
+      throw new InternalServerErrorException('Internal server error');
+    }
+  }
 
   async register(dto: RegisterDto): Promise<RegisterResponseDto> {
     try {

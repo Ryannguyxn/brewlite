@@ -8,6 +8,12 @@ import { PrismaService } from '../src/prisma/prisma.service.js';
 const productId = 'a1000000-0000-4000-8000-000000000002';
 const missingProductId = 'a1000000-0000-4000-8000-000000000999';
 
+const topping = {
+  id: 'b2000000-0000-4000-8000-000000000001',
+  name: 'Trân châu',
+  priceVnd: 5000n,
+};
+
 const product = {
   id: productId,
   name: 'Cà phê sữa',
@@ -15,13 +21,17 @@ const product = {
   basePriceVnd: 35000n,
   stock: 25,
   createdAt: new Date('2026-10-20T00:00:00.000Z'),
-};
-
-const topping = {
-  id: 'b2000000-0000-4000-8000-000000000001',
-  code: 'PEARL',
-  name: 'Trân châu',
-  priceVnd: 5000n,
+  description: null,
+  rating: null,
+  isNew: false,
+  isBestseller: false,
+  sizePolicy: 'STANDARD',
+  category: {
+    code: 'COFFEE',
+    name: 'Cà phê',
+    isActive: true,
+  },
+  productToppings: [{ topping }],
 };
 
 const expectedProduct = {
@@ -30,6 +40,12 @@ const expectedProduct = {
   imageUrl: '/images/product-placeholder.svg',
   basePriceVnd: 35000,
   isAvailable: true,
+  category: { code: 'COFFEE', name: 'Cà phê' },
+  description: null,
+  rating: null,
+  isNew: false,
+  isBestseller: false,
+  sizePolicy: 'STANDARD',
   sizes: [
     { size: 'S', multiplierPercent: 100 },
     { size: 'M', multiplierPercent: 120 },
@@ -37,8 +53,8 @@ const expectedProduct = {
   ],
   toppings: [
     {
-      id: 'b2000000-0000-4000-8000-000000000001',
-      name: 'Trân châu',
+      id: topping.id,
+      name: topping.name,
       priceVnd: 5000,
     },
   ],
@@ -52,14 +68,13 @@ const internalServerError = {
 
 describe('GET /products/:id (e2e)', () => {
   let app: INestApplication<App>;
+
   const prisma = {
     product: { findUnique: vi.fn() },
-    topping: { findMany: vi.fn() },
   };
 
   beforeEach(async () => {
     prisma.product.findUnique.mockReset().mockResolvedValue({ ...product });
-    prisma.topping.findMany.mockReset().mockResolvedValue([{ ...topping }]);
 
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
@@ -92,8 +107,23 @@ describe('GET /products/:id (e2e)', () => {
       .expect({ ...expectedProduct, isAvailable: false });
   });
 
+  it('returns products in an inactive category with isAvailable false', async () => {
+    prisma.product.findUnique.mockResolvedValue({
+      ...product,
+      category: { ...product.category, isActive: false },
+    });
+
+    await request(app.getHttpServer())
+      .get(`/products/${productId}`)
+      .expect(200)
+      .expect({ ...expectedProduct, isAvailable: false });
+  });
+
   it('returns an empty topping array when no toppings exist', async () => {
-    prisma.topping.findMany.mockResolvedValue([]);
+    prisma.product.findUnique.mockResolvedValue({
+      ...product,
+      productToppings: [],
+    });
 
     await request(app.getHttpServer())
       .get(`/products/${productId}`)
@@ -112,7 +142,6 @@ describe('GET /products/:id (e2e)', () => {
       });
 
     expect(prisma.product.findUnique).not.toHaveBeenCalled();
-    expect(prisma.topping.findMany).not.toHaveBeenCalled();
   });
 
   it('returns the contract 404 when a valid UUID does not exist', async () => {
@@ -143,36 +172,34 @@ describe('GET /products/:id (e2e)', () => {
     expect(prisma.product.findUnique).toHaveBeenCalledOnce();
   });
 
-  it.each(['product', 'topping'] as const)(
-    'returns a safe 500 body when the %s query fails',
-    async (query) => {
-      const error = new Error('Private database connection details');
-      if (query === 'product') {
-        prisma.product.findUnique.mockRejectedValue(error);
-      } else {
-        prisma.topping.findMany.mockRejectedValue(error);
-      }
+  it('returns a safe 500 body when the product-with-toppings query fails', async () => {
+    prisma.product.findUnique.mockRejectedValue(
+      new Error('Private database connection details'),
+    );
 
-      await request(app.getHttpServer())
-        .get(`/products/${productId}`)
-        .expect(500)
-        .expect(internalServerError);
-    },
-  );
+    await request(app.getHttpServer())
+      .get(`/products/${productId}`)
+      .expect(500)
+      .expect(internalServerError);
+  });
 
   it.each(['product', 'topping'] as const)(
     'returns 500 instead of an imprecise %s price',
     async (source) => {
       const unsafePrice = 9007199254740993n;
+
       if (source === 'product') {
         prisma.product.findUnique.mockResolvedValue({
           ...product,
           basePriceVnd: unsafePrice,
         });
       } else {
-        prisma.topping.findMany.mockResolvedValue([
-          { ...topping, priceVnd: unsafePrice },
-        ]);
+        prisma.product.findUnique.mockResolvedValue({
+          ...product,
+          productToppings: [
+            { topping: { ...topping, priceVnd: unsafePrice } },
+          ],
+        });
       }
 
       await request(app.getHttpServer())
@@ -184,13 +211,14 @@ describe('GET /products/:id (e2e)', () => {
 
   it('preserves prices at the maximum safe integer boundary', async () => {
     const maximumSafePrice = BigInt(Number.MAX_SAFE_INTEGER);
+
     prisma.product.findUnique.mockResolvedValue({
       ...product,
       basePriceVnd: maximumSafePrice,
+      productToppings: [
+        { topping: { ...topping, priceVnd: maximumSafePrice } },
+      ],
     });
-    prisma.topping.findMany.mockResolvedValue([
-      { ...topping, priceVnd: maximumSafePrice },
-    ]);
 
     await request(app.getHttpServer())
       .get(`/products/${productId}`)

@@ -35,6 +35,17 @@ describe('ProductsService', () => {
     imageUrl: '/images/product-placeholder.svg',
     basePriceVnd: 35000n,
     stock: 25,
+    description: 'Cà phê sữa pha phin truyền thống',
+    rating: null,
+    isNew: false,
+    isBestseller: false,
+    sizePolicy: 'STANDARD',
+    productToppings: [],
+    category: {
+      code: 'traditional',
+      name: 'Cà phê truyền thống',
+      isActive: true,
+    },
   };
 
   beforeEach(async () => {
@@ -62,14 +73,50 @@ describe('ProductsService', () => {
     vi.restoreAllMocks();
   });
 
-  it('queries the requested ID and returns an empty toppings array when none exist', async () => {
+  it('returns STANDARD product detail with v2.1 public fields and no toppings', async () => {
     const detail = await service.findOne(product.id);
 
-    expect(prisma.product.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: product.id },
-      }),
-    );
+    expect(prisma.product.findUnique).toHaveBeenCalledWith({
+      where: { id: product.id },
+      select: {
+        id: true,
+        name: true,
+        imageUrl: true,
+        basePriceVnd: true,
+        stock: true,
+        description: true,
+        rating: true,
+        isNew: true,
+        isBestseller: true,
+        sizePolicy: true,
+        category: {
+          select: {
+            code: true,
+            name: true,
+            isActive: true,
+          },
+        },
+        productToppings: {
+          where: {
+            topping: {
+              isAvailable: true,
+            },
+          },
+          select: {
+            topping: {
+              select: {
+                id: true,
+                name: true,
+                priceVnd: true,
+              },
+            },
+          },
+          orderBy: {
+            toppingId: 'asc',
+          },
+        },
+      },
+    });
 
     expect(detail).toEqual({
       id: product.id,
@@ -77,6 +124,15 @@ describe('ProductsService', () => {
       imageUrl: product.imageUrl,
       basePriceVnd: 35000,
       isAvailable: true,
+      category: {
+        code: 'traditional',
+        name: 'Cà phê truyền thống',
+      },
+      description: product.description,
+      rating: null,
+      isNew: false,
+      isBestseller: false,
+      sizePolicy: 'STANDARD',
       sizes: [
         { size: 'S', multiplierPercent: 100 },
         { size: 'M', multiplierPercent: 120 },
@@ -84,6 +140,129 @@ describe('ProductsService', () => {
       ],
       toppings: [],
     });
+
+    expect(prisma.topping.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns only ONE_SIZE for a ONE_SIZE product', async () => {
+    prisma.product.findUnique.mockResolvedValue({
+      ...product,
+      sizePolicy: 'ONE_SIZE',
+    });
+
+    const detail = await service.findOne(product.id);
+
+    expect(detail.sizePolicy).toBe('ONE_SIZE');
+
+    expect(detail.sizes).toEqual([
+      {
+        size: 'ONE_SIZE',
+        multiplierPercent: 100,
+      },
+    ]);
+
+    expect(detail.sizes).toHaveLength(1);
+  });
+
+  it('returns unavailable product detail when category is inactive', async () => {
+    prisma.product.findUnique.mockResolvedValue({
+      ...product,
+      stock: 25,
+      category: {
+        ...product.category,
+        isActive: false,
+      },
+    });
+
+    const detail = await service.findOne(product.id);
+
+    expect(detail.id).toBe(product.id);
+    expect(detail.isAvailable).toBe(false);
+
+    expect(detail.category).toEqual({
+      code: 'traditional',
+      name: 'Cà phê truyền thống',
+    });
+
+    expect(detail.sizePolicy).toBe('STANDARD');
+    expect(detail.sizes).toHaveLength(3);
+    expect(detail.toppings).toEqual([]);
+
+    expect(detail.category).not.toHaveProperty('isActive');
+  });
+
+  it('returns only linked and available toppings', async () => {
+    prisma.product.findUnique.mockResolvedValue({
+      ...product,
+      productToppings: [
+        {
+          topping: {
+            id: 'b2000000-0000-4000-8000-000000000001',
+            name: 'Trân châu',
+            priceVnd: 5000n,
+          },
+        },
+        {
+          topping: {
+            id: 'b2000000-0000-4000-8000-000000000002',
+            name: 'Thạch cà phê',
+            priceVnd: 7000n,
+          },
+        },
+      ],
+    });
+
+    const detail = await service.findOne(product.id);
+
+    expect(detail.toppings).toEqual([
+      {
+        id: 'b2000000-0000-4000-8000-000000000001',
+        name: 'Trân châu',
+        priceVnd: 5000,
+      },
+      {
+        id: 'b2000000-0000-4000-8000-000000000002',
+        name: 'Thạch cà phê',
+        priceVnd: 7000,
+      },
+    ]);
+
+    expect(prisma.product.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          productToppings: expect.objectContaining({
+            where: {
+              topping: {
+                isAvailable: true,
+              },
+            },
+          }),
+        }),
+      }),
+    );
+
+    expect(prisma.topping.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns product detail rating, description and badges correctly', async () => {
+    prisma.product.findUnique.mockResolvedValue({
+      ...product,
+      description: 'Cà phê sữa đậm đà',
+      rating: { toString: () => '4.5' },
+      isNew: true,
+      isBestseller: true,
+    });
+
+    const detail = await service.findOne(product.id);
+
+    expect(detail).toEqual(
+      expect.objectContaining({
+        description: 'Cà phê sữa đậm đà',
+        rating: 4.5,
+        isNew: true,
+        isBestseller: true,
+      }),
+    );
   });
 
   it('does not query toppings for a missing product', async () => {
@@ -100,30 +279,42 @@ describe('ProductsService', () => {
     prisma.product.findUnique.mockResolvedValue({
       ...product,
       basePriceVnd: 0n,
+      productToppings: [
+        {
+          topping: {
+            id: 'b2000000-0000-4000-8000-000000000001',
+            name: 'Topping',
+            priceVnd: BigInt(Number.MAX_SAFE_INTEGER),
+          },
+        },
+      ],
     });
-
-    prisma.topping.findMany.mockResolvedValue([
-      {
-        id: 'b2000000-0000-4000-8000-000000000001',
-        name: 'Topping',
-        priceVnd: BigInt(Number.MAX_SAFE_INTEGER),
-      },
-    ]);
 
     const detail = await service.findOne(product.id);
 
     expect(detail.basePriceVnd).toBe(0);
-    expect(detail.toppings[0].priceVnd).toBe(Number.MAX_SAFE_INTEGER);
+    expect(detail.toppings).toHaveLength(1);
+    expect(detail.toppings[0].priceVnd).toBe(
+      Number.MAX_SAFE_INTEGER,
+    );
+
+    expect(prisma.topping.findMany).not.toHaveBeenCalled();
   });
 
-  it('returns a server error if the shared topping query fails', async () => {
-    prisma.topping.findMany.mockRejectedValue(
+  it('returns a server error if the product detail query fails', async () => {
+    prisma.product.findUnique.mockRejectedValue(
       new Error('Database unavailable'),
     );
 
     await expect(service.findOne(product.id)).rejects.toThrow(
       InternalServerErrorException,
     );
+
+    expect(loggerError).toHaveBeenCalledWith(
+      'Failed to retrieve product detail (Error)',
+    );
+
+    expect(prisma.topping.findMany).not.toHaveBeenCalled();
   });
 
   describe('findAll', () => {
@@ -133,7 +324,7 @@ describe('ProductsService', () => {
       });
     });
 
-    it('queries all products in stable order and returns only public fields', async () => {
+    it('queries products in stable order and returns v2.1 public fields', async () => {
       prisma.product.findMany.mockResolvedValue([
         product,
         {
@@ -152,6 +343,17 @@ describe('ProductsService', () => {
           imageUrl: true,
           basePriceVnd: true,
           stock: true,
+          description: true,
+          rating: true,
+          isNew: true,
+          isBestseller: true,
+          category: {
+            select: {
+              code: true,
+              name: true,
+              isActive: true,
+            },
+          },
         },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
       });
@@ -164,6 +366,14 @@ describe('ProductsService', () => {
             imageUrl: product.imageUrl,
             basePriceVnd: 35000,
             isAvailable: true,
+            category: {
+              code: 'traditional',
+              name: 'Cà phê truyền thống',
+            },
+            description: product.description,
+            rating: null,
+            isNew: false,
+            isBestseller: false,
           },
           {
             id: 'a1000000-0000-4000-8000-000000000003',
@@ -171,11 +381,72 @@ describe('ProductsService', () => {
             imageUrl: product.imageUrl,
             basePriceVnd: 35000,
             isAvailable: false,
+            category: {
+              code: 'traditional',
+              name: 'Cà phê truyền thống',
+            },
+            description: product.description,
+            rating: null,
+            isNew: false,
+            isBestseller: false,
           },
         ],
       });
 
       expect(prisma.topping.findMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps products from inactive categories but marks them unavailable', async () => {
+      prisma.product.findMany.mockResolvedValue([
+        {
+          ...product,
+          stock: 25,
+          category: {
+            ...product.category,
+            isActive: false,
+          },
+        },
+      ]);
+
+      const result = await service.findAll();
+
+      expect(result.items).toHaveLength(1);
+
+      expect(result.items[0]).toEqual(
+        expect.objectContaining({
+          id: product.id,
+          isAvailable: false,
+          category: {
+            code: 'traditional',
+            name: 'Cà phê truyền thống',
+          },
+        }),
+      );
+    });
+
+    it('returns product description, rating and badges correctly', async () => {
+      prisma.product.findMany.mockResolvedValue([
+        {
+          ...product,
+          description: 'Cà phê sữa đậm đà, pha phin truyền thống',
+          rating: { toString: () => '4.5' },
+          isNew: true,
+          isBestseller: true,
+        },
+      ]);
+
+      const result = await service.findAll();
+
+      expect(result.items).toHaveLength(1);
+
+      expect(result.items[0]).toEqual(
+        expect.objectContaining({
+          description: 'Cà phê sữa đậm đà, pha phin truyền thống',
+          rating: 4.5,
+          isNew: true,
+          isBestseller: true,
+        }),
+      );
     });
 
     it.each([0n, BigInt(Number.MAX_SAFE_INTEGER)])(

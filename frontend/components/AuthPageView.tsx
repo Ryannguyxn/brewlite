@@ -9,6 +9,7 @@ import {
   MOCK_REGISTERED_USERS,
   type AuthErrorCode,
   type AuthMode,
+  type RegisterResponseDto,
 } from "@/mock-data";
 import {
   normalizeAuthEmail,
@@ -19,6 +20,10 @@ import {
 export interface AuthPageViewProps {
   /** Chế độ hiển thị mặc định khi mở trang: "login" (Đăng nhập) hoặc "register" (Đăng ký) */
   initialMode?: AuthMode;
+  /** Hàm đóng màn hình Đăng nhập/Đăng ký để quay lại trang hiện tại */
+  onClose?: () => void;
+  /** Callback khi người dùng đăng nhập thành công */
+  onLoginSuccess?: (user: RegisterResponseDto) => void;
 }
 
 interface AuthAlertBannerState {
@@ -31,6 +36,8 @@ interface AuthAlertBannerState {
 
 export default function AuthPageView({
   initialMode = "login",
+  onClose,
+  onLoginSuccess,
 }: AuthPageViewProps) {
   const router = useRouter();
 
@@ -62,6 +69,15 @@ export default function AuthPageView({
   // ==========================================================================
   // PHẦN 2: CÁC HÀM XỬ LÝ NGHIỆP VỤ (CHUẨN HÓA EMAIL, SWITCH TAB, SUBMIT FORM)
   // ==========================================================================
+
+  // Thoát khỏi màn hình Đăng nhập / Đăng ký để quay về Thực đơn
+  const handleExitAuth = () => {
+    if (onClose) {
+      onClose();
+    } else {
+      router.push("/");
+    }
+  };
 
   // Chuyển đổi qua lại giữa Tab "Đăng nhập" và Tab "Đăng ký"
   const switchAuthMode = (nextMode: AuthMode) => {
@@ -123,10 +139,12 @@ export default function AuthPageView({
         return;
       }
 
-      // Khi đăng nhập thành công: không hiển thị thông báo và thoát ngay khỏi trang login về Thực đơn ("/")
+      // Khi đăng nhập thành công: không hiển thị thông báo và thoát ngay khỏi trang login
       setLoginEmail("");
       setLoginPassword("");
-      router.push("/");
+      setShowLoginPassword(false);
+      onLoginSuccess?.(result.user);
+      handleExitAuth();
     } finally {
       setIsSubmitting(false);
     }
@@ -167,7 +185,7 @@ export default function AuthPageView({
       }
 
       // Khi đăng ký thành công (201 Created, không auto-login theo Mục 6.1):
-      // Không hiển thị thông báo, xóa trắng toàn bộ khung nhập liệu và tự động chuyển sang trang Đăng nhập
+      // Không hiển thị thông báo, tự động chuyển sang trang/tab Đăng nhập và để trống hoàn toàn khung email/mật khẩu
       setRegisterFullName("");
       setRegisterEmail("");
       setRegisterPassword("");
@@ -179,7 +197,6 @@ export default function AuthPageView({
 
       setAlertState(null);
       setAuthMode("login");
-      router.push("/login");
     } finally {
       setIsSubmitting(false);
     }
@@ -211,22 +228,42 @@ export default function AuthPageView({
     <div className="min-h-screen bg-background font-body-md text-on-surface flex flex-col justify-between selection:bg-primary-fixed selection:text-on-primary-fixed">
       {/* Đây là thanh Header tối giản ở trên cùng chứa Logo BrewLite Coffee */}
       <header className="w-full pt-space-xl pb-space-md flex justify-center">
-        <Link
-          className="inline-flex items-center gap-space-sm group focus:outline-none"
-          href="/"
-        >
-          <span className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-sm transition-transform group-hover:scale-105">
-            <span className="material-symbols-outlined text-[22px]">
-              coffee
+        {onClose ? (
+          <button
+            type="button"
+            onClick={handleExitAuth}
+            className="inline-flex items-center gap-space-sm group focus:outline-none cursor-pointer"
+          >
+            <span className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-sm transition-transform group-hover:scale-105">
+              <span className="material-symbols-outlined text-[22px]">
+                coffee
+              </span>
             </span>
-          </span>
-          <span className="font-headline-md text-headline-md text-on-surface tracking-tight font-bold">
-            {MOCK_AUTH_UI_CONFIG.brandTitle}{" "}
-            <span className="text-primary font-normal text-title-md">
-              {MOCK_AUTH_UI_CONFIG.brandHighlight}
+            <span className="font-headline-md text-headline-md text-on-surface tracking-tight font-bold">
+              {MOCK_AUTH_UI_CONFIG.brandTitle}{" "}
+              <span className="text-primary font-normal text-title-md">
+                {MOCK_AUTH_UI_CONFIG.brandHighlight}
+              </span>
             </span>
-          </span>
-        </Link>
+          </button>
+        ) : (
+          <Link
+            className="inline-flex items-center gap-space-sm group focus:outline-none"
+            href="/"
+          >
+            <span className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-sm transition-transform group-hover:scale-105">
+              <span className="material-symbols-outlined text-[22px]">
+                coffee
+              </span>
+            </span>
+            <span className="font-headline-md text-headline-md text-on-surface tracking-tight font-bold">
+              {MOCK_AUTH_UI_CONFIG.brandTitle}{" "}
+              <span className="text-primary font-normal text-title-md">
+                {MOCK_AUTH_UI_CONFIG.brandHighlight}
+              </span>
+            </span>
+          </Link>
+        )}
       </header>
 
       {/* Đây là khu vực nội dung chính nằm giữa màn hình */}
@@ -234,15 +271,28 @@ export default function AuthPageView({
         <div className="flex flex-col w-full items-center justify-center py-space-sm sm:py-space-md">
           {/* Đây là thanh điều hướng nhanh "Quay lại Thực đơn" và nhãn "Artisanal Roast" phía trên khung thẻ */}
           <div className="w-full max-w-md mb-space-md flex items-center justify-between">
-            <Link
-              className="inline-flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md group"
-              href="/"
-            >
-              <span className="material-symbols-outlined text-[18px] transition-transform group-hover:-translate-x-1">
-                arrow_back
-              </span>
-              <span>{MOCK_AUTH_UI_CONFIG.backToMenuLabel}</span>
-            </Link>
+            {onClose ? (
+              <button
+                type="button"
+                onClick={handleExitAuth}
+                className="inline-flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md group cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px] transition-transform group-hover:-translate-x-1">
+                  arrow_back
+                </span>
+                <span>{MOCK_AUTH_UI_CONFIG.backToMenuLabel}</span>
+              </button>
+            ) : (
+              <Link
+                className="inline-flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md group"
+                href="/"
+              >
+                <span className="material-symbols-outlined text-[18px] transition-transform group-hover:-translate-x-1">
+                  arrow_back
+                </span>
+                <span>{MOCK_AUTH_UI_CONFIG.backToMenuLabel}</span>
+              </Link>
+            )}
             <span className="font-label-md text-label-md uppercase tracking-widest text-primary/70">
               {MOCK_AUTH_UI_CONFIG.roastBadge}
             </span>

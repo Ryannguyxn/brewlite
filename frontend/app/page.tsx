@@ -32,6 +32,8 @@ export default function HomePage() {
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<number | null>(null);
+  const [errorTitle, setErrorTitle] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState<number>(0);
 
   const [categories, setCategories] =
@@ -87,6 +89,8 @@ export default function HomePage() {
         setHeroBanner(catalogRes.heroBanner);
         setSiteConfig(catalogRes.siteConfig);
         setErrorMessage(null);
+        setErrorCode(null);
+        setErrorTitle(null);
       })
       .catch((err: unknown) => {
         if (isCancelled) return;
@@ -104,7 +108,17 @@ export default function HomePage() {
           err instanceof Error && err.message
             ? err.message
             : "Hệ thống kết nối đến quầy bar chi nhánh Saigon Center đang bị gián đoạn hoặc đường truyền không ổn định. Dữ liệu thực đơn và giá món chưa thể cập nhật theo thời gian thực.";
+        const status =
+          typeof (err as { statusCode?: unknown })?.statusCode === "number"
+            ? (err as { statusCode: number }).statusCode
+            : null;
+        const title =
+          typeof (err as { errorTitle?: unknown })?.errorTitle === "string"
+            ? (err as { errorTitle: string }).errorTitle
+            : null;
         setErrorMessage(customMsg);
+        setErrorCode(status);
+        setErrorTitle(title);
       })
       .finally(() => {
         if (isCancelled) return;
@@ -123,6 +137,8 @@ export default function HomePage() {
     setSearchQuery("");
     setIsLoading(true);
     setErrorMessage(null);
+    setErrorCode(null);
+    setErrorTitle(null);
     setProducts([]);
     setReloadKey((prev) => prev + 1);
   };
@@ -332,7 +348,8 @@ export default function HomePage() {
               <ProductErrorState
                 onRetry={handleRetryLoad}
                 errorMessage={errorMessage}
-                errorCode={500}
+                errorCode={errorCode}
+                errorTitle={errorTitle || undefined}
                 hotline={siteConfig.hotline}
               />
             )}

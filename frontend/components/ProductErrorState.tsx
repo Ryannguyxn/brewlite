@@ -5,14 +5,16 @@ import React from "react";
 interface ProductErrorStateProps {
   onRetry: () => void;
   errorMessage?: string;
-  errorCode?: number;
+  errorCode?: number | null;
+  errorTitle?: string;
   hotline?: string;
 }
 
 export default function ProductErrorState({
   onRetry,
   errorMessage = "Hệ thống kết nối đến quầy bar chi nhánh Saigon Center đang bị gián đoạn hoặc đường truyền không ổn định. Dữ liệu thực đơn và giá món chưa thể cập nhật theo thời gian thực.",
-  errorCode = 500,
+  errorCode,
+  errorTitle,
   hotline = "1900 6868",
 }: ProductErrorStateProps) {
   const cleanHotline = hotline.replace(/\s+/g, "");
@@ -88,14 +90,16 @@ export default function ProductErrorState({
         </div>
       </div>
 
-      {/* Mã lỗi hệ thống 500 theo chuẩn API Contract Mục 5.6 */}
+      {/* Hiển thị mã lỗi thật khi có, hoặc thông báo kết nối chung nếu không xác định được mã */}
       <div
         data-testid="error-code-badge"
         className="inline-flex items-center gap-space-xs bg-surface-container px-space-md py-1 rounded-full text-on-surface-variant font-label-md text-label-md mb-space-md"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
-        <span className="font-mono tracking-tight font-semibold">
-          MÃ LỖI: {errorCode} INTERNAL_SERVER_ERROR
+        <span className="font-mono tracking-tight font-semibold uppercase">
+          {errorCode
+            ? `MÃ LỖI: ${errorCode}${errorTitle ? ` ${errorTitle}` : errorCode === 500 ? " INTERNAL_SERVER_ERROR" : ""}`
+            : "LỖI KẾT NỐI MÁY CHỦ"}
         </span>
       </div>
 

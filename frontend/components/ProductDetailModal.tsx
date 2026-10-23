@@ -768,4 +768,3 @@ function ProductDetailModalContent({
     </div>
   );
 }
-

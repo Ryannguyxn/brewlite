@@ -143,7 +143,7 @@ function waitDelay(ms: number): Promise<void> {
 /**
  * Lấy danh sách đồ uống từ API Backend (`GET /products`)
  * Tuân thủ API Contract v2.1 Mục 3.
- * 
+ *
  * Lưu ý quan trọng:
  * - Khi chạy trên trình duyệt (client), ưu tiên gọi qua Next.js Rewrite Proxy `/api/backend/products`
  *   để triệt tiêu hoàn toàn lỗi CORS do khác cổng giữa Frontend (3000) và Backend (3001) mà không cần can thiệp Backend.
@@ -156,7 +156,10 @@ export async function getProducts(options?: {
   forceError?: boolean;
 }): Promise<ProductListResponse> {
   if (options?.forceError) {
-    throw new Error("Internal server error");
+    const err = new Error("Lỗi máy chủ nội bộ (Internal Server Error)");
+    (err as { statusCode?: number }).statusCode = 500;
+    (err as { errorTitle?: string }).errorTitle = "INTERNAL_SERVER_ERROR";
+    throw err;
   }
   if (options?.forceEmpty) {
     return { items: [] };
@@ -193,18 +196,31 @@ export async function getProducts(options?: {
   }
 
   if (!response.ok) {
-    let errorDetail = `Failed to fetch products: ${response.status} ${response.statusText}`;
+    let errorDetail = `Lỗi yêu cầu API: HTTP ${response.status} ${response.statusText}`;
+    let statusCode: number = response.status;
+    let errorTitle: string | undefined = undefined;
     try {
       const errorJson = await response.json();
+      if (typeof errorJson?.statusCode === "number") {
+        statusCode = errorJson.statusCode;
+      }
+      if (typeof errorJson?.error === "string") {
+        errorTitle = errorJson.error;
+      }
       if (errorJson?.message) {
         errorDetail = Array.isArray(errorJson.message)
           ? errorJson.message.join(", ")
-          : errorJson.message;
+          : String(errorJson.message);
       }
     } catch {
       // Bỏ qua lỗi parse JSON nếu response không phải JSON
     }
-    throw new Error(errorDetail);
+    const err = new Error(errorDetail);
+    (err as { statusCode?: number }).statusCode = statusCode;
+    if (errorTitle) {
+      (err as { errorTitle?: string }).errorTitle = errorTitle;
+    }
+    throw err;
   }
 
   const data: ProductListResponse = await response.json();
@@ -223,7 +239,7 @@ export async function getProducts(options?: {
 
 /**
  * Lấy chi tiết đồ uống từ Mock Data theo ID (`GET /products/:id`)
- * 
+ *
  * Lưu ý phân công SCRUM-28 vs SCRUM-32:
  * - Nhiệm vụ SCRUM-28 chỉ hiển thị Menu sản phẩm (`GET /products`).
  * - Nhấn vào sản phẩm ra chi tiết thuộc phạm vi SCRUM-32 do Lập phụ trách.

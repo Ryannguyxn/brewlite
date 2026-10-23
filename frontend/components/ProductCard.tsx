@@ -169,10 +169,8 @@ export default function ProductCard({ product }: ProductCardProps) {
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
           <span className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-title-sm text-title-sm shadow-md flex items-center justify-center gap-1.5 group-hover:bg-primary-container transition-all">
-            <span className="material-symbols-outlined text-[18px]">
-              shopping_cart
-            </span>
-            Thêm vào giỏ
+            <span className="material-symbols-outlined text-[18px]">visibility</span>
+            Xem chi tiết
           </span>
         </div>
       </div>

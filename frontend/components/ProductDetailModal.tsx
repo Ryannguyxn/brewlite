@@ -626,7 +626,7 @@ function ProductDetailModalContent({
                   className="font-title-sm text-[13px] font-semibold text-on-surface flex items-center justify-between"
                   htmlFor="order-notes"
                 >
-                  <span>Yêu cầu đặc biệt (Ghi chú pha chế)</span>
+                  <span>{isBakery ? "Yêu cầu đặc biệt (Ghi chú)" : "Yêu cầu đặc biệt (Ghi chú pha chế)"}</span>
                   <span className="font-body-sm text-[10.5px] font-normal text-outline">
                     Không bắt buộc
                   </span>
@@ -638,7 +638,7 @@ function ProductDetailModalContent({
                     className="w-full py-1.5 pl-2.5 pr-11 bg-surface-container-low rounded-lg text-on-surface placeholder:text-outline font-body-sm text-[12px] focus:outline-none focus:bg-surface-container transition-all resize-none disabled:opacity-60"
                     id="order-notes"
                     maxLength={100}
-                    placeholder="Ví dụ: Ít ngọt 50%, nhiều đá, để đá riêng..."
+                    placeholder={isBakery ? "" : "Ví dụ: Ít ngọt 50%, nhiều đá, để đá riêng..."}
                     rows={1}
                     value={note}
                     onChange={(e) => setNote(e.target.value.slice(0, 100))}

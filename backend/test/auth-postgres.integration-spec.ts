@@ -47,13 +47,14 @@ describe('Register → Login → Guard with a PostgreSQL datasource', () => {
       imports: [AppModule],
       controllers: [IdentityController],
     }).compile();
-    prisma = module.get(PrismaService);
+    const prismaService = module.get<PrismaService>(PrismaService);
+    prisma = prismaService;
     jwt = module.get(JwtService);
     app = module.createNestApplication({ logger: false });
     await app.init();
     // Fail during setup with the database error if the connection/migrations
     // are missing, rather than reporting misleading API assertions below.
-    await prisma.user.count();
+    await prismaService.user.count();
   });
 
   afterAll(async () => {

@@ -27,6 +27,17 @@ export class ProductsService {
           imageUrl: true,
           basePriceVnd: true,
           stock: true,
+          description: true,
+          rating: true,
+          isNew: true,
+          isBestseller: true,
+          category: {
+            select: {
+              code: true,
+              name: true,
+              isActive: true,
+            },
+          },
         },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
       });
@@ -42,7 +53,19 @@ export class ProductsService {
             name: product.name,
             imageUrl: product.imageUrl,
             basePriceVnd: this.toPriceNumber(product.basePriceVnd),
-            isAvailable: product.stock > 0,
+            isAvailable:
+              product.stock > 0 && product.category.isActive,
+            category: {
+              code: product.category.code,
+              name: product.category.name,
+            },
+            description: product.description,
+            rating:
+              product.rating === null
+                ? null
+                : Number(product.rating),
+            isNew: product.isNew,
+            isBestseller: product.isBestseller,
           };
         }),
       };
@@ -62,6 +85,37 @@ export class ProductsService {
           imageUrl: true,
           basePriceVnd: true,
           stock: true,
+          description: true,
+          rating: true,
+          isNew: true,
+          isBestseller: true,
+          sizePolicy: true,
+          category: {
+            select: {
+              code: true,
+              name: true,
+              isActive: true,
+            },
+          },
+          productToppings: {
+            where: {
+              topping: {
+                isAvailable: true,
+              },
+            },
+            select: {
+              topping: {
+                select: {
+                  id: true,
+                  name: true,
+                  priceVnd: true,
+                },
+              },
+            },
+            orderBy: {
+              toppingId: 'asc',
+            },
+          },
         },
       });
 
@@ -69,28 +123,32 @@ export class ProductsService {
         throw new NotFoundException('Product not found');
       }
 
-      // Sprint 1 dùng chung danh sách topping cho mọi sản phẩm.
-      const toppings = await this.prisma.topping.findMany({
-        select: {
-          id: true,
-          name: true,
-          priceVnd: true,
-        },
-        orderBy: { id: 'asc' },
-      });
+      const sizes: ProductDetailDto['sizes'] =
+        product.sizePolicy === 'ONE_SIZE'
+          ? [{ size: 'ONE_SIZE', multiplierPercent: 100 }]
+          : [
+              { size: 'S', multiplierPercent: 100 },
+              { size: 'M', multiplierPercent: 120 },
+              { size: 'L', multiplierPercent: 140 },
+            ];
 
       return {
         id: product.id,
         name: product.name,
         imageUrl: product.imageUrl,
         basePriceVnd: this.toPriceNumber(product.basePriceVnd),
-        isAvailable: product.stock > 0,
-        sizes: [
-          { size: 'S', multiplierPercent: 100 },
-          { size: 'M', multiplierPercent: 120 },
-          { size: 'L', multiplierPercent: 140 },
-        ],
-        toppings: toppings.map((topping) => ({
+        isAvailable: product.stock > 0 && product.category.isActive,
+        category: {
+          code: product.category.code,
+          name: product.category.name,
+        },
+        description: product.description,
+        rating: product.rating === null ? null : Number(product.rating),
+        isNew: product.isNew,
+        isBestseller: product.isBestseller,
+        sizePolicy: product.sizePolicy,
+        sizes,
+        toppings: product.productToppings.map(({ topping }) => ({
           id: topping.id,
           name: topping.name,
           priceVnd: this.toPriceNumber(topping.priceVnd),

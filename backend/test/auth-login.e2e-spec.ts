@@ -84,7 +84,7 @@ describe('Login and JWT guard (HTTP)', () => {
     await app?.close();
   });
 
-  async function login(body: unknown = { email, password }) {
+  async function login(body: object | string = { email, password }) {
     return request(app.getHttpServer()).post('/auth/login').send(body);
   }
 

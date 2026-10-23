@@ -12,6 +12,7 @@ import {
 interface HeaderProps {
   cartCount?: number;
   onCartClick?: () => void;
+  onFeatureNotice?: (featureLabel: string) => void;
   searchQuery?: string;
   onSearchChange?: (value: string) => void;
   activeNav?: "thuc-don" | "khuyen-mai" | "lich-su-don-hang" | "ve-brewlite";
@@ -22,12 +23,19 @@ interface HeaderProps {
 export default function Header({
   cartCount = 0,
   onCartClick,
+  onFeatureNotice,
   searchQuery = "",
   onSearchChange,
   activeNav = "thuc-don",
   userProfile = MOCK_USER_PROFILE,
   siteConfig = MOCK_SITE_CONFIG,
 }: HeaderProps) {
+  const handleNotice = (label: string) => {
+    if (onFeatureNotice) {
+      onFeatureNotice(label);
+    }
+  };
+
   return (
     <header className="fixed top-0 left-0 right-0 w-full z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
       <div className="h-20 max-w-[1320px] mx-auto px-margin flex items-center justify-between gap-gutter">
@@ -43,6 +51,7 @@ export default function Header({
             </span>
           </Link>
           <button
+            onClick={() => handleNotice("Chọn chi nhánh")}
             className="hidden xl:flex items-center gap-space-xs px-space-sm py-1.5 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors cursor-pointer"
             type="button"
           >
@@ -88,7 +97,7 @@ export default function Header({
           </Link>
           <button
             type="button"
-            onClick={() => {}}
+            onClick={() => handleNotice("Khuyến mãi")}
             className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors cursor-pointer ${
               activeNav === "khuyen-mai"
                 ? "bg-primary text-on-primary shadow-sm font-semibold"
@@ -99,7 +108,7 @@ export default function Header({
           </button>
           <button
             type="button"
-            onClick={() => {}}
+            onClick={() => handleNotice("Lịch sử đơn hàng")}
             className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors cursor-pointer"
           >
             Lịch sử đơn hàng
@@ -115,7 +124,13 @@ export default function Header({
         <div className="flex items-center gap-space-md flex-shrink-0">
           <button
             id="header-cart-btn"
-            onClick={() => onCartClick?.()}
+            onClick={() => {
+              if (onCartClick) {
+                onCartClick();
+              } else {
+                handleNotice("Giỏ hàng");
+              }
+            }}
             className="relative flex items-center gap-space-xs px-3.5 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface transition-all cursor-pointer"
             type="button"
           >
@@ -132,7 +147,7 @@ export default function Header({
 
           <button
             type="button"
-            onClick={() => {}}
+            onClick={() => handleNotice("Tài khoản & Hội viên")}
             className="flex items-center gap-space-sm pl-2 group cursor-pointer"
           >
             <img

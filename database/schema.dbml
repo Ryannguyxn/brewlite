@@ -26,6 +26,12 @@ Enum drink_size {
   S
   M
   L
+  ONE_SIZE
+}
+
+Enum product_size_policy {
+  STANDARD
+  ONE_SIZE
 }
 
 Enum payment_method {
@@ -63,10 +69,11 @@ Enum inventory_movement_reason {
 Table users {
   id uuid [pk, not null]
   email varchar(255) [not null, unique, note: 'Trimmed and lowercased before storage']
-  password_hash varchar(255) [not null, note: 'bcrypt hash only']
+  password_hash varchar(255) [not null, note: 'Argon2id password hash; never store plaintext passwords']
   full_name varchar(255)
   loyalty_points int [not null, default: 0, check: `loyalty_points >= 0`]
   created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
 
   Note: '''
     CHECK CONSTRAINT REQUIRED
@@ -78,24 +85,103 @@ Table users {
   '''
 }
 
-Table products {
+Table categories {
   id uuid [pk, not null]
-  name varchar(255) [not null]
-  base_price_vnd bigint [not null, check: `base_price_vnd >= 0`]
-  image_url varchar(2048) [not null]
-  stock int [not null, check: `stock >= 0`, note: 'Available cups across all sizes']
-  created_at timestamptz [not null, default: `now()`]
+  code varchar(50) [not null, unique]
+  name varchar(100) [not null]
+  is_active boolean [not null, default: true]
 
   Note: '''
-    CHECK CONSTRAINTS REQUIRED
+    PRODUCT CATEGORY RULES
 
-    1. ck_products_stock_nonnegative
-       CHECK (stock >= 0)
+    R1. UNIQUE CATEGORY CODE
+    Each category must have a unique, stable code.
 
-    2. ck_products_base_price_nonnegative
-       CHECK (base_price_vnd >= 0)
+    R2. CATEGORY AVAILABILITY
+    is_active = false means the category is
+    no longer available for normal browsing.
 
-    Implementation: PostgreSQL / Prisma migration
+    R3. DELETE POLICY
+    Categories referenced by Products must
+    not be deleted.
+
+    R4. ORDER ELIGIBILITY
+    Products belonging to inactive Categories
+    must not be accepted in new Orders.
+
+    The Backend must validate Category
+    availability during Order creation.
+
+    R5. HISTORICAL ORDERS
+    Deactivating a Category must not modify
+    existing Orders or OrderItem snapshots.
+
+    Existing Products remain stored.
+  '''
+}
+
+Table products {
+  id uuid [pk, not null]
+  category_id uuid [not null]
+  size_policy product_size_policy [not null, default: 'STANDARD']
+  name varchar(255) [not null]
+  description text
+  base_price_vnd bigint [not null]
+  image_url varchar(2048) [not null]
+  stock int [not null]
+  is_new boolean [not null, default: false]
+  is_bestseller boolean [not null, default: false]
+  rating decimal(2,1)
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    category_id [name: 'ix_products_category_id']
+  }
+
+  checks {
+    `base_price_vnd >= 0` [name: 'ck_products_base_price_nonnegative']
+    `stock >= 0` [name: 'ck_products_stock_nonnegative']
+    `rating IS NULL OR (rating >= 0 AND rating <= 5)` [name: 'ck_products_rating_range']
+  }
+
+  Note: '''
+    PRODUCT BUSINESS RULES
+
+    R1. CATEGORY
+    Each Product belongs to exactly one Category.
+
+    R2. AVAILABILITY
+
+    A Product is available for new Orders only when:
+    - products.stock > 0
+    - categories.is_active = true
+
+    Backend must validate both conditions
+    during Order creation.
+
+    Frontend must use the availability status
+    returned by the Backend.
+
+    Changing Category availability must not
+    affect historical Orders.
+
+    R3. RATING
+    rating is nullable when no rating exists.
+    For Assignment 1, ratings may be seeded
+    as demonstration data.
+
+    R4. BADGES
+    is_new and is_bestseller control UI badges.
+    Both default to false.
+
+    R5. TIMESTAMPS
+    updated_at must be maintained by the
+    application or database on updates.
+
+    R6. MIGRATION
+    Existing Products must be assigned a valid
+    Category before category_id becomes NOT NULL.
   '''
 }
 
@@ -104,6 +190,7 @@ Table toppings {
   code varchar(50) [not null, unique]
   name varchar(255) [not null]
   price_vnd bigint [not null, check: `price_vnd >= 0`]
+  is_available boolean [not null, default: true]
 
   Note: '''
     CHECK CONSTRAINT REQUIRED
@@ -111,7 +198,64 @@ Table toppings {
     ck_toppings_price_nonnegative
     CHECK (price_vnd >= 0)
 
-    Implementation: PostgreSQL / Prisma migration
+    TOPPING BUSINESS RULES
+
+    R1. AVAILABILITY
+    Only toppings with is_available = true
+    may be selected for new Orders.
+
+    R2. HISTORICAL DATA
+    Changing topping availability must not
+    affect existing OrderItemTopping snapshots.
+
+    R3. VALIDATION
+    Backend must validate topping availability
+    during Order creation.
+  '''
+}
+
+Table product_toppings {
+  product_id uuid [not null]
+  topping_id uuid [not null]
+
+  indexes {
+    (product_id, topping_id) [pk]
+    topping_id [name: 'ix_product_toppings_topping_id']
+  }
+
+  Note: '''
+    PRODUCT TOPPING BUSINESS RULES
+
+    R1. ELIGIBILITY
+    Only toppings linked to a Product may be
+    selected when creating a new Order.
+
+    R2. AVAILABILITY
+    A topping must have is_available = true
+    to be selected for new Orders.
+
+    R3. VALIDATION
+    Backend must validate both eligibility
+    and availability during Order creation.
+
+    R4. HISTORICAL DATA
+    Changes to product_toppings must not affect
+    existing OrderItemTopping snapshots.
+
+    R5. LIMIT
+    Maximum three distinct toppings per OrderItem.
+
+    R6. DELETE POLICY
+
+    ProductTopping is a configuration relation.
+
+    Deleting a Product or Topping may cascade
+    to its ProductTopping links only when
+    deletion is permitted by all other
+    historical and financial foreign keys.
+
+    Removing a ProductTopping link must not
+    modify historical OrderItemTopping records.
   '''
 }
 
@@ -217,7 +361,7 @@ Table order_items {
   product_id uuid [not null]
   product_name_snapshot varchar(255) [not null]
   size drink_size [not null]
-  size_percent_snapshot int [not null, note: 'S=100, M=120, L=140']
+  size_percent_snapshot int [not null, note: 'S=100, M=120, L=140, ONE_SIZE=100']
   base_price_snapshot_vnd bigint [not null]
   unit_price_vnd bigint [not null, note: 'Size-adjusted price plus topping snapshots']
   quantity int [not null, check: `quantity >= 1 AND quantity <= 10`]
@@ -233,6 +377,48 @@ Table order_items {
     order_id [name: 'ix_order_items_order_id']
     product_id [name: 'ix_order_items_product_id']
   }
+
+  Note: '''
+    ORDER ITEM SIZE RULES
+
+    R1. DRINK SIZES
+    Drinks may use S, M or L according to
+    the product's supported size policy.
+
+    R2. ONE SIZE PRODUCTS
+    Products without selectable sizes,
+    such as bakery items, use ONE_SIZE.
+
+    R3. SIZE PRICE MULTIPLIER
+    S = 100
+    M = 120
+    L = 140
+    ONE_SIZE = 100
+
+    R4. SERVER VALIDATION
+    Backend must reject an unsupported size
+    for the selected Product.
+
+    R5. HISTORICAL SNAPSHOT
+    The selected size and size percentage
+    are preserved in OrderItem snapshots.
+
+    R6. SIZE POLICY CONSISTENCY
+    The selected size must match the Product
+    size_policy at Order creation time.
+    STANDARD:
+    - Allowed sizes: S, M, L.
+    ONE_SIZE:
+    - Allowed size: ONE_SIZE only.
+    Backend must reject incompatible sizes.
+
+    R7. SIZE PRICE CALCULATION
+    size_adjusted_price_vnd =
+      floor(base_price_vnd * size_percent / 100)
+    The calculation must use integer arithmetic
+    and be performed by the Backend.
+    Topping prices are added after size adjustment.
+  '''
 }
 
 Table order_item_toppings {
@@ -539,7 +725,10 @@ Ref: users.id < coupon_redemptions.user_id [delete: restrict]
 
 Ref: products.id < order_items.product_id [delete: restrict]
 Ref: products.id < inventory_movements.product_id [delete: restrict]
+Ref: categories.id < products.category_id [delete: restrict]
+Ref: products.id < product_toppings.product_id [delete: cascade]
 
+Ref: toppings.id < product_toppings.topping_id [delete: cascade]
 Ref: toppings.id < order_item_toppings.topping_id [delete: restrict]
 
 Ref: coupons.id ?< orders.coupon_id [delete: restrict]

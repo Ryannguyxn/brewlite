@@ -1,0 +1,5 @@
+# Local database backups
+/db-backups/
+
+# Temporary SQL migration drafts
+/backend/product-catalog-upgrade-draft.sql

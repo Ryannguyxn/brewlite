@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="640"
+     height="640"
+     viewBox="0 0 640 640">
+
+  <rect width="640" height="640" fill="#F5EDE3"/>
+
+  <circle cx="320" cy="282" r="166" fill="#E7D2B9"/>
+
+  <path d="M215 220h210v170c0 48-36 84-84 84h-42c-48 0-84-36-84-84V220z"
+        fill="#9C6B48"/>
+
+  <path d="M425 250h28c65 0 65 110 0 110h-28"
+        fill="none"
+        stroke="#9C6B48"
+        stroke-width="25"/>
+
+  <path d="M277 185c-22-31 19-48 0-80M335 185c-22-31 19-48 0-80"
+        fill="none"
+        stroke="#9C6B48"
+        stroke-width="12"
+        stroke-linecap="round"/>
+
+  <text x="320" y="554"
+        font-family="Arial, sans-serif"
+        font-size="38"
+        font-weight="bold"
+        fill="#65452E"
+        text-anchor="middle">
+    BrewLite
+  </text>
+
+  <text x="320" y="586"
+        font-family="Arial, sans-serif"
+        font-size="18"
+        fill="#80644F"
+        text-anchor="middle">
+    Product Image
+  </text>
+
+</svg>

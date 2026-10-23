@@ -69,10 +69,19 @@ function ProductDetailModalContent({
   // ==========================================================================
 
   // State lưu kích cỡ đang chọn — Mặc định là Size S (100%) theo Business Rule
-  const [selectedSize, setSelectedSize] =
-    useState<DrinkSize>(DEFAULT_DRINK_SIZE);
+  const initialSize: DrinkSize = useMemo(() => {
+    if (product.sizePolicy === "ONE_SIZE") return "ONE_SIZE";
+    const found = product.sizes.find((s) => s.size === DEFAULT_DRINK_SIZE);
+    return found ? found.size : product.sizes[0]?.size || DEFAULT_DRINK_SIZE;
+  }, [product.sizePolicy, product.sizes]);
+
+  const [selectedSize, setSelectedSize] = useState<DrinkSize>(initialSize);
 
   // State lưu danh sách ID các topping đã tích chọn (tối đa 3 món)
+  const isBakery =
+    (typeof product.category === "object" && product.category?.code === "bakery") ||
+    product.sizePolicy === "ONE_SIZE";
+
   const [selectedToppingIds, setSelectedToppingIds] = useState<string[]>([]);
 
   // State lưu số lượng ly (số nguyên từ 1 đến 10)
@@ -318,7 +327,7 @@ function ProductDetailModalContent({
                     </span>
                   )}
                   <span className="px-2 py-0.5 rounded-full bg-surface-container-lowest/90 backdrop-blur-sm text-on-surface font-label-md text-[10.5px] shadow-sm">
-                    {product.originBadge || "Rang mộc Đắk Lắk"}
+                    {product.originBadge || (isBakery ? "Bơ Pháp hảo hạng" : "Rang mộc Đắk Lắk")}
                   </span>
                 </div>
 
@@ -349,9 +358,7 @@ function ProductDetailModalContent({
 
                 {/* Đoạn mô tả chi tiết hương vị của sản phẩm */}
                 <p className="font-body-md text-[12px] leading-snug text-on-surface-variant">
-                  {product.flavorNotes ||
-                    product.description ||
-                    "Hương vị sô-cô-la đen, đắng dịu êm ái, hậu ngọt mật ong đậm đà hòa quyện cùng sữa đặc béo ngậy chuẩn gu Sài Thành."}
+                  {product.flavorNotes || product.description || (isBakery ? "Bánh sừng bò bơ Pháp ngàn lớp thơm lừng giòn rụm bên ngoài, mềm xốp béo ngậy bên trong." : "Hương vị cà phê thơm nồng đậm đà, hậu vị ngọt sâu hòa quyện cùng sữa đặc béo ngậy.")}
                 </p>
 
                 {/* Đây là 3 ô thông số kỹ thuật của đồ uống: Độ đậm - Loại hạt - Phương pháp chế biến */}
@@ -362,7 +369,7 @@ function ProductDetailModalContent({
                       Độ đậm
                     </span>
                     <span className="font-label-md text-[11px] text-tertiary">
-                      {product.intensity || "4/5 • Đậm"}
+                      {product.intensity || (isBakery ? "Ngọt dịu" : "4/5 • Đậm")}
                     </span>
                   </div>
                   {/* Ô 2: Loại hạt */}
@@ -371,7 +378,7 @@ function ProductDetailModalContent({
                       Hạt
                     </span>
                     <span className="font-label-md text-[11px] text-on-surface">
-                      {product.beanType || "Robusta"}
+                      {product.beanType || (isBakery ? "Bột mì Pháp" : "Robusta")}
                     </span>
                   </div>
                   {/* Ô 3: Phương pháp chế biến */}
@@ -380,7 +387,7 @@ function ProductDetailModalContent({
                       Chế biến
                     </span>
                     <span className="font-label-md text-[11px] text-on-surface">
-                      {product.processMethod || "Honey"}
+                      {product.processMethod || (isBakery ? "Nướng tươi" : "Honey")}
                     </span>
                   </div>
                 </div>
@@ -391,8 +398,7 @@ function ProductDetailModalContent({
             <div className="flex items-center gap-1.5 pt-2 text-outline font-body-sm text-[11px]">
               <span className="material-symbols-outlined text-[15px]">eco</span>
               <span>
-                {product.sustainabilityNote ||
-                  "Hạt canh tác bền vững theo tiêu chuẩn UTZ"}
+                {product.sustainabilityNote || (isBakery ? "Nguyên liệu cao cấp tiêu chuẩn Châu Âu" : "Hạt canh tác bền vững theo tiêu chuẩn UTZ")}
               </span>
             </div>
           </div>
@@ -409,10 +415,10 @@ function ProductDetailModalContent({
                 {/* Đây là hàng nhãn phân loại công thức, cách phục vụ và trạng thái Còn hàng / Hết hàng */}
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="font-label-md text-[10.5px] text-primary bg-primary-fixed px-2 py-0.5 rounded-full">
-                    {product.recipeTag || "Công thức Độc Quyền"}
+                    {product.recipeTag || (isBakery ? "Bánh nướng thủ công" : "Công thức Độc Quyền")}
                   </span>
                   <span className="font-body-sm text-[11px] text-outline">
-                    • {product.servingNote || "Phục vụ lạnh"}
+                    • {product.servingNote || (isBakery ? "Phục vụ ấm / nóng" : "Phục vụ lạnh")}
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded-full font-label-md text-[10px] ${
@@ -461,7 +467,7 @@ function ProductDetailModalContent({
                 </div>
 
                 {/* Đây là 3 ô chọn Size: Size S, Size M, Size L */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className={`grid gap-2 ${product.sizes.length === 1 ? "grid-cols-1 max-w-[220px]" : "grid-cols-3"}`}>
                   {product.sizes.map((sizeOption) => {
                     const isSelected = selectedSize === sizeOption.size;
                     const extraPriceVnd = calculateSizeExtraVnd(
@@ -499,7 +505,7 @@ function ProductDetailModalContent({
                               isSelected ? "text-primary" : "text-on-surface"
                             }`}
                           >
-                            Size {sizeOption.size}
+                            {sizeOption.size === "ONE_SIZE" ? "Tiêu chuẩn (One Size)" : `Size ${sizeOption.size}`}
                           </span>
                           {/* Dung tích & phần trăm hệ số giá (100% / 120% / 140%) */}
                           <span className="font-body-sm text-[10.5px] leading-tight text-on-surface-variant">

@@ -237,24 +237,6 @@ export async function getProducts(options?: {
   };
 }
 
-/**
- * Lấy chi tiết đồ uống từ Mock Data theo ID (`GET /products/:id`)
- *
- * Lưu ý phân công SCRUM-28 vs SCRUM-32:
- * - Nhiệm vụ SCRUM-28 chỉ hiển thị Menu sản phẩm (`GET /products`).
- * - Nhấn vào sản phẩm ra chi tiết thuộc phạm vi SCRUM-32 do Lập phụ trách.
- * - Giữ nguyên hàm này nhằm đảm bảo tính tương thích và tránh xung đột khi merge với SCRUM-32.
- */
-export async function getProductById(
-  id: string
-): Promise<ProductDetail | null> {
-  const trimmedId = (id || "").trim();
-  if (!isValidUuid(trimmedId)) {
-    return null;
-  }
-  return MOCK_PRODUCT_DETAILS[trimmedId] ?? null;
-}
-
 export type ProductDetailLookupResult =
   | {
       status: 200;
@@ -269,13 +251,163 @@ export type ProductDetailLookupResult =
       status: 404;
       message: string;
       error: "Not Found";
+    }
+  | {
+      status: 500;
+      message: string;
+      error: "Internal Server Error";
     };
 
 /**
- * Tra cứu chi tiết sản phẩm theo chuẩn HTTP status của API Contract v2.1 Mục 4 & Mục 5:
- * - 400 Bad Request: ID không đúng định dạng UUID (`Validation failed (uuid is expected)`)
- * - 404 Not Found: ID đúng UUID nhưng không tồn tại (`Product not found`)
- * - 200 OK: Trả về `ProductDetail` đầy đủ (`sizes`, `toppings`, `isAvailable`, ...)
+ * Gọi thực tế API Backend `GET /products/:id` (SCRUM-32: Integrate Product Detail API)
+ * - Tuân thủ API Contract v2.1 Mục 4.
+ * - Gọi request tới `${API_BASE_URL}/products/:id` (tự động fallback qua Next.js rewrite `/api/backend/products/:id` nếu gặp chặn CORS trên client)
+ * - Xử lý đầy đủ các mã trạng thái HTTP: 200 OK, 400 Bad Request, 404 Not Found, 500 Internal Server Error & lỗi mạng.
+ */
+export async function fetchProductDetailById(
+  id: string,
+  signal?: AbortSignal
+): Promise<ProductDetailLookupResult> {
+  const trimmedId = (id || "").trim();
+
+  // Kiểm tra nhanh định dạng UUID trước để trả về 400 theo chuẩn
+  if (!isValidUuid(trimmedId)) {
+    return {
+      status: 400,
+      message: "Validation failed (uuid is expected)",
+      error: "Bad Request",
+    };
+  }
+
+  const isBrowser = typeof window !== "undefined";
+  const encodedId = encodeURIComponent(trimmedId);
+  const primaryUrl = isBrowser
+    ? `/api/backend/products/${encodedId}`
+    : `${API_BASE_URL}/products/${encodedId}`;
+  const fallbackUrl = isBrowser
+    ? `${API_BASE_URL}/products/${encodedId}`
+    : `/api/backend/products/${encodedId}`;
+
+  let response: Response;
+  try {
+    response = await fetch(primaryUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      signal,
+    });
+  } catch (primaryErr) {
+    if (signal?.aborted) throw primaryErr;
+    try {
+      response = await fetch(fallbackUrl, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+        cache: "no-store",
+        signal,
+      });
+    } catch (fallbackErr) {
+      if (signal?.aborted) throw fallbackErr;
+      return {
+        status: 500,
+        message:
+          "Không thể kết nối đến máy chủ Backend (GET /products/:id). Vui lòng kiểm tra lại dịch vụ Backend.",
+        error: "Internal Server Error",
+      };
+    }
+  }
+
+  if (response.status === 400) {
+    const errorJson = await response.json().catch(() => null);
+    return {
+      status: 400,
+      message:
+        typeof errorJson?.message === "string"
+          ? errorJson.message
+          : "Validation failed (uuid is expected)",
+      error: "Bad Request",
+    };
+  }
+
+  if (response.status === 404) {
+    const errorJson = await response.json().catch(() => null);
+    return {
+      status: 404,
+      message:
+        typeof errorJson?.message === "string"
+          ? errorJson.message
+          : "Product not found",
+      error: "Not Found",
+    };
+  }
+
+  if (!response.ok) {
+    const errorJson = await response.json().catch(() => null);
+    return {
+      status: 500,
+      message:
+        typeof errorJson?.message === "string"
+          ? errorJson.message
+          : `Lỗi máy chủ khi tải chi tiết sản phẩm (HTTP ${response.status}).`,
+      error: "Internal Server Error",
+    };
+  }
+
+  const apiData = (await response.json()) as ProductDetail;
+
+  // Lấy thêm metadata phụ trợ nếu có trong mock data (flavorNotes, originBadge, v.v.)
+  const uiMeta = MOCK_PRODUCT_DETAILS[apiData.id];
+
+  return {
+    status: 200,
+    data: {
+      ...uiMeta,
+      ...apiData,
+      id: apiData.id,
+      name: apiData.name,
+      imageUrl: apiData.imageUrl || uiMeta?.imageUrl || FALLBACK_DRINK_IMAGE,
+      basePriceVnd: Number(apiData.basePriceVnd),
+      isAvailable: Boolean(apiData.isAvailable),
+      sizePolicy:
+        apiData.sizePolicy ||
+        (apiData.sizes?.length === 1 && apiData.sizes[0]?.size === "ONE_SIZE"
+          ? "ONE_SIZE"
+          : "STANDARD"),
+      sizes: Array.isArray(apiData.sizes)
+        ? apiData.sizes.map((s) => ({
+            size: s.size,
+            multiplierPercent: Number(s.multiplierPercent),
+          }))
+        : [],
+      toppings: Array.isArray(apiData.toppings)
+        ? apiData.toppings.map((t) => ({
+            id: t.id,
+            code: t.code,
+            name: t.name,
+            priceVnd: Number(t.priceVnd),
+            isAvailable: t.isAvailable !== false,
+          }))
+        : [],
+    },
+  };
+}
+
+/**
+ * Lấy chi tiết đồ uống theo ID (`GET /products/:id`)
+ * Kết nối API Backend thật và trả về ProductDetail nếu thành công (200 OK)
+ */
+export async function getProductById(
+  id: string
+): Promise<ProductDetail | null> {
+  const result = await fetchProductDetailById(id);
+  return result.status === 200 ? result.data : null;
+}
+
+/**
+ * Tra cứu chi tiết sản phẩm từ Mock Data (giữ lại hỗ trợ fallback / test offline)
  */
 export function lookupProductDetailById(id: string): ProductDetailLookupResult {
   const trimmedId = (id || "").trim();

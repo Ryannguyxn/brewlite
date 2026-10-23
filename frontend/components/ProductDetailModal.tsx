@@ -51,6 +51,7 @@ const SIZE_VOLUME_LABELS: Record<DrinkSize, string> = {
   S: "Tiêu chuẩn (350ml)",
   M: "Vừa (480ml)",
   L: "Lớn (650ml)",
+  ONE_SIZE: "Tiêu chuẩn (500ml)",
 };
 
 export default function ProductDetailModal(props: ProductDetailModalProps) {
@@ -767,3 +768,4 @@ function ProductDetailModalContent({
     </div>
   );
 }
+

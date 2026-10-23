@@ -1,7 +1,8 @@
 # SCRUM-38 — Register API
 
 Endpoint public: POST /auth/register. Auth tag on /api-docs.
-This change implements registration only. Login/JWT/Guard belong to SCRUM-39.
+This document covers registration. Login/JWT/Guard are documented in
+[README-login.md](./README-login.md) for SCRUM-39.
 
 ## Dependency on the shared schema
 
@@ -29,6 +30,8 @@ npm run start:dev
 ```
 
 Use DATABASE_URL in backend/.env for your local PostgreSQL. Do not commit .env.
+With SCRUM-39, also configure JWT_SECRET as described in README-login.md before
+starting the app. Keep your existing database connection and local PORT.
 A User-aware generated client is required; generating from the old Product-only
 schema will correctly report that PrismaService.user does not exist.
 

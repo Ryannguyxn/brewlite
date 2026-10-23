@@ -24,14 +24,14 @@ const prisma = new PrismaClient({ adapter });
 const imageUrl = "/images/product-placeholder.svg";
 
 const products = [
-  { id: "a1000000-0000-4000-8000-000000000001", name: "Cà phê đen", price: 30000, stock: 30 },
-  { id: "a1000000-0000-4000-8000-000000000002", name: "Cà phê sữa", price: 35000, stock: 25 },
-  { id: "a1000000-0000-4000-8000-000000000003", name: "Bạc xỉu", price: 40000, stock: 20 },
-  { id: "a1000000-0000-4000-8000-000000000004", name: "Cappuccino", price: 45000, stock: 15 },
-  { id: "a1000000-0000-4000-8000-000000000005", name: "Latte", price: 45000, stock: 15 },
-  { id: "a1000000-0000-4000-8000-000000000006", name: "Trà đào cam sả", price: 42000, stock: 18 },
-  { id: "a1000000-0000-4000-8000-000000000007", name: "Matcha Latte", price: 50000, stock: 10 },
-  { id: "a1000000-0000-4000-8000-000000000008", name: "Trà sữa truyền thống", price: 40000, stock: 0 },
+  { id: "a1000000-0000-4000-8000-000000000001", name: "Cà phê đen", price: 30000, stock: 30, categoryCode: "traditional" },
+  { id: "a1000000-0000-4000-8000-000000000002", name: "Cà phê sữa", price: 35000, stock: 25, categoryCode: "traditional" },
+  { id: "a1000000-0000-4000-8000-000000000003", name: "Bạc xỉu", price: 40000, stock: 20, categoryCode: "traditional" },
+  { id: "a1000000-0000-4000-8000-000000000004", name: "Cappuccino", price: 45000, stock: 15, categoryCode: "espresso_coldbrew" },
+  { id: "a1000000-0000-4000-8000-000000000005", name: "Latte", price: 45000, stock: 15, categoryCode: "espresso_coldbrew" },
+  { id: "a1000000-0000-4000-8000-000000000006", name: "Trà đào cam sả", price: 42000, stock: 18, categoryCode: "tea_macchiato" },
+  { id: "a1000000-0000-4000-8000-000000000007", name: "Matcha Latte", price: 50000, stock: 10, categoryCode: "tea_macchiato" },
+  { id: "a1000000-0000-4000-8000-000000000008", name: "Trà sữa truyền thống", price: 40000, stock: 0, categoryCode: "tea_macchiato" },
 ] as const;
 
 const toppings = [
@@ -45,6 +45,17 @@ const toppings = [
 async function main() {
   await prisma.$transaction(async (tx) => {
     for (const product of products) {
+      const category = await tx.category.findUnique({
+        where: { code: product.categoryCode },
+        select: { id: true },
+      });
+
+      if (!category) {
+        throw new Error(
+          `Category "${product.categoryCode}" not found for product "${product.name}"`,
+        );
+      }
+
       const data = {
         name: product.name,
         basePriceVnd: BigInt(product.price),
@@ -54,7 +65,11 @@ async function main() {
 
       await tx.product.upsert({
         where: { id: product.id },
-        create: { id: product.id, ...data },
+        create: {
+          id: product.id,
+          ...data,
+          categoryId: category.id,
+        },
         update: data,
       });
     }

@@ -8,7 +8,7 @@ import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 export type { ProductListItem as ProductItem };
 
 interface ProductCardProps {
-  /** Dữ liệu 1 đồ uống theo API Contract v1.0 (`id`, `name`, `imageUrl`, `basePriceVnd`, `isAvailable`) */
+  /** Dữ liệu 1 đồ uống theo API Contract v2.1 (`id`, `name`, `imageUrl`, `basePriceVnd`, `isAvailable`, `category`, `description`, `rating`, `isNew`, `isBestseller`) */
   product: ProductListItem;
   onAddToCart?: (product: ProductListItem) => void;
 }
@@ -16,14 +16,41 @@ interface ProductCardProps {
 export default function ProductCard({ product }: ProductCardProps) {
   const formattedPrice = formatVnd(product.basePriceVnd);
   const altText = product.imageAlt || product.name;
-  const ratingText = product.rating || "4.9";
-  const reviewsText = product.reviews || "Chuẩn vị thủ công";
+
+  // Lấy tên danh mục
+  const categoryName =
+    typeof product.category === "object" && product.category !== null
+      ? product.category.name
+      : undefined;
+
+  // Xử lý badge theo API Contract v2.1 (isBestseller / isNew) hoặc trường badge tùy chọn
+  const badgeLabel = product.isBestseller
+    ? "Best Seller"
+    : product.isNew
+    ? "Mới"
+    : product.badge;
+
+  // Xử lý rating theo API Contract v2.1:
+  // "Không tạo giá trị rating giả; rating chưa có thì trả null."
+  const hasRating =
+    product.rating !== null &&
+    product.rating !== undefined &&
+    typeof product.rating === "number" &&
+    product.rating > 0;
+  const ratingText = hasRating ? Number(product.rating).toFixed(1) : null;
+
+  const reviewsText =
+    product.reviews || (categoryName ? categoryName : "Chuẩn vị thủ công");
+
   const descriptionText =
     product.description ||
-    "Tùy chọn kích cỡ Size S (100%), Size M (120%), Size L (140%) và tối đa 3 loại topping.";
+    (categoryName
+      ? `${categoryName} pha chế thủ công chuẩn vị nguyên bản BrewLite.`
+      : "Tùy chọn kích cỡ Size S, M, L và tối đa 3 loại topping.");
+
   const detailHref = `/products/${product.id}`;
 
-  // Trạng thái Hết hàng (`isAvailable === false` theo API Contract Mục 3.2 & US-CAT-04)
+  // Trạng thái Hết hàng (`isAvailable === false` theo API Contract v2.1 Mục 3.4 & US-CAT-04)
   // Nhấn vào bất kỳ vị trí nào trên thẻ vẫn mở trang Product Detail (nút Thêm vào giỏ trong trang Detail sẽ bị khóa)
   if (!product.isAvailable) {
     return (
@@ -59,17 +86,23 @@ export default function ProductCard({ product }: ProductCardProps) {
               <h3 className="font-title-md text-title-md text-on-surface group-hover:text-primary transition-colors">
                 {product.name}
               </h3>
-              <div className="flex items-center gap-1 text-outline flex-shrink-0">
-                <span
-                  className="material-symbols-outlined text-[16px]"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  star
+              {hasRating ? (
+                <div className="flex items-center gap-1 text-outline flex-shrink-0">
+                  <span
+                    className="material-symbols-outlined text-[16px]"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    star
+                  </span>
+                  <span className="font-label-md text-label-md">
+                    {ratingText}
+                  </span>
+                </div>
+              ) : (
+                <span className="font-label-sm text-[12px] text-outline">
+                  {categoryName || "Thủ công"}
                 </span>
-                <span className="font-label-md text-label-md">
-                  {ratingText}
-                </span>
-              </div>
+              )}
             </div>
             <p className="font-body-sm text-body-sm text-outline line-clamp-2 mb-2">
               {descriptionText}
@@ -101,7 +134,7 @@ export default function ProductCard({ product }: ProductCardProps) {
     );
   }
 
-  // Trạng thái Còn hàng (`isAvailable === true` theo API Contract Mục 3.2 & US-CAT-01)
+  // Trạng thái Còn hàng (`isAvailable === true` theo API Contract v2.1 Mục 3.4 & US-CAT-01)
   // Toàn bộ thẻ là một <Link> dẫn tới `/products/${product.id}`
   return (
     <Link
@@ -121,25 +154,23 @@ export default function ProductCard({ product }: ProductCardProps) {
             }
           }}
         />
-        {product.badge && (
+        {badgeLabel && (
           <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10">
             <span
               className={`px-2.5 py-1 rounded-full font-label-md text-label-md shadow-sm font-semibold ${
-                product.badge === "Best Seller"
+                badgeLabel === "Best Seller"
                   ? "bg-tertiary-container text-on-tertiary-container"
                   : "bg-secondary-container text-on-secondary-container"
               }`}
             >
-              {product.badge}
+              {badgeLabel}
             </span>
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
           <span className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-title-sm text-title-sm shadow-md flex items-center justify-center gap-1.5 group-hover:bg-primary-container transition-all">
-            <span className="material-symbols-outlined text-[18px]">
-              shopping_cart
-            </span>
-            Thêm vào giỏ
+            <span className="material-symbols-outlined text-[18px]">visibility</span>
+            Xem chi tiết
           </span>
         </div>
       </div>
@@ -150,17 +181,23 @@ export default function ProductCard({ product }: ProductCardProps) {
             <h3 className="font-title-md text-title-md text-on-surface group-hover:text-primary transition-colors">
               {product.name}
             </h3>
-            <div className="flex items-center gap-1 text-tertiary flex-shrink-0">
-              <span
-                className="material-symbols-outlined text-[16px]"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                star
+            {hasRating ? (
+              <div className="flex items-center gap-1 text-tertiary flex-shrink-0">
+                <span
+                  className="material-symbols-outlined text-[16px]"
+                  style={{ fontVariationSettings: "'FILL' 1" }}
+                >
+                  star
+                </span>
+                <span className="font-label-md text-label-md font-bold">
+                  {ratingText}
+                </span>
+              </div>
+            ) : (
+              <span className="font-label-sm text-[12px] text-on-surface-variant">
+                {categoryName || "Thủ công"}
               </span>
-              <span className="font-label-md text-label-md font-bold">
-                {ratingText}
-              </span>
-            </div>
+            )}
           </div>
           <p className="font-body-sm text-body-sm text-on-surface-variant line-clamp-2 mb-2">
             {descriptionText}

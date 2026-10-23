@@ -27,11 +27,13 @@ import { fetchCatalogData } from "@/services/api.service";
 
 export default function HomePage() {
   // ==========================================================================
-  // PHẦN 1: QUẢN LÝ STATE & TẢI DỮ LIỆU BẤT ĐỒNG BỘ (LOADING -> DATA / EMPTY / ERROR)
+  // PHẦN 1: QUẢN LÝ STATE & TẢI DỮ LIỆU TỪ API (GET /products)
   // ==========================================================================
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<number | null>(null);
+  const [errorTitle, setErrorTitle] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState<number>(0);
 
   const [categories, setCategories] =
@@ -87,8 +89,10 @@ export default function HomePage() {
         setHeroBanner(catalogRes.heroBanner);
         setSiteConfig(catalogRes.siteConfig);
         setErrorMessage(null);
+        setErrorCode(null);
+        setErrorTitle(null);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (isCancelled) return;
         setProducts([]);
         setCategories(
@@ -100,9 +104,21 @@ export default function HomePage() {
           ...prev,
           totalCatalogCount: 0,
         }));
-        setErrorMessage(
-          "Hệ thống kết nối đến quầy bar chi nhánh Saigon Center đang bị gián đoạn hoặc đường truyền không ổn định. Dữ liệu thực đơn và giá món chưa thể cập nhật theo thời gian thực."
-        );
+        const customMsg =
+          err instanceof Error && err.message
+            ? err.message
+            : "Hệ thống kết nối đến quầy bar chi nhánh Saigon Center đang bị gián đoạn hoặc đường truyền không ổn định. Dữ liệu thực đơn và giá món chưa thể cập nhật theo thời gian thực.";
+        const status =
+          typeof (err as { statusCode?: unknown })?.statusCode === "number"
+            ? (err as { statusCode: number }).statusCode
+            : null;
+        const title =
+          typeof (err as { errorTitle?: unknown })?.errorTitle === "string"
+            ? (err as { errorTitle: string }).errorTitle
+            : null;
+        setErrorMessage(customMsg);
+        setErrorCode(status);
+        setErrorTitle(title);
       })
       .finally(() => {
         if (isCancelled) return;
@@ -121,6 +137,8 @@ export default function HomePage() {
     setSearchQuery("");
     setIsLoading(true);
     setErrorMessage(null);
+    setErrorCode(null);
+    setErrorTitle(null);
     setProducts([]);
     setReloadKey((prev) => prev + 1);
   };
@@ -157,12 +175,18 @@ export default function HomePage() {
     setToastVisible(false);
   };
 
-  // Lọc và sắp xếp danh sách sản phẩm theo đúng trường chuẩn của API Contract (`basePriceVnd`, `name`, `id`, `isAvailable`)
+  // Lọc và sắp xếp danh sách sản phẩm theo đúng chuẩn API Contract v2.1 (`basePriceVnd`, `name`, `id`, `isAvailable`, `category`)
   const filteredProducts = useMemo(() => {
     let list = [...products];
 
     if (activeCategory !== "all") {
-      list = list.filter((p) => !p.category || p.category === activeCategory);
+      list = list.filter((p) => {
+        const catCode =
+          typeof p.category === "object" && p.category !== null
+            ? p.category.code
+            : p.category;
+        return catCode === activeCategory;
+      });
     }
 
     if (searchQuery.trim()) {
@@ -200,10 +224,14 @@ export default function HomePage() {
       );
     } else if (sortBy === "newest") {
       list.sort(
-        (a, b) => (b.badge === "Mới" ? 1 : 0) - (a.badge === "Mới" ? 1 : 0)
+        (a, b) =>
+          (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0) ||
+          (b.badge === "Mới" ? 1 : 0) - (a.badge === "Mới" ? 1 : 0) ||
+          a.name.localeCompare(b.name, "vi") ||
+          a.id.localeCompare(b.id)
       );
     } else {
-      // Mặc định theo API Contract Mục 3.5 & BR-017: sắp xếp theo `name` ASC, sau đó `id` ASC
+      // Mặc định theo API Contract v2.1 Mục 3.4 & BR-017: sắp xếp theo `name` ASC, sau đó `id` ASC
       list.sort(
         (a, b) =>
           a.name.localeCompare(b.name, "vi") || a.id.localeCompare(b.id)
@@ -255,7 +283,7 @@ export default function HomePage() {
                     bolt
                   </span>
                   <span>
-                    Phiên kết nối SCA-API v2.4 • Độ trễ dự kiến: ~420ms
+                    Phiên kết nối API v2.1 • Cổng máy chủ 3001
                   </span>
                 </div>
               </div>
@@ -315,17 +343,18 @@ export default function HomePage() {
             {/* 1. TRẠNG THÁI LOADING (SKELETON SHIMMER) — Chỉ hiển thị khi đang tải chưa nhận dữ liệu */}
             {isLoading && <ProductSkeletonGrid />}
 
-            {/* 2. TRẠNG THÁI LỖI KẾT NỐI (ERROR STATE — API Contract Mục 5.6 & 5.7) */}
+            {/* 2. TRẠNG THÁI LỖI KẾT NỐI (ERROR STATE — API Contract v2.1 Mục 5) */}
             {!isLoading && errorMessage && (
               <ProductErrorState
                 onRetry={handleRetryLoad}
                 errorMessage={errorMessage}
-                errorCode={500}
+                errorCode={errorCode}
+                errorTitle={errorTitle || undefined}
                 hotline={siteConfig.hotline}
               />
             )}
 
-            {/* 3. TRẠNG THÁI EMPTY STATE (Mảng dữ liệu rỗng items: [] khi GET /products trả về 200 OK — API Contract Mục 3.5 & 5.7) */}
+            {/* 3. TRẠNG THÁI EMPTY STATE (Mảng dữ liệu rỗng items: [] khi GET /products trả về 200 OK — API Contract v2.1 Mục 3.4) */}
             {!isLoading && !errorMessage && filteredProducts.length === 0 && (
               <ProductEmptyState
                 onReloadMenu={handleRetryLoad}

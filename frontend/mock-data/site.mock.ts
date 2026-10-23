@@ -51,7 +51,7 @@ export const MOCK_SITE_CONFIG: SiteConfigData = {
   copyright: "© 2025 BrewLite Specialty Coffee Co. Mọi quyền được bảo lưu.",
   tagline: "Thiết kế cho người yêu cà phê nguyên bản Việt Nam.",
   deliveryHighlight: "Phục vụ nhanh chóng • Chuẩn vị cà phê thủ công",
-  totalCatalogCount: 9,
+  totalCatalogCount: 8,
   branches: [
     {
       id: "branch-1",

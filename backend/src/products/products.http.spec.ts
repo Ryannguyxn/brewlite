@@ -34,6 +34,17 @@ describe('GET /products HTTP', () => {
     imageUrl: '/images/product-placeholder.svg',
     basePriceVnd: 35000n,
     stock: 25,
+    description: 'Cà phê sữa pha phin truyền thống',
+    rating: null,
+    isNew: false,
+    isBestseller: false,
+    sizePolicy: 'STANDARD',
+    productToppings: [],
+    category: {
+      code: 'traditional',
+      name: 'Cà phê truyền thống',
+      isActive: true,
+    },
   };
 
   beforeEach(async () => {
@@ -92,6 +103,14 @@ describe('GET /products HTTP', () => {
           imageUrl: row.imageUrl,
           basePriceVnd: 35000,
           isAvailable: true,
+          category: {
+            code: 'traditional',
+            name: 'Cà phê truyền thống',
+          },
+          description: row.description,
+          rating: null,
+          isNew: false,
+          isBestseller: false,
         },
         {
           id: 'a1000000-0000-4000-8000-000000000003',
@@ -99,6 +118,14 @@ describe('GET /products HTTP', () => {
           imageUrl: row.imageUrl,
           basePriceVnd: 35000,
           isAvailable: false,
+          category: {
+            code: 'traditional',
+            name: 'Cà phê truyền thống',
+          },
+          description: row.description,
+          rating: null,
+          isNew: false,
+          isBestseller: false,
         },
       ],
     });

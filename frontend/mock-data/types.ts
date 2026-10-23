@@ -1,17 +1,20 @@
 // ============================================================================
 // ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES / INTERFACES) CHO BREWLITE FRONTEND
 // Đối chiếu chuẩn 100% với:
-// - docs/api/BrewLite_API_Contract_v1.0.md (Mục 2, 3, 4, 5.1)
-// - docs/api/BrewLite_API_Contract_v2.0.md (Mục 3, 4, 5, 8)
-// - docs/requirements/BrewLite_Requirements_Specification.docx (BR-011 .. BR-017)
+// - docs/api/BrewLite_API_Contract_v2.1.md (Mục 2, 3, 4, 5.1)
+// - backend/prisma/seed.ts & Migration 5 (product_catalog_schema_upgrade)
+// - database/schema.dbml
 // ============================================================================
 
 export type CategoryId =
   | "all"
   | "traditional"
+  | "espresso_coldbrew"
+  | "tea_macchiato"
+  | "bakery"
+  // Legacy aliases for backward compatibility with mock & SCRUM-32
   | "espresso"
-  | "tea"
-  | "bakery";
+  | "tea";
 
 export interface CategoryOption {
   id: CategoryId;
@@ -23,41 +26,65 @@ export interface SelectOption {
   label: string;
 }
 
+export interface ProductCategory {
+  code: string;
+  name: string;
+  isActive?: boolean;
+}
+
 /**
- * Kích cỡ đồ uống hợp lệ theo API Contract Mục 4.2 & BR-011:
- * - S: 100% giá gốc (Mặc định)
+ * Kích cỡ đồ uống hợp lệ theo API Contract v2.1 Mục 2.3, 4.4 & BR-011:
+ * - S: 100% giá gốc (Mặc định cho STANDARD)
  * - M: 120% giá gốc
  * - L: 140% giá gốc
+ * - ONE_SIZE: 100% giá gốc
  */
-export type DrinkSize = "S" | "M" | "L";
+export type DrinkSize = "S" | "M" | "L" | "ONE_SIZE";
+
+export type ProductSizePolicy = "STANDARD" | "ONE_SIZE";
 
 export type SizeMultiplierPercent = 100 | 120 | 140;
 
 /**
- * 1 phần tử đồ uống trả về từ `GET /products` (API Contract Mục 3.2 & 5.1)
- * - 5 trường bắt buộc theo API Contract: `id`, `name`, `imageUrl`, `basePriceVnd`, `isAvailable`
- * - Các trường phụ trợ UI (`category`, `rating`, `reviews`, `description`, `badge`, `imageAlt`, ...)
- *   để dạng optional (`?`) nhằm giữ nguyên giao diện thẻ sản phẩm của trang cũ khi đọc từ mock-data
- *   nhưng vẫn tương thích 100% khi ghép nối response thật từ Backend.
+ * 1 phần tử đồ uống trả về từ `GET /products` (API Contract v2.1 Mục 3.3)
+ * Cấu trúc API Contract v2.1:
+ * - id: UUID string
+ * - name: string
+ * - imageUrl: string ("/images/...")
+ * - basePriceVnd: number
+ * - isAvailable: boolean (stock > 0 && category.isActive)
+ * - category: { code: string, name: string }
+ * - description: string | null
+ * - rating: number | null (0-5)
+ * - isNew: boolean
+ * - isBestseller: boolean
  */
 export interface ProductListItem {
   /** UUID v4 của sản phẩm */
   id: string;
   /** Tên hiển thị của đồ uống */
   name: string;
-  /** Đường dẫn ảnh sản phẩm (API Contract Mục 3.2) */
+  /** Đường dẫn ảnh sản phẩm (API Contract Mục 2.3 & 3.3) */
   imageUrl: string;
-  /** Giá gốc ứng với Size S (100%), số nguyên VND > 0, bội số của 5.000đ (AC-US-CAT-05-04) */
+  /** Giá gốc ứng với Size S / ONE_SIZE (100%), số nguyên VND */
   basePriceVnd: number;
-  /** `true` = còn hàng, `false` = tạm hết hàng (US-CAT-04) */
+  /** true = còn hàng và danh mục đang hoạt động, false = hết hàng hoặc ngừng kinh doanh */
   isAvailable: boolean;
 
-  // Các trường UI bổ trợ (optional để không bắt buộc Backend phải trả về)
-  category?: CategoryId;
-  rating?: string;
+  /** Danh mục đồ uống: hỗ trợ object {code, name} từ API v2.1 và string mã danh mục từ mock */
+  category?: ProductCategory | CategoryId | string;
+  /** Mô tả chi tiết (nullable theo API Contract v2.1) */
+  description?: string | null;
+  /** Điểm đánh giá (hỗ trợ number/null theo v2.1 và string từ mock) */
+  rating?: number | string | null;
+  /** Badge sản phẩm mới */
+  isNew?: boolean;
+  /** Badge bán chạy */
+  isBestseller?: boolean;
+
+  // Các trường UI bổ trợ (tương thích với mock-data và SCRUM-32)
   reviews?: string;
-  description?: string;
-  badge?: "Best Seller" | "Mới";
+  badge?: "Best Seller" | "Mới" | string;
   imageAlt?: string;
   originBadge?: string;
   recipeTag?: string;
@@ -73,40 +100,42 @@ export interface ProductListItem {
 export type ProductItem = ProductListItem;
 
 /**
- * Response 200 OK của `GET /products` (API Contract Mục 3.3 & 3.7)
+ * Response 200 OK của `GET /products` (API Contract v2.1 Mục 3.3)
  */
 export interface ProductListResponse {
   items: ProductListItem[];
 }
 
 /**
- * Cấu hình kích cỡ trong `GET /products/:id` (API Contract Mục 4.2 & 5.1 — dành cho Task 4)
+ * Cấu hình kích cỡ trong `GET /products/:id` (API Contract v2.1 Mục 4.3)
  */
 export interface ProductSizeOption {
   size: DrinkSize;
-  multiplierPercent: SizeMultiplierPercent;
+  multiplierPercent: number;
 }
 
 /**
- * Cấu hình topping trong `GET /products/:id` (API Contract Mục 4.2 & 5.1 — dành cho Task 4)
+ * Cấu hình topping trong `GET /products/:id` và seed.ts (API Contract v2.1 Mục 4.3)
  */
 export interface ToppingOption {
   id: string;
+  code?: string;
   name: string;
   priceVnd: number;
   isAvailable?: boolean;
 }
 
 /**
- * Response 200 OK của `GET /products/:id` (API Contract Mục 4.2 & 4.4 — dành cho Task 4)
+ * Response 200 OK của `GET /products/:id` (API Contract v2.1 Mục 4.3)
  */
 export interface ProductDetail extends ProductListItem {
+  sizePolicy?: ProductSizePolicy;
   sizes: ProductSizeOption[];
   toppings: ToppingOption[];
 }
 
 /**
- * Cấu trúc lỗi HTTP mặc định của NestJS (API Contract Mục 1.4 & 5.1)
+ * Cấu trúc lỗi HTTP mặc định của NestJS (API Contract Mục 5.1 & 5.2)
  */
 export interface ApiErrorResponse {
   statusCode: number;

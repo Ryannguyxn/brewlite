@@ -24,8 +24,10 @@ import {
   type SiteConfigData,
 } from "@/mock-data";
 import { fetchCatalogData } from "@/services/api.service";
+import { useCart } from "@/context/CartContext";
 
 export default function HomePage() {
+  const { openCart, totalQuantity } = useCart();
   // ==========================================================================
   // PHẦN 1: QUẢN LÝ STATE & TẢI DỮ LIỆU TỪ API (GET /products)
   // ==========================================================================
@@ -155,7 +157,7 @@ export default function HomePage() {
   };
 
   const handleCartClick = () => {
-    showToastNotice("Mục giỏ hàng hiện đang trong quá trình xây dựng");
+    openCart();
   };
 
   const handleFeatureNotice = (featureLabel: string) => {

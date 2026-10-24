@@ -51,7 +51,7 @@ export interface CartItem {
   basePriceVnd: number;
   /** Danh sách topping đã chọn (tối đa 3 loại) */
   toppings: CartItemTopping[];
-  /** Danh sách ID topping */
+  /** Danh sách ID topping (phải khớp chính xác với toppings) */
   toppingIds: string[];
   /** Số lượng món (1 đến 10) */
   quantity: number;
@@ -102,14 +102,14 @@ export interface CartContextValue {
   totalLines: number;
   /** Tổng tiền tạm tính của giỏ hàng */
   subtotalVnd: number;
-  /** Chuỗi tổng tiền tạm tính có format đ */
+  /** Chuỗi tổng tiền tạm tính có format ₫ */
   formattedSubtotal: string;
   /** Trạng thái mở/đóng Cart Drawer */
   isCartOpen: boolean;
   /** Thông báo feedback ngắn hạn (Toast) */
   feedbackMessage: string | null;
   feedbackType: "success" | "warning" | "error" | null;
-  /** Thêm món vào giỏ hàng */
+  /** Thêm món vào giỏ hàng (trả về kết quả đồng bộ chính xác) */
   addToCart: (input: AddToCartInput) => { success: boolean; message: string };
   /** Cập nhật số lượng của dòng món */
   updateQuantity: (itemId: string, quantity: number) => void;
@@ -135,6 +135,8 @@ export interface CartContextValue {
 
 const CartContext = createContext<CartContextValue | null>(null);
 
+const VALID_SIZES: readonly DrinkSize[] = ["S", "M", "L", "ONE_SIZE"] as const;
+
 /**
  * Sinh chuỗi định danh duy nhất cho dòng sản phẩm dựa trên thuộc tính
  * (Nếu cùng productId, cùng size, cùng toppingIds và cùng note thì được xem là cùng 1 món)
@@ -150,6 +152,164 @@ function generateCartItemKey(
   return `${productId}_${size}_[${sortedToppingKey}]_${cleanNote}`;
 }
 
+/**
+ * [MUST FIX 1]: Hàm kiểm tra và chuẩn hóa dữ liệu từng Cart Item khi hydrate từ localStorage
+ * Loại bỏ mọi dữ liệu sai cấu trúc, quantity không hợp lệ (như "abc", NaN, <= 0),
+ * và tính toán lại giá để bảo đảm không bao giờ xuất hiện NaN trên UI.
+ */
+export function validateAndSanitizeCartItem(raw: unknown): CartItem | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+
+  // 1. Kiểm tra productId & productName
+  if (typeof r.productId !== "string" || !r.productId.trim()) return null;
+  if (typeof r.productName !== "string" || !r.productName.trim()) return null;
+
+  // 2. Kiểm tra size hợp lệ
+  if (typeof r.size !== "string" || !VALID_SIZES.includes(r.size as DrinkSize)) {
+    return null;
+  }
+  const size = r.size as DrinkSize;
+
+  // 3. Kiểm tra quantity: Bắt buộc là số nguyên hợp lệ từ MIN đến MAX
+  let quantity: number;
+  if (typeof r.quantity === "number") {
+    quantity = r.quantity;
+  } else if (typeof r.quantity === "string") {
+    quantity = Number(r.quantity);
+  } else {
+    return null;
+  }
+
+  if (
+    !Number.isFinite(quantity) ||
+    !Number.isInteger(quantity) ||
+    quantity < MIN_ORDER_QUANTITY ||
+    quantity > MAX_ORDER_QUANTITY
+  ) {
+    return null;
+  }
+
+  // 4. Kiểm tra basePriceVnd
+  const basePriceVnd = Number(r.basePriceVnd);
+  if (
+    !Number.isFinite(basePriceVnd) ||
+    !Number.isInteger(basePriceVnd) ||
+    basePriceVnd < 0
+  ) {
+    return null;
+  }
+
+  // 5. Kiểm tra sizeMultiplierPercent
+  const multiplier =
+    typeof r.sizeMultiplierPercent === "number" &&
+    Number.isFinite(r.sizeMultiplierPercent) &&
+    r.sizeMultiplierPercent > 0
+      ? r.sizeMultiplierPercent
+      : size === "M"
+      ? 120
+      : size === "L"
+      ? 140
+      : 100;
+
+  // 6. [MUST FIX 3]: Đồng bộ danh sách toppings và toppingIds
+  const toppings: CartItemTopping[] = [];
+  const rawToppings = Array.isArray(r.toppings) ? r.toppings : [];
+
+  for (const item of rawToppings) {
+    if (typeof item !== "object" || item === null) return null;
+    const t = item as Record<string, unknown>;
+    if (
+      typeof t.id !== "string" ||
+      !t.id.trim() ||
+      typeof t.name !== "string" ||
+      !t.name.trim() ||
+      typeof t.priceVnd !== "number" ||
+      !Number.isFinite(t.priceVnd) ||
+      !Number.isInteger(t.priceVnd) ||
+      t.priceVnd < 0
+    ) {
+      return null;
+    }
+    toppings.push({
+      id: t.id.trim(),
+      name: t.name.trim(),
+      priceVnd: t.priceVnd,
+    });
+  }
+
+  // Tối đa 3 topping không trùng lặp
+  const uniqueToppingIds = Array.from(new Set(toppings.map((t) => t.id)));
+  if (
+    uniqueToppingIds.length !== toppings.length ||
+    uniqueToppingIds.length > MAX_TOPPINGS_PER_ITEM
+  ) {
+    return null;
+  }
+
+  // Nếu trong raw có toppingIds, kiểm tra xem có khớp chính xác không
+  if (Array.isArray(r.toppingIds)) {
+    const rawIds = r.toppingIds.map((id) => String(id).trim());
+    if (
+      rawIds.length !== uniqueToppingIds.length ||
+      rawIds.some((id) => !uniqueToppingIds.includes(id))
+    ) {
+      return null;
+    }
+  }
+
+  // 7. Tự tính toán lại giá để bảo đảm 100% không bị NaN
+  const sizePriceVnd = calculateSizePriceVnd(basePriceVnd, multiplier);
+  const unitPriceVnd = calculateUnitPriceVnd(basePriceVnd, multiplier, toppings);
+  const lineTotalVnd = calculateLineTotalVnd(unitPriceVnd, quantity);
+
+  if (
+    !Number.isFinite(sizePriceVnd) ||
+    !Number.isFinite(unitPriceVnd) ||
+    !Number.isFinite(lineTotalVnd)
+  ) {
+    return null;
+  }
+
+  const id =
+    typeof r.id === "string" && r.id.trim()
+      ? r.id.trim()
+      : `cart_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const imageUrl =
+    typeof r.imageUrl === "string" && r.imageUrl.trim()
+      ? r.imageUrl.trim()
+      : "/images/product-placeholder.svg";
+
+  const note =
+    typeof r.note === "string" && r.note.trim()
+      ? r.note.trim().slice(0, 100)
+      : undefined;
+
+  const sizePolicy =
+    r.sizePolicy === "ONE_SIZE" || r.sizePolicy === "STANDARD"
+      ? r.sizePolicy
+      : undefined;
+
+  return {
+    id,
+    productId: r.productId.trim(),
+    productName: r.productName.trim(),
+    imageUrl,
+    size,
+    sizeMultiplierPercent: multiplier,
+    sizePriceVnd,
+    basePriceVnd,
+    toppings,
+    toppingIds: uniqueToppingIds,
+    quantity,
+    unitPriceVnd,
+    lineTotalVnd,
+    note,
+    sizePolicy,
+  };
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
@@ -160,18 +320,39 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     "success" | "warning" | "error" | null
   >(null);
 
-  // Khôi phục giỏ hàng từ localStorage khi khởi động (SSR Safe)
+  // Khôi phục giỏ hàng từ localStorage khi khởi động (SSR Safe + Chặt chẽ)
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CART_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          setItems(parsed);
+          const sanitizedItems = parsed
+            .map(validateAndSanitizeCartItem)
+            .filter((item): item is CartItem => item !== null)
+            .slice(0, MAX_CART_ITEMS);
+
+          setItems(sanitizedItems);
+
+          // Nếu có item sai cấu trúc đã bị loại bỏ, dọn sạch localStorage ngay
+          if (sanitizedItems.length !== parsed.length) {
+            localStorage.setItem(
+              CART_STORAGE_KEY,
+              JSON.stringify(sanitizedItems)
+            );
+          }
+        } else {
+          setItems([]);
+          localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
         }
       }
     } catch {
-      // Bỏ qua lỗi parse và khởi tạo giỏ rỗng
+      setItems([]);
+      try {
+        localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
+      } catch {
+        // Bỏ qua lỗi localStorage
+      }
     } finally {
       setIsHydrated(true);
     }
@@ -221,40 +402,105 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const closeCart = useCallback(() => setIsCartOpen(false), []);
   const toggleCart = useCallback(() => setIsCartOpen((prev) => !prev), []);
 
-  // Thêm món vào giỏ
+  // [MUST FIX 2 & 3]: Thêm món vào giỏ hàng đảm bảo tính đồng bộ kết quả trả về và đồng bộ topping
   const addToCart = useCallback(
-    (input: AddToCartInput) => {
-      // 1. Kiểm tra topping tối đa 3 loại khác nhau (API Contract v2.1 Mục 4.4 & 8.3)
-      const rawToppings = input.toppings || [];
-      const rawToppingIds = input.toppingIds || rawToppings.map((t) => t.id);
+    (input: AddToCartInput): { success: boolean; message: string } => {
+      // 1. Validate thông tin cơ bản
+      if (!input.productId || !input.productId.trim()) {
+        return { success: false, message: "ID sản phẩm không hợp lệ." };
+      }
+      if (!input.productName || !input.productName.trim()) {
+        return { success: false, message: "Tên sản phẩm không hợp lệ." };
+      }
+      if (!VALID_SIZES.includes(input.size)) {
+        return { success: false, message: "Kích cỡ sản phẩm không hợp lệ." };
+      }
+      if (
+        !Number.isFinite(input.basePriceVnd) ||
+        input.basePriceVnd < 0 ||
+        !Number.isInteger(input.basePriceVnd)
+      ) {
+        return { success: false, message: "Giá sản phẩm không hợp lệ." };
+      }
 
-      // Loại bỏ topping trùng lặp nếu có
-      const uniqueToppingIds = Array.from(new Set(rawToppingIds));
-      if (uniqueToppingIds.length > MAX_TOPPINGS_PER_ITEM) {
-        showFeedback(
-          `Mỗi món chỉ được chọn tối đa ${MAX_TOPPINGS_PER_ITEM} loại topping.`,
-          "warning"
-        );
+      const requestedQty = Math.trunc(input.quantity || 1);
+      if (
+        !Number.isInteger(requestedQty) ||
+        requestedQty < MIN_ORDER_QUANTITY ||
+        requestedQty > MAX_ORDER_QUANTITY
+      ) {
         return {
           success: false,
-          message: `Mỗi món chỉ được chọn tối đa ${MAX_TOPPINGS_PER_ITEM} loại topping.`,
+          message: `Số lượng mỗi lần thêm phải từ ${MIN_ORDER_QUANTITY} đến ${MAX_ORDER_QUANTITY} ly.`,
         };
       }
 
-      // 2. Chuẩn hóa topping objects theo danh sách IDs duy nhất
-      const normalizedToppings: CartItemTopping[] = [];
-      for (const id of uniqueToppingIds) {
-        const found = rawToppings.find((t) => t.id === id);
-        if (found) {
-          normalizedToppings.push({
-            id: found.id,
-            name: found.name,
-            priceVnd: found.priceVnd,
-          });
+      // 2. [MUST FIX 3]: Đồng bộ và kiểm tra tính nhất quán giữa toppings và toppingIds
+      const rawToppings = input.toppings || [];
+      const rawToppingIds = input.toppingIds;
+
+      // Nếu truyền toppingIds, mọi ID phải có trong rawToppings
+      if (rawToppingIds && rawToppingIds.length > 0) {
+        const map = new Map(rawToppings.map((t) => [t.id, t]));
+        for (const tid of rawToppingIds) {
+          if (!map.has(tid)) {
+            return {
+              success: false,
+              message: "Danh sách topping không đồng bộ (thiếu dữ liệu chi tiết topping).",
+            };
+          }
         }
       }
 
-      // 3. Tính toán giá theo API Contract v2.1 Mục 4.5
+      const normalizedToppings: CartItemTopping[] = [];
+      const seenToppingIds = new Set<string>();
+
+      const toppingsToProcess = rawToppingIds
+        ? rawToppingIds.map((id) => rawToppings.find((t) => t.id === id)!)
+        : rawToppings;
+
+      for (const t of toppingsToProcess) {
+        if (
+          !t ||
+          typeof t.id !== "string" ||
+          !t.id.trim() ||
+          typeof t.name !== "string" ||
+          !t.name.trim() ||
+          typeof t.priceVnd !== "number" ||
+          !Number.isFinite(t.priceVnd) ||
+          !Number.isInteger(t.priceVnd) ||
+          t.priceVnd < 0
+        ) {
+          return {
+            success: false,
+            message: "Dữ liệu topping không hợp lệ.",
+          };
+        }
+
+        if (seenToppingIds.has(t.id)) {
+          return {
+            success: false,
+            message: "Không được chọn trùng lặp cùng một loại topping.",
+          };
+        }
+
+        seenToppingIds.add(t.id);
+        normalizedToppings.push({
+          id: t.id.trim(),
+          name: t.name.trim(),
+          priceVnd: t.priceVnd,
+        });
+      }
+
+      if (normalizedToppings.length > MAX_TOPPINGS_PER_ITEM) {
+        const msg = `Mỗi món chỉ được chọn tối đa ${MAX_TOPPINGS_PER_ITEM} loại topping.`;
+        showFeedback(msg, "warning");
+        return { success: false, message: msg };
+      }
+
+      const uniqueToppingIds = normalizedToppings.map((t) => t.id);
+
+      // 3. Tính toán giá chính xác
       const sizePriceVnd = calculateSizePriceVnd(
         input.basePriceVnd,
         input.sizeMultiplierPercent
@@ -266,12 +512,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       );
 
       const cleanNote = (input.note || "").trim().slice(0, 100);
-      const requestedQty = Math.max(
-        MIN_ORDER_QUANTITY,
-        Math.min(MAX_ORDER_QUANTITY, Math.trunc(input.quantity || 1))
-      );
 
-      // Tạo key định danh dòng món
+      // 4. [MUST FIX 2]: Tính toán trạng thái dựa trên items hiện tại ĐỒNG BỘ
       const itemKey = generateCartItemKey(
         input.productId,
         input.size,
@@ -279,95 +521,78 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         cleanNote
       );
 
-      let resultMessage = "Đã thêm món vào giỏ hàng thành công!";
-      let isSuccess = true;
+      const existingIndex = items.findIndex(
+        (item) =>
+          generateCartItemKey(
+            item.productId,
+            item.size,
+            item.toppingIds,
+            item.note
+          ) === itemKey
+      );
 
-      setItems((prevItems) => {
-        const existingIndex = prevItems.findIndex(
-          (item) =>
-            generateCartItemKey(
-              item.productId,
-              item.size,
-              item.toppingIds,
-              item.note
-            ) === itemKey
+      if (existingIndex >= 0) {
+        // Đã có món trong giỏ
+        const current = items[existingIndex];
+        if (current.quantity >= MAX_ORDER_QUANTITY) {
+          const msg = `Đã đạt giới hạn tối đa ${MAX_ORDER_QUANTITY} ly cho món này trong giỏ hàng.`;
+          showFeedback(msg, "warning");
+          return { success: false, message: msg };
+        }
+
+        const newQty = Math.min(
+          MAX_ORDER_QUANTITY,
+          current.quantity + requestedQty
         );
-
-        if (existingIndex >= 0) {
-          // Đã có món cùng thuộc tính trong giỏ -> tăng số lượng
-          const current = prevItems[existingIndex];
-          const newQty = current.quantity + requestedQty;
-
-          if (newQty > MAX_ORDER_QUANTITY) {
-            resultMessage = `Đã đạt giới hạn tối đa ${MAX_ORDER_QUANTITY} ly cho món này trong giỏ hàng.`;
-            showFeedback(resultMessage, "warning");
-            const updated = [...prevItems];
-            updated[existingIndex] = {
-              ...current,
-              quantity: MAX_ORDER_QUANTITY,
-              lineTotalVnd: calculateLineTotalVnd(
-                current.unitPriceVnd,
-                MAX_ORDER_QUANTITY
-              ),
-            };
-            return updated;
-          }
-
-          const updated = [...prevItems];
-          updated[existingIndex] = {
-            ...current,
-            quantity: newQty,
-            lineTotalVnd: calculateLineTotalVnd(current.unitPriceVnd, newQty),
-          };
-          showFeedback(
-            `Đã cập nhật số lượng: ${current.productName} (${newQty} ly)`,
-            "success"
-          );
-          return updated;
-        }
-
-        // Chưa có -> Kiểm tra giới hạn tối đa 20 dòng món
-        if (prevItems.length >= MAX_CART_ITEMS) {
-          resultMessage = `Giỏ hàng chỉ có thể chứa tối đa ${MAX_CART_ITEMS} dòng món khác nhau.`;
-          isSuccess = false;
-          showFeedback(resultMessage, "error");
-          return prevItems;
-        }
-
-        const newItem: CartItem = {
-          id:
-            typeof crypto !== "undefined" && crypto.randomUUID
-              ? crypto.randomUUID()
-              : `cart_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          productId: input.productId,
-          productName: input.productName,
-          imageUrl: input.imageUrl || "/images/product-placeholder.svg",
-          size: input.size,
-          sizeMultiplierPercent: input.sizeMultiplierPercent,
-          sizePriceVnd,
-          basePriceVnd: input.basePriceVnd,
-          toppings: normalizedToppings,
-          toppingIds: uniqueToppingIds,
-          quantity: requestedQty,
-          unitPriceVnd,
-          lineTotalVnd: calculateLineTotalVnd(unitPriceVnd, requestedQty),
-          note: cleanNote,
-          sizePolicy: input.sizePolicy,
+        const updatedItems = [...items];
+        updatedItems[existingIndex] = {
+          ...current,
+          quantity: newQty,
+          lineTotalVnd: calculateLineTotalVnd(current.unitPriceVnd, newQty),
         };
 
-        showFeedback(`Đã thêm "${newItem.productName}" vào giỏ hàng`, "success");
-        return [...prevItems, newItem];
-      });
+        setItems(updatedItems);
+        setIsCartOpen(true);
+        const msg = `Đã cập nhật số lượng: ${current.productName} (${newQty} ly)`;
+        showFeedback(msg, "success");
+        return { success: true, message: msg };
+      }
 
-      // Tự động mở Cart Drawer để người dùng quan sát giỏ hàng
-      setIsCartOpen(true);
+      // Chưa có món trong giỏ: kiểm tra giới hạn 20 dòng món
+      if (items.length >= MAX_CART_ITEMS) {
+        const msg = `Giỏ hàng chỉ có thể chứa tối đa ${MAX_CART_ITEMS} dòng món khác nhau.`;
+        showFeedback(msg, "error");
+        return { success: false, message: msg };
+      }
 
-      return {
-        success: isSuccess,
-        message: resultMessage,
+      const newItem: CartItem = {
+        id:
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `cart_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        productId: input.productId.trim(),
+        productName: input.productName.trim(),
+        imageUrl: input.imageUrl || "/images/product-placeholder.svg",
+        size: input.size,
+        sizeMultiplierPercent: input.sizeMultiplierPercent,
+        sizePriceVnd,
+        basePriceVnd: input.basePriceVnd,
+        toppings: normalizedToppings,
+        toppingIds: uniqueToppingIds,
+        quantity: requestedQty,
+        unitPriceVnd,
+        lineTotalVnd: calculateLineTotalVnd(unitPriceVnd, requestedQty),
+        note: cleanNote,
+        sizePolicy: input.sizePolicy,
       };
+
+      setItems([...items, newItem]);
+      setIsCartOpen(true);
+      const msg = `Đã thêm "${newItem.productName}" vào giỏ hàng`;
+      showFeedback(msg, "success");
+      return { success: true, message: msg };
     },
-    [showFeedback]
+    [items, showFeedback]
   );
 
   // Cập nhật số lượng của dòng món
@@ -375,7 +600,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     (itemId: string, newQuantity: number) => {
       setItems((prevItems) => {
         if (newQuantity <= 0) {
-          // Xóa khỏi giỏ nếu giảm về <= 0
           const itemToRemove = prevItems.find((i) => i.id === itemId);
           if (itemToRemove) {
             showFeedback(`Đã xóa ${itemToRemove.productName} khỏi giỏ hàng`);
@@ -439,7 +663,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         const item = prevItems.find((i) => i.id === itemId);
         if (!item) return prevItems;
         if (item.quantity <= 1) {
-          // Giảm từ 1 sẽ xóa món khỏi giỏ
           showFeedback(`Đã xóa ${item.productName} khỏi giỏ hàng`);
           return prevItems.filter((i) => i.id !== itemId);
         }

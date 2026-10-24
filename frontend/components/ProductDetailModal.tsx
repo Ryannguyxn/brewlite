@@ -248,7 +248,7 @@ function ProductDetailModalContent({
   const handleSubmitAddToCart = () => {
     if (!product.isAvailable) return;
 
-    addToCart({
+    const result = addToCart({
       productId: product.id,
       productName: product.name,
       imageUrl: product.imageUrl,
@@ -262,7 +262,8 @@ function ProductDetailModalContent({
       sizePolicy: product.sizePolicy,
     });
 
-    onAddToCart?.({
+    if (result.success) {
+      onAddToCart?.({
       productId: product.id,
       productName: product.name,
       size: activeSizeOption.size,
@@ -274,7 +275,8 @@ function ProductDetailModalContent({
       unitPriceVnd,
       lineTotalVnd,
       note: note.trim(),
-    });
+      });
+    }
   };
 
   // ==========================================================================

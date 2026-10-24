@@ -259,7 +259,7 @@
     const drawer = document.getElementById('cartDrawerPanel');
     const scrim = document.getElementById('cartDrawerScrim');
     const menuCanvas = document.getElementById('mainMenuCanvas');
-    
+
     isCartOpen = !isCartOpen;
     if (isCartOpen) {
       drawer.classList.remove('translate-x-full');
@@ -284,7 +284,7 @@
       return;
     }
     el.innerText = val;
-    
+
     // Update delete icon for items 2 & 3
     if (id === 'qty2') {
       const icon = document.getElementById('iconQty2');

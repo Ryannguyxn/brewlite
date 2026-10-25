@@ -9,6 +9,7 @@ import {
   type SiteConfigData,
   type UserProfile,
 } from "@/mock-data";
+import { useCart } from "@/context/CartContext";
 
 interface HeaderProps {
   cartCount?: number;
@@ -22,7 +23,7 @@ interface HeaderProps {
 }
 
 export default function Header({
-  cartCount = 0,
+  cartCount,
   onCartClick,
   onFeatureNotice,
   searchQuery = "",
@@ -31,7 +32,12 @@ export default function Header({
   userProfile = MOCK_USER_PROFILE,
   siteConfig = MOCK_SITE_CONFIG,
 }: HeaderProps) {
-  // Chỉ mở màn hình Đăng nhập / Đăng ký khi người dùng click vào ô Tài khoản trên Header
+  // Lấy dữ liệu giỏ hàng từ CartContext (SCRUM-40)
+  const cart = useCart();
+  const displayCartCount =
+    cartCount !== undefined ? cartCount : cart.totalQuantity;
+
+  // Chỉ mở màn hình Đăng nhập / Đăng ký khi người dùng click vào ô Tài khoản trên Header (SCRUM-41)
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
 
   const handleNotice = (label: string) => {
@@ -40,9 +46,17 @@ export default function Header({
     }
   };
 
+  const handleCartButtonClick = () => {
+    if (onCartClick) {
+      onCartClick();
+    } else {
+      cart.openCart();
+    }
+  };
+
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 w-full z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
+      <header className="fixed top-0 left-0 right-0 w-full z-40 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
         <div className="h-20 max-w-[1320px] mx-auto px-margin flex items-center justify-between gap-gutter">
           <div className="flex items-center gap-space-lg flex-shrink-0">
             <Link className="flex items-center gap-space-sm" href="/">
@@ -129,15 +143,10 @@ export default function Header({
           <div className="flex items-center gap-space-md flex-shrink-0">
             <button
               id="header-cart-btn"
-              onClick={() => {
-                if (onCartClick) {
-                  onCartClick();
-                } else {
-                  handleNotice("Giỏ hàng");
-                }
-              }}
+              onClick={handleCartButtonClick}
               className="relative flex items-center gap-space-xs px-3.5 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container-high text-on-surface transition-all cursor-pointer"
               type="button"
+              aria-label={`Giỏ hàng, có ${displayCartCount} món`}
             >
               <span className="material-symbols-outlined text-[22px] text-primary">
                 shopping_bag
@@ -145,8 +154,8 @@ export default function Header({
               <span className="font-label-md text-label-md hidden sm:inline">
                 Giỏ hàng
               </span>
-              <span className="flex items-center justify-center px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-md text-[11px] leading-tight">
-                {cartCount} món
+              <span className="flex items-center justify-center px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-md text-[11px] leading-tight font-semibold">
+                {displayCartCount} món
               </span>
             </button>
 

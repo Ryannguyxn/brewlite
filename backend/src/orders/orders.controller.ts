@@ -17,6 +17,7 @@ import {
   ApiBadRequestResponse,
   ApiUnauthorizedResponse,
   ApiConflictResponse,
+  ApiInternalServerErrorResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedUser } from '../auth/jwt.strategy.js';
@@ -45,6 +46,16 @@ export class OrdersController {
   @ApiUnauthorizedResponse({ description: 'UNAUTHORIZED' })
   @ApiConflictResponse({
     description: 'INSUFFICIENT_STOCK or PENDING_ORDER_EXISTS',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Unexpected server error',
+    schema: {
+      example: {
+        statusCode: 500,
+        message: 'Internal server error',
+        error: 'Internal Server Error',
+      },
+    },
   })
   create(
     @Req() req: { user: AuthenticatedUser },

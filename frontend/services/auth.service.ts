@@ -226,7 +226,18 @@ export async function registerApi(dto: RegisterRequestDto): Promise<RegisterResp
   }
 
   if (res.ok) {
-    return (await res.json()) as RegisterResponseDto;
+    const data = (await res.json()) as RegisterResponseDto;
+    if (typeof window !== "undefined" && data.fullName) {
+      try {
+        localStorage.setItem(
+          `brewlite_user_fullname_${normalizedDto.email}`,
+          data.fullName
+        );
+      } catch {
+        // Bỏ qua lỗi lưu cache tên
+      }
+    }
+    return data;
   }
 
   const errorData = await res.json().catch(() => null);
@@ -321,7 +332,48 @@ export function resolveUserFromLogin(
   const payload = decodeJwtPayload(accessToken);
   const userId = payload?.sub || `u-${Date.now()}`;
 
-  // Nếu đang chạy Mock Mode, lấy từ mock preview
+  // 1. Nếu có explicit knownFullName
+  if (knownFullName) {
+    return {
+      id: userId,
+      email: normalized,
+      fullName: knownFullName,
+    };
+  }
+
+  // 2. Tra cứu tên đã lưu khi người dùng đăng ký tài khoản trên trình duyệt
+  if (typeof window !== "undefined") {
+    try {
+      const cached = localStorage.getItem(`brewlite_user_fullname_${normalized}`);
+      if (cached) {
+        return {
+          id: userId,
+          email: normalized,
+          fullName: cached,
+        };
+      }
+    } catch {
+      // Bỏ qua lỗi đọc localStorage
+    }
+  }
+
+  // 3. Đối chiếu danh sách demo customers đã được cấu hình trong DB (seed-users.ts & API contract)
+  const SEEDED_USER_NAMES: Record<string, string> = {
+    "demo.customer1@brewlite.test": "Khách hàng Demo 1",
+    "demo.customer2@brewlite.test": "Khách hàng Demo 2",
+    "customer@example.com": "Nguyễn Văn A",
+    "huong.nguyen@brewlite.vn": "Nguyễn Thị Hương",
+    "dung.tran@brewlite.vn": "Trần Quốc Dũng",
+  };
+  if (SEEDED_USER_NAMES[normalized]) {
+    return {
+      id: userId,
+      email: normalized,
+      fullName: SEEDED_USER_NAMES[normalized],
+    };
+  }
+
+  // 4. Nếu đang chạy Mock Mode, lấy từ mock preview
   if (AUTH_MODE === "mock") {
     const mockUser = findMockUserByEmail(normalized);
     if (mockUser) {
@@ -336,6 +388,6 @@ export function resolveUserFromLogin(
   return {
     id: userId,
     email: normalized,
-    fullName: knownFullName ?? null,
+    fullName: null,
   };
 }

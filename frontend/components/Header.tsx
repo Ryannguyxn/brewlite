@@ -172,7 +172,7 @@ export default function Header({
                   {(user.fullName || user.email)[0].toUpperCase()}
                 </div>
                 <div className="hidden sm:flex flex-col text-left">
-                  <span className="font-title-sm text-title-sm text-on-surface leading-tight group-hover:text-primary transition-colors max-w-[120px] truncate">
+                  <span className="font-title-sm text-title-sm text-on-surface leading-tight group-hover:text-primary transition-colors max-w-[200px] truncate">
                     {user.fullName || user.email.split("@")[0]}
                   </span>
                   <div className="flex items-center gap-1 mt-0.5">

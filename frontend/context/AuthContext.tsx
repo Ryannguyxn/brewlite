@@ -1,0 +1,146 @@
+"use client";
+
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import type {
+  DatabaseUser,
+  LoginRequestDto,
+  RegisterRequestDto,
+  RegisterResponseDto,
+} from "@/mock-data";
+import {
+  clearStoredSession,
+  getStoredToken,
+  getStoredUser,
+  loginApi,
+  registerApi,
+  resolveUserFromLogin,
+  setStoredSession,
+} from "@/services/auth.service";
+
+// ============================================================================
+// AUTH CONTEXT — SPRINT 2 (SCRUM-41)
+// Quản lý trạng thái xác thực người dùng trên toàn Frontend Next.js
+// Tuân thủ API Contract v2.1:
+// - Giữ nguyên giỏ hàng (Cart) khi chuyển đổi đăng nhập / đăng xuất
+// - Quản lý token Bearer và thông tin người dùng với đầy đủ 7 trường database
+// ============================================================================
+
+interface AuthContextType {
+  user: DatabaseUser | null;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (dto: LoginRequestDto) => Promise<void>;
+  register: (dto: RegisterRequestDto) => Promise<RegisterResponseDto>;
+  logout: () => void;
+
+  // Trạng thái modal Auth bật nhanh
+  isAuthModalOpen: boolean;
+  authModalMode: "login" | "register";
+  openAuthModal: (mode?: "login" | "register") => void;
+  closeAuthModal: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<DatabaseUser | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Điều khiển popup Modal nếu người dùng click từ Header hoặc Checkout
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
+
+  // Khôi phục phiên đăng nhập khi tải trang
+  useEffect(() => {
+    try {
+      const savedToken = getStoredToken();
+      const savedUser = getStoredUser();
+      if (savedToken && savedUser) {
+        setAccessToken(savedToken);
+        setUser(savedUser);
+      }
+    } catch {
+      // Bỏ qua lỗi đọc localStorage
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const login = useCallback(async (dto: LoginRequestDto): Promise<void> => {
+    const res = await loginApi(dto);
+    const resolvedUser = resolveUserFromLogin(dto.email);
+    setAccessToken(res.accessToken);
+    setUser(resolvedUser);
+    setStoredSession(res.accessToken, resolvedUser);
+  }, []);
+
+  const register = useCallback(
+    async (dto: RegisterRequestDto): Promise<RegisterResponseDto> => {
+      // Theo API Contract v2.1: Register thành công KHÔNG tự động đăng nhập
+      return await registerApi(dto);
+    },
+    []
+  );
+
+  const logout = useCallback((): void => {
+    clearStoredSession();
+    setAccessToken(null);
+    setUser(null);
+  }, []);
+
+  const openAuthModal = useCallback((mode: "login" | "register" = "login") => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  }, []);
+
+  const closeAuthModal = useCallback(() => {
+    setIsAuthModalOpen(false);
+  }, []);
+
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user,
+      accessToken,
+      isAuthenticated: Boolean(accessToken && user),
+      isLoading,
+      login,
+      register,
+      logout,
+      isAuthModalOpen,
+      authModalMode,
+      openAuthModal,
+      closeAuthModal,
+    }),
+    [
+      user,
+      accessToken,
+      isLoading,
+      login,
+      register,
+      logout,
+      isAuthModalOpen,
+      authModalMode,
+      openAuthModal,
+      closeAuthModal,
+    ]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthContextType {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+}

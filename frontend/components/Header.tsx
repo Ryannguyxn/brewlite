@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import {
   MOCK_SITE_CONFIG,
@@ -9,6 +9,7 @@ import {
   type UserProfile,
 } from "@/mock-data";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 
 interface HeaderProps {
   cartCount?: number;
@@ -33,7 +34,12 @@ export default function Header({
 }: HeaderProps) {
   // Lấy dữ liệu giỏ hàng từ CartContext (SCRUM-40)
   const cart = useCart();
-  const displayCartCount = cartCount !== undefined ? cartCount : cart.totalQuantity;
+  const displayCartCount =
+    cartCount !== undefined ? cartCount : cart.totalQuantity;
+
+  // Lấy dữ liệu xác thực người dùng từ AuthContext (SCRUM-41)
+  const { user, isAuthenticated, logout, openAuthModal } = useAuth();
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
   const handleNotice = (label: string) => {
     if (onFeatureNotice) {
@@ -59,7 +65,7 @@ export default function Header({
               className="h-8 w-auto object-contain"
               src={siteConfig.logoUrl}
             />
-            <span className="font-headline-md text-headline-md text-primary tracking-tight">
+            <span className="font-headline-md text-headline-md text-primary tracking-tight font-bold">
               {siteConfig.brandName}
             </span>
           </Link>
@@ -153,30 +159,102 @@ export default function Header({
             </span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => handleNotice("Tài khoản & Hội viên")}
-            className="flex items-center gap-space-sm pl-2 group cursor-pointer"
-          >
-            <img
-              alt="Profile"
-              className="w-8 h-8 rounded-full object-cover shadow-[0_1px_4px_rgba(0,0,0,0.1)] ring-1 ring-surface-variant group-hover:ring-primary transition-all"
-              src={userProfile.avatarUrl}
-            />
-            <div className="hidden sm:flex flex-col text-left">
-              <span className="font-title-sm text-title-sm text-on-surface leading-tight group-hover:text-primary transition-colors">
-                {userProfile.fullName}
-              </span>
-              <div className="flex items-center gap-1 mt-0.5">
-                <span className="font-label-md text-[11px] text-primary font-bold bg-primary-fixed/60 px-1.5 py-0.2 rounded">
-                  {userProfile.tierName}
+          {/* User Profile / Auth State (SCRUM-41) */}
+          {isAuthenticated && user ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                className="flex items-center gap-space-sm pl-2 group cursor-pointer focus:outline-none"
+                aria-expanded={isUserMenuOpen}
+              >
+                <div className="w-8 h-8 rounded-full bg-primary text-on-primary font-bold flex items-center justify-center text-sm shadow-[0_1px_4px_rgba(0,0,0,0.1)] ring-1 ring-surface-variant group-hover:ring-primary transition-all">
+                  {(user.fullName || user.email)[0].toUpperCase()}
+                </div>
+                <div className="hidden sm:flex flex-col text-left">
+                  <span className="font-title-sm text-title-sm text-on-surface leading-tight group-hover:text-primary transition-colors max-w-[120px] truncate">
+                    {user.fullName || user.email.split("@")[0]}
+                  </span>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="font-label-md text-[11px] text-primary font-bold bg-primary-fixed/60 px-1.5 py-0.2 rounded">
+                      Thành viên
+                    </span>
+                    <span className="font-label-md text-[11px] text-tertiary font-semibold">
+                      💎 {user.loyaltyPoints ?? 0} điểm
+                    </span>
+                  </div>
+                </div>
+                <span className="material-symbols-outlined text-[16px] text-outline group-hover:text-primary transition-colors">
+                  expand_more
                 </span>
-                <span className="font-label-md text-[11px] text-tertiary font-semibold">
-                  💎 {userProfile.points} điểm
-                </span>
-              </div>
+              </button>
+
+              {/* Dropdown Menu người dùng */}
+              {isUserMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/40 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-4 py-2.5 border-b border-outline-variant/30">
+                    <p className="font-label-md text-label-md font-bold text-on-surface truncate">
+                      {user.fullName || "Quý khách BrewLite"}
+                    </p>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
+                      {user.email}
+                    </p>
+                    <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container text-primary font-label-md text-[12px] font-semibold">
+                      <span>💎 Điểm tích lũy:</span>
+                      <span className="font-bold">{user.loyaltyPoints ?? 0}</span>
+                    </div>
+                  </div>
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        handleNotice("Lịch sử đơn hàng");
+                      }}
+                      className="w-full px-4 py-2 text-left font-body-sm text-body-sm text-on-surface hover:bg-surface-container flex items-center gap-2 cursor-pointer transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[18px] text-outline">
+                        receipt_long
+                      </span>
+                      <span>Lịch sử đơn hàng</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        logout();
+                      }}
+                      className="w-full px-4 py-2 text-left font-body-sm text-body-sm text-error hover:bg-error-container/20 flex items-center gap-2 cursor-pointer transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        logout
+                      </span>
+                      <span>Đăng xuất</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => openAuthModal("login")}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-on-primary transition-all font-label-md text-label-md font-semibold cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  login
+                </span>
+                <span>Đăng nhập</span>
+              </button>
+              <Link
+                href="/login?mode=register"
+                className="hidden sm:inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-outline-variant hover:border-primary text-on-surface hover:text-primary transition-all font-label-md text-label-md cursor-pointer"
+              >
+                <span>Đăng ký</span>
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </header>

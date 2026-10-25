@@ -146,13 +146,20 @@ export default function AuthCard({
         message?: string;
       };
 
+      const statusCode = errorObj?.statusCode;
+      const is5xx =
+        typeof statusCode === "number" && statusCode >= 500 && statusCode <= 599;
+
       let title = "Đã có lỗi xảy ra";
       let desc = errorObj?.message || "Không thể xử lý yêu cầu. Vui lòng thử lại.";
 
-      if (errorObj?.code === "NETWORK_ERROR" || errorObj?.statusCode === 503) {
+      if (errorObj?.code === "NETWORK_ERROR" || statusCode === 503) {
         title = "Không thể kết nối máy chủ";
         desc = "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại dịch vụ hoặc thử lại sau.";
-      } else if (errorObj?.code === "INVALID_CREDENTIALS" || errorObj?.statusCode === 401) {
+      } else if (errorObj?.code === "SERVER_ERROR" || is5xx) {
+        title = "Sự cố hệ thống";
+        desc = "Hệ thống đang gặp sự cố. Vui lòng thử lại sau.";
+      } else if (errorObj?.code === "INVALID_CREDENTIALS" || statusCode === 401) {
         title = "Đăng nhập thất bại";
         desc = "Email hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.";
       } else if (

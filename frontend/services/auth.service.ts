@@ -316,12 +316,25 @@ export async function registerApi(dto: RegisterRequestDto): Promise<RegisterResp
   }
 
   const errorData = await res.json().catch(() => null);
+  const is5xx = res.status >= 500 && res.status <= 599;
+
+  let defaultRegisterMessage = "Đăng ký không thành công.";
+  if (res.status === 409) {
+    defaultRegisterMessage = "Địa chỉ email đã được sử dụng.";
+  } else if (is5xx) {
+    defaultRegisterMessage = "Máy chủ đang gặp sự cố. Vui lòng thử lại sau.";
+  } else if (res.status === 400) {
+    defaultRegisterMessage = "Thông tin đăng ký không hợp lệ.";
+  }
+
+  const rawRegisterMessage = Array.isArray(errorData?.message)
+    ? errorData.message.join(", ")
+    : typeof errorData?.message === "string"
+    ? errorData.message
+    : null;
+
   const err: Error & { statusCode?: number; code?: string; details?: unknown } =
-    new Error(
-      (Array.isArray(errorData?.message)
-        ? errorData.message.join(", ")
-        : errorData?.message) || "Đăng ký không thành công"
-    );
+    new Error(rawRegisterMessage || defaultRegisterMessage);
   err.statusCode = res.status;
   err.code =
     errorData?.code ||
@@ -329,7 +342,9 @@ export async function registerApi(dto: RegisterRequestDto): Promise<RegisterResp
       ? "EMAIL_ALREADY_EXISTS"
       : res.status === 400
       ? "VALIDATION_ERROR"
-      : "SERVER_ERROR");
+      : is5xx
+      ? "SERVER_ERROR"
+      : "UNKNOWN_ERROR");
   err.details = errorData;
   throw err;
 }
@@ -376,12 +391,25 @@ export async function loginApi(dto: LoginRequestDto): Promise<LoginResponseDto> 
   }
 
   const errorData = await res.json().catch(() => null);
+  const is5xx = res.status >= 500 && res.status <= 599;
+
+  let defaultLoginMessage = "Không thể đăng nhập. Vui lòng thử lại.";
+  if (res.status === 401) {
+    defaultLoginMessage = "Email hoặc mật khẩu không chính xác.";
+  } else if (is5xx) {
+    defaultLoginMessage = "Máy chủ đang gặp sự cố. Vui lòng thử lại sau.";
+  } else if (res.status === 400) {
+    defaultLoginMessage = "Thông tin đăng nhập không hợp lệ.";
+  }
+
+  const rawLoginMessage = Array.isArray(errorData?.message)
+    ? errorData.message.join(", ")
+    : typeof errorData?.message === "string"
+    ? errorData.message
+    : null;
+
   const err: Error & { statusCode?: number; code?: string; details?: unknown } =
-    new Error(
-      (Array.isArray(errorData?.message)
-        ? errorData.message.join(", ")
-        : errorData?.message) || "Email hoặc mật khẩu không chính xác."
-    );
+    new Error(rawLoginMessage || defaultLoginMessage);
   err.statusCode = res.status;
   err.code =
     errorData?.code ||
@@ -389,7 +417,9 @@ export async function loginApi(dto: LoginRequestDto): Promise<LoginResponseDto> 
       ? "INVALID_CREDENTIALS"
       : res.status === 400
       ? "VALIDATION_ERROR"
-      : "SERVER_ERROR");
+      : is5xx
+      ? "SERVER_ERROR"
+      : "UNKNOWN_ERROR");
   err.details = errorData;
   throw err;
 }

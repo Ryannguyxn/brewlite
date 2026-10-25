@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const savedToken = getStoredToken();
-      const savedUser = getStoredUser();
+      let savedUser = getStoredUser();
       if (savedToken && savedUser) {
         if (isTokenExpired(savedToken)) {
           // Token hết hạn: Xóa phiên đăng nhập nhưng BẢO LƯU GIỎ HÀNG
@@ -73,6 +73,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setAccessToken(null);
           setUser(null);
         } else {
+          // Tự động đối chiếu lại họ tên nếu phiên lưu trữ trước đó chưa có fullName
+          if (!savedUser.fullName) {
+            const reResolved = resolveUserFromLogin(savedUser.email, savedToken);
+            if (reResolved.fullName) {
+              savedUser = reResolved;
+              setStoredSession(savedToken, savedUser);
+            }
+          }
           setAccessToken(savedToken);
           setUser(savedUser);
         }

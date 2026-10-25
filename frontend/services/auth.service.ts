@@ -391,3 +391,23 @@ export function resolveUserFromLogin(
     fullName: null,
   };
 }
+
+/**
+ * Định dạng tên hiển thị của người dùng trên giao diện:
+ * - Ưu tiên fullName nếu có
+ * - Nếu fullName là null: chuyển đổi email prefix thành tên đẹp (vd: "hoang.khanh" -> "Hoang Khanh")
+ */
+export function getDisplayCustomerName(user: AuthUser | null): string {
+  if (!user) return "Quý khách";
+  if (user.fullName && user.fullName.trim()) {
+    return user.fullName.trim();
+  }
+  const rawPrefix = user.email.split("@")[0] || "";
+  const words = rawPrefix
+    .replace(/[._\-+]/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+
+  return words.length > 0 ? words.join(" ") : user.email;
+}

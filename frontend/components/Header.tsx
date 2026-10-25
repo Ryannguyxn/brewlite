@@ -10,6 +10,7 @@ import {
 } from "@/mock-data";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
+import { getDisplayCustomerName } from "@/services/auth.service";
 
 interface HeaderProps {
   cartCount?: number;
@@ -169,11 +170,11 @@ export default function Header({
                 aria-expanded={isUserMenuOpen}
               >
                 <div className="w-8 h-8 rounded-full bg-primary text-on-primary font-bold flex items-center justify-center text-sm shadow-[0_1px_4px_rgba(0,0,0,0.1)] ring-1 ring-surface-variant group-hover:ring-primary transition-all">
-                  {(user.fullName || user.email)[0].toUpperCase()}
+                  {getDisplayCustomerName(user)[0].toUpperCase()}
                 </div>
                 <div className="hidden sm:flex flex-col text-left">
                   <span className="font-title-sm text-title-sm text-on-surface leading-tight group-hover:text-primary transition-colors max-w-[200px] truncate">
-                    {user.fullName || user.email.split("@")[0]}
+                    {getDisplayCustomerName(user)}
                   </span>
                   <div className="flex items-center gap-1 mt-0.5">
                     <span className="font-label-md text-[11px] text-primary font-bold bg-primary-fixed/60 px-1.5 py-0.2 rounded">
@@ -191,7 +192,7 @@ export default function Header({
                 <div className="absolute right-0 mt-2 w-64 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/40 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                   <div className="px-4 py-2.5 border-b border-outline-variant/30">
                     <p className="font-label-md text-label-md font-bold text-on-surface truncate">
-                      {user.fullName || "Quý khách BrewLite"}
+                      {getDisplayCustomerName(user)}
                     </p>
                     <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
                       {user.email}

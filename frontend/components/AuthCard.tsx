@@ -166,6 +166,16 @@ export default function AuthCard({
         errorObj?.statusCode === 400
       ) {
         title = "Thông tin không hợp lệ";
+      } else if (
+        errorObj?.code === "INVALID_TOKEN" ||
+        errorObj?.code === "INVALID_TOKEN_FORMAT" ||
+        errorObj?.code === "INVALID_TOKEN_PAYLOAD" ||
+        errorObj?.code === "MISSING_TOKEN_SUB" ||
+        errorObj?.code === "MISSING_TOKEN_EXP" ||
+        errorObj?.code === "TOKEN_EXPIRED"
+      ) {
+        title = "Xác thực không hợp lệ";
+        desc = errorObj?.message || "Mã xác thực phiên đăng nhập không hợp lệ hoặc đã hết hạn.";
       }
 
       setAlert({

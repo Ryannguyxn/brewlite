@@ -61,29 +61,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
 
-  // Khôi phục phiên đăng nhập khi tải trang & kiểm tra token hết hạn
+  // Khôi phục phiên đăng nhập khi tải trang & kiểm tra token hết hạn / không hợp lệ
   useEffect(() => {
     try {
       const savedToken = getStoredToken();
-      let savedUser = getStoredUser();
+      const savedUser = getStoredUser();
       if (savedToken && savedUser) {
         if (isTokenExpired(savedToken)) {
-          // Token hết hạn: Xóa phiên đăng nhập nhưng BẢO LƯU GIỎ HÀNG
+          // Token hết hạn hoặc không hợp lệ: Xóa phiên đăng nhập nhưng BẢO LƯU GIỎ HÀNG
           clearStoredSession();
           setAccessToken(null);
           setUser(null);
         } else {
-          // Tự động đối chiếu lại họ tên nếu phiên lưu trữ trước đó chưa có fullName
-          if (!savedUser.fullName) {
-            const reResolved = resolveUserFromLogin(savedUser.email, savedToken);
-            if (reResolved.fullName) {
-              savedUser = reResolved;
-              setStoredSession(savedToken, savedUser);
-            }
-          }
           setAccessToken(savedToken);
           setUser(savedUser);
         }
+      } else {
+        clearStoredSession();
+        setAccessToken(null);
+        setUser(null);
       }
     } catch {
       clearStoredSession();
@@ -96,6 +92,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (dto: LoginRequestDto): Promise<void> => {
     const res = await loginApi(dto);
+    // Validate JWT (cấu trúc 3 phần, sub chuỗi không rỗng, exp chưa hết hạn).
+    // Nếu token không hợp lệ, resolveUserFromLogin sẽ ném lỗi.
+    // Lỗi ném ra TRƯỚC KHI lưu session -> không lưu token hoặc thiết lập trạng thái đăng nhập.
     const resolvedUser = resolveUserFromLogin(dto.email, res.accessToken);
     setAccessToken(res.accessToken);
     setUser(resolvedUser);

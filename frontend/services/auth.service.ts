@@ -30,16 +30,31 @@ export const USER_STORAGE_KEY = "brewlite_auth_user_v1";
 export const AUTH_MODE: "real" | "mock" =
   process.env.NEXT_PUBLIC_AUTH_MODE === "mock" ? "mock" : "real";
 
+export interface DecodedJwtPayload {
+  sub?: unknown;
+  exp?: unknown;
+  iat?: unknown;
+  [key: string]: unknown;
+}
+
+export interface ValidatedJwtPayload {
+  sub: string;
+  exp: number;
+  iat?: number;
+  [key: string]: unknown;
+}
+
 /**
- * Giải mã JWT Payload phía client một cách an toàn để lấy sub (User ID) và exp
+ * Giải mã phần payload của JWT phía client.
+ * Lưu ý: Client KHÔNG xác thực chữ ký mật mã (Backend chịu trách nhiệm xác thực chữ ký).
  */
-export function decodeJwtPayload(
-  token: string
-): { sub?: string; exp?: number; iat?: number } | null {
+export function decodeJwtPayload(token: string): DecodedJwtPayload | null {
   try {
-    const parts = token.split(".");
+    if (typeof token !== "string") return null;
+    const parts = token.trim().split(".");
     if (parts.length !== 3) return null;
     const base64Url = parts[1];
+    if (!base64Url) return null;
     const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const jsonPayload = decodeURIComponent(
       atob(base64)
@@ -54,13 +69,84 @@ export function decodeJwtPayload(
 }
 
 /**
- * Kiểm tra xem JWT access token đã hết hạn chưa
+ * Validate cấu trúc và thông tin JWT trước khi thiết lập session:
+ * 1. Cấu trúc JWT hợp lệ (chuỗi không rỗng, đúng 3 phần header.payload.signature, payload parse được JSON)
+ * 2. sub là chuỗi không rỗng (bỏ logic tạo User ID dự phòng bằng Date.now())
+ * 3. exp là số hợp lệ và chưa hết hạn
+ *
+ * Lưu ý: Giữ nguyên nguyên tắc Backend chịu trách nhiệm xác thực chữ ký JWT.
+ */
+export function validateJwtToken(token: string): ValidatedJwtPayload {
+  if (typeof token !== "string" || !token.trim()) {
+    const error: Error & { code?: string } = new Error(
+      "Mã xác thực (JWT) không hợp lệ: token trống."
+    );
+    error.code = "INVALID_TOKEN";
+    throw error;
+  }
+
+  const parts = token.trim().split(".");
+  if (parts.length !== 3) {
+    const error: Error & { code?: string } = new Error(
+      "Mã xác thực (JWT) có định dạng không hợp lệ."
+    );
+    error.code = "INVALID_TOKEN_FORMAT";
+    throw error;
+  }
+
+  const payload = decodeJwtPayload(token);
+  if (!payload || typeof payload !== "object") {
+    const error: Error & { code?: string } = new Error(
+      "Không thể giải mã dữ liệu mã xác thực (JWT)."
+    );
+    error.code = "INVALID_TOKEN_PAYLOAD";
+    throw error;
+  }
+
+  // 1. sub là chuỗi không rỗng (bỏ logic tạo User ID dự phòng bằng Date.now())
+  if (typeof payload.sub !== "string" || !payload.sub.trim()) {
+    const error: Error & { code?: string } = new Error(
+      "Mã xác thực (JWT) không hợp lệ: thiếu thông tin định danh người dùng (sub)."
+    );
+    error.code = "MISSING_TOKEN_SUB";
+    throw error;
+  }
+
+  // 2. exp là số và chưa hết hạn
+  if (typeof payload.exp !== "number" || isNaN(payload.exp)) {
+    const error: Error & { code?: string } = new Error(
+      "Mã xác thực (JWT) không hợp lệ: thiếu thời gian hết hạn (exp)."
+    );
+    error.code = "MISSING_TOKEN_EXP";
+    throw error;
+  }
+
+  if (payload.exp * 1000 <= Date.now()) {
+    const error: Error & { code?: string } = new Error(
+      "Mã xác thực (JWT) đã hết hạn. Vui lòng đăng nhập lại."
+    );
+    error.code = "TOKEN_EXPIRED";
+    throw error;
+  }
+
+  return {
+    ...payload,
+    sub: payload.sub.trim(),
+    exp: payload.exp,
+    iat: typeof payload.iat === "number" ? payload.iat : undefined,
+  };
+}
+
+/**
+ * Kiểm tra xem JWT access token đã hết hạn hoặc không hợp lệ chưa
  */
 export function isTokenExpired(token: string): boolean {
-  const payload = decodeJwtPayload(token);
-  if (!payload || !payload.exp) return true;
-  // exp được tính theo giây, chuyển sang milliseconds so với thời gian hiện tại
-  return payload.exp * 1000 <= Date.now();
+  try {
+    validateJwtToken(token);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -226,18 +312,7 @@ export async function registerApi(dto: RegisterRequestDto): Promise<RegisterResp
   }
 
   if (res.ok) {
-    const data = (await res.json()) as RegisterResponseDto;
-    if (typeof window !== "undefined" && data.fullName) {
-      try {
-        localStorage.setItem(
-          `brewlite_user_fullname_${normalizedDto.email}`,
-          data.fullName
-        );
-      } catch {
-        // Bỏ qua lỗi lưu cache tên
-      }
-    }
-    return data;
+    return (await res.json()) as RegisterResponseDto;
   }
 
   const errorData = await res.json().catch(() => null);
@@ -322,58 +397,27 @@ export async function loginApi(dto: LoginRequestDto): Promise<LoginResponseDto> 
 /**
  * Tạo AuthUser từ thông tin đăng nhập thành công và JWT accessToken.
  * Tuyệt đối không chứa passwordHash hay dữ liệu nhạy cảm.
+ *
+ * Tuân thủ yêu cầu:
+ * - Validate JWT trước khi tạo User: kiểm tra cấu trúc hợp lệ, sub là chuỗi không rỗng, exp chưa hết hạn.
+ * - Bỏ logic tạo User ID dự phòng bằng Date.now() khi token thiếu sub (ném lỗi nếu thiếu).
+ * - Bỏ hoàn toàn danh sách hardcode tên Customer theo email.
+ * - Trong Real Mode: fullName là null (chưa có API Profile, không coi tên lưu trong localStorage là dữ liệu chính thức từ Backend).
  */
 export function resolveUserFromLogin(
   email: string,
-  accessToken: string,
-  knownFullName?: string | null
+  accessToken: string
 ): AuthUser {
   const normalized = email.trim().toLowerCase();
-  const payload = decodeJwtPayload(accessToken);
-  const userId = payload?.sub || `u-${Date.now()}`;
 
-  // 1. Nếu có explicit knownFullName
-  if (knownFullName) {
-    return {
-      id: userId,
-      email: normalized,
-      fullName: knownFullName,
-    };
-  }
+  // Validate JWT nghiêm ngặt theo yêu cầu:
+  // - Cấu trúc hợp lệ (3 phần ngăn cách bởi dấu chấm, payload parse được JSON)
+  // - sub là chuỗi không rỗng (bỏ logic tạo User ID dự phòng bằng Date.now())
+  // - exp chưa hết hạn
+  // - Backend chịu trách nhiệm xác thực chữ ký JWT
+  const validatedPayload = validateJwtToken(accessToken);
 
-  // 2. Tra cứu tên đã lưu khi người dùng đăng ký tài khoản trên trình duyệt
-  if (typeof window !== "undefined") {
-    try {
-      const cached = localStorage.getItem(`brewlite_user_fullname_${normalized}`);
-      if (cached) {
-        return {
-          id: userId,
-          email: normalized,
-          fullName: cached,
-        };
-      }
-    } catch {
-      // Bỏ qua lỗi đọc localStorage
-    }
-  }
-
-  // 3. Đối chiếu danh sách demo customers đã được cấu hình trong DB (seed-users.ts & API contract)
-  const SEEDED_USER_NAMES: Record<string, string> = {
-    "demo.customer1@brewlite.test": "Khách hàng Demo 1",
-    "demo.customer2@brewlite.test": "Khách hàng Demo 2",
-    "customer@example.com": "Nguyễn Văn A",
-    "huong.nguyen@brewlite.vn": "Nguyễn Thị Hương",
-    "dung.tran@brewlite.vn": "Trần Quốc Dũng",
-  };
-  if (SEEDED_USER_NAMES[normalized]) {
-    return {
-      id: userId,
-      email: normalized,
-      fullName: SEEDED_USER_NAMES[normalized],
-    };
-  }
-
-  // 4. Nếu đang chạy Mock Mode, lấy từ mock preview
+  // Nếu đang chạy Mock Mode: lấy từ dữ liệu mock preview nếu có
   if (AUTH_MODE === "mock") {
     const mockUser = findMockUserByEmail(normalized);
     if (mockUser) {
@@ -385,8 +429,11 @@ export function resolveUserFromLogin(
     }
   }
 
+  // Real Mode:
+  // Backend Login hiện chỉ trả accessToken, tokenType, expiresIn, JWT chứa sub, không có fullName.
+  // fullName đặt là null; giao diện sẽ hiển thị email hoặc tên suy ra từ email qua getDisplayCustomerName().
   return {
-    id: userId,
+    id: validatedPayload.sub,
     email: normalized,
     fullName: null,
   };
@@ -394,15 +441,17 @@ export function resolveUserFromLogin(
 
 /**
  * Định dạng tên hiển thị của người dùng trên giao diện:
- * - Ưu tiên fullName nếu có
- * - Nếu fullName là null: chuyển đổi email prefix thành tên đẹp (vd: "hoang.khanh" -> "Hoang Khanh")
+ * - Ưu tiên fullName nếu có (ví dụ khi Mock Mode cung cấp profile mẫu)
+ * - Tạm thời hiển thị tên suy ra từ email (vd: "hoang.khanh@..." -> "Hoang Khanh", "customer@..." -> "Customer")
+ * - Nếu không thể suy ra, hiển thị trực tiếp email
+ * - Không coi tên lưu trong localStorage là dữ liệu chính thức từ Backend.
  */
 export function getDisplayCustomerName(user: AuthUser | null): string {
   if (!user) return "Quý khách";
   if (user.fullName && user.fullName.trim()) {
     return user.fullName.trim();
   }
-  const rawPrefix = user.email.split("@")[0] || "";
+  const rawPrefix = (user.email || "").split("@")[0] || "";
   const words = rawPrefix
     .replace(/[._\-+]/g, " ")
     .split(" ")

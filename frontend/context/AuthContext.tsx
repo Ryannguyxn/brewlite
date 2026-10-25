@@ -9,7 +9,7 @@ import React, {
   useState,
 } from "react";
 import type {
-  DatabaseUser,
+  AuthUser,
   LoginRequestDto,
   RegisterRequestDto,
   RegisterResponseDto,
@@ -18,6 +18,7 @@ import {
   clearStoredSession,
   getStoredToken,
   getStoredUser,
+  isTokenExpired,
   loginApi,
   registerApi,
   resolveUserFromLogin,
@@ -29,11 +30,12 @@ import {
 // Quản lý trạng thái xác thực người dùng trên toàn Frontend Next.js
 // Tuân thủ API Contract v2.1:
 // - Giữ nguyên giỏ hàng (Cart) khi chuyển đổi đăng nhập / đăng xuất
-// - Quản lý token Bearer và thông tin người dùng với đầy đủ 7 trường database
+// - Quản lý token Bearer và thông tin AuthUser an toàn (không chứa passwordHash)
+// - Tự động kiểm tra token hết hạn khi reload trang
 // ============================================================================
 
 interface AuthContextType {
-  user: DatabaseUser | null;
+  user: AuthUser | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -51,7 +53,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<DatabaseUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -59,17 +61,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
 
-  // Khôi phục phiên đăng nhập khi tải trang
+  // Khôi phục phiên đăng nhập khi tải trang & kiểm tra token hết hạn
   useEffect(() => {
     try {
       const savedToken = getStoredToken();
       const savedUser = getStoredUser();
       if (savedToken && savedUser) {
-        setAccessToken(savedToken);
-        setUser(savedUser);
+        if (isTokenExpired(savedToken)) {
+          // Token hết hạn: Xóa phiên đăng nhập nhưng BẢO LƯU GIỎ HÀNG
+          clearStoredSession();
+          setAccessToken(null);
+          setUser(null);
+        } else {
+          setAccessToken(savedToken);
+          setUser(savedUser);
+        }
       }
     } catch {
-      // Bỏ qua lỗi đọc localStorage
+      clearStoredSession();
+      setAccessToken(null);
+      setUser(null);
     } finally {
       setIsLoading(false);
     }
@@ -77,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (dto: LoginRequestDto): Promise<void> => {
     const res = await loginApi(dto);
-    const resolvedUser = resolveUserFromLogin(dto.email);
+    const resolvedUser = resolveUserFromLogin(dto.email, res.accessToken);
     setAccessToken(res.accessToken);
     setUser(resolvedUser);
     setStoredSession(res.accessToken, resolvedUser);
@@ -92,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback((): void => {
+    // Đăng xuất: Xóa auth session nhưng BẢO LƯU GIỎ HÀNG
     clearStoredSession();
     setAccessToken(null);
     setUser(null);

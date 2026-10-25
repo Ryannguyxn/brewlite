@@ -1,5 +1,5 @@
 import {
-  type DatabaseUser,
+  type AuthUser,
   type LoginRequestDto,
   type LoginResponseDto,
   type RegisterRequestDto,
@@ -14,11 +14,54 @@ import { API_BASE_URL } from "./api.service";
 // AUTH SERVICE — SPRINT 2 (SCRUM-41)
 // Đối chiếu chuẩn 100% với:
 // - docs/api/BrewLite_API_Contract_v2.1.md (Mục 5, 6, 7)
-// - Database table `users` & schema.prisma
+// - Backend Auth Controller & Service
+// - Tuyệt đối không lưu passwordHash trên client / localStorage
+// - Tách bạch hoàn toàn Real Authentication (mặc định) và Mock Mode
 // ============================================================================
 
 export const TOKEN_STORAGE_KEY = "brewlite_auth_token_v1";
-export const USER_STORAGE_KEY = "brewlite_current_user_v1";
+export const USER_STORAGE_KEY = "brewlite_auth_user_v1";
+
+/**
+ * Cấu hình chế độ xác thực:
+ * - "real" (mặc định): Kết nối trực tiếp đến Backend API thật.
+ * - "mock": Chỉ dùng khi biến môi trường NEXT_PUBLIC_AUTH_MODE=mock để test UI cô lập.
+ */
+export const AUTH_MODE: "real" | "mock" =
+  process.env.NEXT_PUBLIC_AUTH_MODE === "mock" ? "mock" : "real";
+
+/**
+ * Giải mã JWT Payload phía client một cách an toàn để lấy sub (User ID) và exp
+ */
+export function decodeJwtPayload(
+  token: string
+): { sub?: string; exp?: number; iat?: number } | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Kiểm tra xem JWT access token đã hết hạn chưa
+ */
+export function isTokenExpired(token: string): boolean {
+  const payload = decodeJwtPayload(token);
+  if (!payload || !payload.exp) return true;
+  // exp được tính theo giây, chuyển sang milliseconds so với thời gian hiện tại
+  return payload.exp * 1000 <= Date.now();
+}
 
 /**
  * Validation cơ bản cho email theo API Contract v2.1:
@@ -73,46 +116,65 @@ export function validateFullName(fullName?: string): { isValid: boolean; error?:
 }
 
 /**
- * Trích xuất token lưu trong localStorage
+ * Trích xuất token lưu trong localStorage (có kiểm tra hạn)
  */
 export function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
+    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (!token) return null;
+    if (isTokenExpired(token)) {
+      clearStoredSession();
+      return null;
+    }
+    return token;
   } catch {
     return null;
   }
 }
 
 /**
- * Trích xuất thông tin User đang đăng nhập từ localStorage
+ * Trích xuất thông tin User đang đăng nhập từ localStorage.
+ * An toàn tuyệt đối: Chỉ chứa id, email, fullName. Không có passwordHash.
  */
-export function getStoredUser(): DatabaseUser | null {
+export function getStoredUser(): AuthUser | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(USER_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as DatabaseUser) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AuthUser;
+    // Đảm bảo không có passwordHash
+    return {
+      id: parsed.id,
+      email: parsed.email,
+      fullName: parsed.fullName ?? null,
+    };
   } catch {
     return null;
   }
 }
 
 /**
- * Lưu token và thông tin User sau khi đăng nhập thành công
+ * Lưu token và thông tin User an toàn sau khi đăng nhập thành công
  */
-export function setStoredSession(token: string, user: DatabaseUser): void {
+export function setStoredSession(token: string, user: AuthUser): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    const safeUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName ?? null,
+    };
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(safeUser));
   } catch {
     // Bỏ qua lỗi lưu session
   }
 }
 
 /**
- * Đăng xuất và xóa phiên đăng nhập
- * Lưu ý theo API Contract v2.1 Mục 7.5: Tuyệt đối KHÔNG xóa giỏ hàng (Cart) khi logout!
+ * Đăng xuất và xóa phiên đăng nhập.
+ * TUYỆT ĐỐI BẢO LƯU GIỎ HÀNG (Cart) theo API Contract v2.1 Mục 7.5 & 9.2!
  */
 export function clearStoredSession(): void {
   if (typeof window === "undefined") return;
@@ -126,8 +188,8 @@ export function clearStoredSession(): void {
 
 /**
  * Gửi yêu cầu Đăng ký (Register)
- * - Tự động gọi API Backend trước (`/api/backend/auth/register` hoặc `${API_BASE_URL}/auth/register`).
- * - Nếu Backend offline hoặc gặp lỗi kết nối, fallback về Mock Data đảm bảo đủ 7 trường database.
+ * - Mặc định Real Mode: Gửi trực tiếp đến Backend API `/auth/register`.
+ * - Khi Backend gặp lỗi / không khả dụng: Ném lỗi rõ ràng, KHÔNG tự động đăng nhập giả.
  */
 export async function registerApi(dto: RegisterRequestDto): Promise<RegisterResponseDto> {
   const normalizedDto: RegisterRequestDto = {
@@ -136,49 +198,61 @@ export async function registerApi(dto: RegisterRequestDto): Promise<RegisterResp
     fullName: dto.fullName?.trim() || undefined,
   };
 
+  // Nếu explicitly bật Mock Mode qua biến môi trường
+  if (AUTH_MODE === "mock") {
+    return mockRegister(normalizedDto);
+  }
+
   const endpoint =
     typeof window !== "undefined"
       ? "/api/backend/auth/register"
       : `${API_BASE_URL}/auth/register`;
 
+  let res: Response;
   try {
-    const res = await fetch(endpoint, {
+    res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(normalizedDto),
     });
-
-    if (res.ok) {
-      return (await res.json()) as RegisterResponseDto;
-    }
-
-    // Nếu Backend trả lỗi có cấu trúc (ví dụ 400 VALIDATION_ERROR, 409 EMAIL_ALREADY_EXISTS)
-    const errorData = await res.json().catch(() => null);
-    const err: Error & { statusCode?: number; code?: string; details?: unknown } =
-      new Error(
-        (Array.isArray(errorData?.message)
-          ? errorData.message.join(", ")
-          : errorData?.message) || "Đăng ký thất bại"
-      );
-    err.statusCode = res.status;
-    err.code = errorData?.code || (res.status === 409 ? "EMAIL_ALREADY_EXISTS" : "VALIDATION_ERROR");
-    err.details = errorData;
+  } catch (netErr) {
+    // Lỗi mạng hoặc Backend chưa chạy trong Real Mode: Báo lỗi thật sự, không giả lập thành công!
+    const err: Error & { statusCode?: number; code?: string } = new Error(
+      "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại dịch vụ."
+    );
+    err.statusCode = 503;
+    err.code = "NETWORK_ERROR";
     throw err;
-  } catch (error) {
-    // Nếu là lỗi nghiệp vụ từ server (đã có statusCode), ném tiếp
-    if ((error as { statusCode?: number }).statusCode) {
-      throw error;
-    }
-    // Nếu lỗi mạng / Backend chưa chạy -> Fallback qua Mock Data
-    console.warn("Backend API không phản hồi, chuyển sang xử lý bằng Mock Data Users...");
-    return mockRegister(normalizedDto);
   }
+
+  if (res.ok) {
+    return (await res.json()) as RegisterResponseDto;
+  }
+
+  const errorData = await res.json().catch(() => null);
+  const err: Error & { statusCode?: number; code?: string; details?: unknown } =
+    new Error(
+      (Array.isArray(errorData?.message)
+        ? errorData.message.join(", ")
+        : errorData?.message) || "Đăng ký không thành công"
+    );
+  err.statusCode = res.status;
+  err.code =
+    errorData?.code ||
+    (res.status === 409
+      ? "EMAIL_ALREADY_EXISTS"
+      : res.status === 400
+      ? "VALIDATION_ERROR"
+      : "SERVER_ERROR");
+  err.details = errorData;
+  throw err;
 }
 
 /**
  * Gửi yêu cầu Đăng nhập (Login)
- * - Tự động gọi API Backend trước (`/api/backend/auth/login` hoặc `${API_BASE_URL}/auth/login`).
- * - Nếu Backend offline, fallback về Mock Data Users.
+ * - Mặc định Real Mode: Gửi trực tiếp đến Backend API `/auth/login`.
+ * - Nhận JWT token thật từ backend và verify qua Argon2id.
+ * - Khi Backend gặp lỗi / không khả dụng: Ném lỗi rõ ràng, KHÔNG tự động đăng nhập giả.
  */
 export async function loginApi(dto: LoginRequestDto): Promise<LoginResponseDto> {
   const normalizedDto: LoginRequestDto = {
@@ -186,70 +260,82 @@ export async function loginApi(dto: LoginRequestDto): Promise<LoginResponseDto> 
     password: dto.password,
   };
 
+  if (AUTH_MODE === "mock") {
+    return mockLogin(normalizedDto);
+  }
+
   const endpoint =
     typeof window !== "undefined"
       ? "/api/backend/auth/login"
       : `${API_BASE_URL}/auth/login`;
 
+  let res: Response;
   try {
-    const res = await fetch(endpoint, {
+    res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(normalizedDto),
     });
-
-    if (res.ok) {
-      return (await res.json()) as LoginResponseDto;
-    }
-
-    const errorData = await res.json().catch(() => null);
-    const err: Error & { statusCode?: number; code?: string; details?: unknown } =
-      new Error(
-        (Array.isArray(errorData?.message)
-          ? errorData.message.join(", ")
-          : errorData?.message) || "Email hoặc mật khẩu không chính xác."
-      );
-    err.statusCode = res.status;
-    err.code = errorData?.code || (res.status === 401 ? "INVALID_CREDENTIALS" : "VALIDATION_ERROR");
-    err.details = errorData;
+  } catch (netErr) {
+    const err: Error & { statusCode?: number; code?: string } = new Error(
+      "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại dịch vụ."
+    );
+    err.statusCode = 503;
+    err.code = "NETWORK_ERROR";
     throw err;
-  } catch (error) {
-    if ((error as { statusCode?: number }).statusCode) {
-      throw error;
-    }
-    console.warn("Backend API không phản hồi, chuyển sang xử lý bằng Mock Data Users...");
-    return mockLogin(normalizedDto);
   }
+
+  if (res.ok) {
+    return (await res.json()) as LoginResponseDto;
+  }
+
+  const errorData = await res.json().catch(() => null);
+  const err: Error & { statusCode?: number; code?: string; details?: unknown } =
+    new Error(
+      (Array.isArray(errorData?.message)
+        ? errorData.message.join(", ")
+        : errorData?.message) || "Email hoặc mật khẩu không chính xác."
+    );
+  err.statusCode = res.status;
+  err.code =
+    errorData?.code ||
+    (res.status === 401
+      ? "INVALID_CREDENTIALS"
+      : res.status === 400
+      ? "VALIDATION_ERROR"
+      : "SERVER_ERROR");
+  err.details = errorData;
+  throw err;
 }
 
 /**
- * Tìm hoặc tạo đối tượng DatabaseUser hoàn chỉnh tương ứng với tài khoản đăng nhập thành công
+ * Tạo AuthUser từ thông tin đăng nhập thành công và JWT accessToken.
+ * Tuyệt đối không chứa passwordHash hay dữ liệu nhạy cảm.
  */
 export function resolveUserFromLogin(
   email: string,
-  userId?: string
-): DatabaseUser {
+  accessToken: string,
+  knownFullName?: string | null
+): AuthUser {
   const normalized = email.trim().toLowerCase();
-  const existing = findMockUserByEmail(normalized);
-  if (existing) {
-    return existing;
+  const payload = decodeJwtPayload(accessToken);
+  const userId = payload?.sub || `u-${Date.now()}`;
+
+  // Nếu đang chạy Mock Mode, lấy từ mock preview
+  if (AUTH_MODE === "mock") {
+    const mockUser = findMockUserByEmail(normalized);
+    if (mockUser) {
+      return {
+        id: mockUser.id,
+        email: mockUser.email,
+        fullName: mockUser.fullName,
+      };
+    }
   }
 
-  // Nếu là user từ backend thực tế mà chưa có trong local mock
-  const fallbackId = userId || `user-${Date.now()}`;
-  const nowIso = new Date().toISOString();
   return {
-    id: fallbackId,
+    id: userId,
     email: normalized,
-    passwordHash: "backend_verified",
-    fullName: null,
-    loyaltyPoints: 0,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    password_hash: "backend_verified",
-    full_name: null,
-    loyalty_points: 0,
-    created_at: nowIso,
-    updated_at: nowIso,
+    fullName: knownFullName ?? null,
   };
 }

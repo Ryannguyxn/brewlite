@@ -179,9 +179,6 @@ export default function Header({
                     <span className="font-label-md text-[11px] text-primary font-bold bg-primary-fixed/60 px-1.5 py-0.2 rounded">
                       Thành viên
                     </span>
-                    <span className="font-label-md text-[11px] text-tertiary font-semibold">
-                      💎 {user.loyaltyPoints ?? 0} điểm
-                    </span>
                   </div>
                 </div>
                 <span className="material-symbols-outlined text-[16px] text-outline group-hover:text-primary transition-colors">
@@ -199,10 +196,6 @@ export default function Header({
                     <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
                       {user.email}
                     </p>
-                    <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container text-primary font-label-md text-[12px] font-semibold">
-                      <span>💎 Điểm tích lũy:</span>
-                      <span className="font-bold">{user.loyaltyPoints ?? 0}</span>
-                    </div>
                   </div>
                   <div className="py-1">
                     <button

@@ -73,7 +73,7 @@
 <!-- Bottom Switcher Prompt -->
 <div class="text-center pt-space-xs">
 <p class="font-body-md text-body-md text-on-surface-variant">
-          Chưa có tài khoản? 
+          Chưa có tài khoản?
           <button class="font-label-md text-label-md text-primary hover:underline hover:text-secondary font-bold inline-block ml-1" onclick="switchAuthMode('register')" type="button">
             Đăng ký ngay
           </button>
@@ -129,7 +129,7 @@
 <!-- Bottom Switcher Prompt -->
 <div class="text-center pt-space-xs">
 <p class="font-body-md text-body-md text-on-surface-variant">
-          Đã có tài khoản? 
+          Đã có tài khoản?
           <button class="font-label-md text-label-md text-primary hover:underline hover:text-secondary font-bold inline-block ml-1" onclick="switchAuthMode('login')" type="button">
             Đăng nhập ngay
           </button>
@@ -171,7 +171,7 @@
       // Style active tab
       tabLogin.className = 'py-2 rounded-md font-label-lg text-label-lg transition-all duration-200 bg-surface-container-lowest text-on-surface shadow-sm font-bold flex items-center justify-center gap-1.5';
       tabRegister.className = 'py-2 rounded-md font-label-lg text-label-lg transition-all duration-200 text-on-surface-variant hover:text-on-surface flex items-center justify-center gap-1.5';
-      
+
       // Toggle form presence
       formLogin.classList.remove('hidden');
       formLogin.classList.add('flex');
@@ -181,7 +181,7 @@
       // Update titles
       heading.innerText = 'Chào mừng trở lại';
       subheading.innerText = 'Trải nghiệm cà phê nghệ nhân & đặc sản nguyên bản';
-      
+
       const emailField = document.getElementById('login-email');
       if (emailField) emailField.focus();
     } else {
@@ -210,7 +210,7 @@
     const start = inputElement.selectionStart;
     const end = inputElement.selectionEnd;
     const formatted = inputElement.value.trim().toLowerCase();
-    
+
     // Only update if changes to prevent cursor disruption
     if (inputElement.value !== formatted) {
       inputElement.value = formatted;
@@ -242,7 +242,7 @@
     const alertTitle = document.getElementById('auth-alert-title');
     const alertDesc = document.getElementById('auth-alert-desc');
     const alertIcon = document.getElementById('auth-alert-icon');
-    
+
     if (type === 'login') {
       const email = document.getElementById('login-email').value;
       alertBox.className = 'mt-space-md p-3.5 rounded-lg text-left flex items-start gap-2.5 bg-surface-container-high text-on-surface';
@@ -259,7 +259,7 @@
       alertTitle.innerText = 'Đăng ký thành công!';
       alertDesc.innerText = `Tài khoản ${email} của ${fullName} đã sẵn sàng phục vụ.`;
     }
-    
+
     alertBox.classList.remove('hidden');
   }
 </script></main><footer class="w-full py-space-lg text-center font-body-sm text-body-sm text-on-surface-variant"><p class="max-w-md mx-auto leading-relaxed">© 2025 BrewLite Specialty Coffee. Nghệ thuật rang xay &amp; thưởng thức cà phê thủ công.</p></footer>

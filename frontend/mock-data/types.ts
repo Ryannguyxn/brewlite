@@ -169,6 +169,16 @@ export interface DatabaseUser {
   updated_at?: string;
 }
 
+/**
+ * Thông tin User an toàn trong Client State / AuthContext / LocalStorage.
+ * TUYỆT ĐỐI KHÔNG chứa passwordHash hay password_hash trên Client.
+ */
+export interface AuthUser {
+  id: string;
+  email: string;
+  fullName: string | null;
+}
+
 /** Payload gửi lên khi đăng ký (API Contract v2.1 Mục 6.2) */
 export interface RegisterRequestDto {
   email: string;

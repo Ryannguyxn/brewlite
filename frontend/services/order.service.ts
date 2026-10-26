@@ -6,6 +6,8 @@ import {
   type InsufficientStockDetail,
   type InvalidCartDetail,
   type OrderErrorCode,
+  type OrderItemSnapshotDto,
+  type OrderToppingSnapshotDto,
 } from "@/mock-data";
 import {
   API_BASE_URL,
@@ -27,11 +29,14 @@ import {
 // - database/schema.dbml & backend/prisma/schema.prisma
 // - backend/src/orders/orders.controller.ts & orders.service.ts
 //
-// Phạm vi SCRUM-43:
-// - Chuẩn hóa & kiểm tra payload Checkout -> Gọi API Create Order (`POST /orders`)
-// - Đính kèm Authorization: Bearer <JWT_ACCESS_TOKEN>
-// - Bảo toàn trạng thái Giỏ hàng (Cart) khi chuyển qua Login / 401 / tạo đơn PENDING
-// (Phần xử lý loading/error UI chi tiết và hiển thị dữ liệu Order Response thuộc SCRUM-44)
+// Nguyên tắc bắt buộc:
+// 1. Chỉ gửi { items: [{ productId, size, toppingIds, quantity }], couponCode? }
+// 2. Không dùng Math.trunc() để tự sửa quantity thập phân; từ chối dữ liệu sai.
+// 3. Không tự động gửi lại (retry) POST /orders khi fetch bị lỗi mạng vì request
+//    đầu tiên có thể đã tạo Order thành công trên máy chủ.
+// 4. Chỉ coi HTTP 201 Created là thành công cho POST /orders (không chấp nhận mọi 2xx).
+// 5. Kiểm tra chặt chẽ toàn bộ trường bắt buộc trong CreateOrderResponseDto,
+//    không tự điền giá trị mặc định che giấu dữ liệu sai.
 // ============================================================================
 
 export const MAX_ORDER_ITEMS = 20;
@@ -127,6 +132,7 @@ export function validateCouponCodeInput(couponCode?: string | null): {
  * - Loại bỏ mọi trường cấm (userId, status, price, unitPriceVnd, lineTotalVnd, subtotalVnd, discountVnd, totalVnd)
  * - Trim và lowercase UUID (productId, toppingIds)
  * - Trim và uppercase couponCode (bỏ qua nếu rỗng)
+ * - TUYỆT ĐỐI KHÔNG dùng Math.trunc() để tự sửa quantity thập phân; giữ nguyên giá trị để validateCreateOrderPayload từ chối nếu sai kiểu/thập phân.
  */
 export function sanitizeCreateOrderPayload(
   raw: CreateOrderRequestDto
@@ -143,10 +149,7 @@ export function sanitizeCreateOrderPayload(
               typeof id === "string" ? id.trim().toLowerCase() : ""
             )
           : [],
-        quantity:
-          typeof item?.quantity === "number" && Number.isFinite(item.quantity)
-            ? Math.trunc(item.quantity)
-            : Number(item?.quantity),
+        quantity: item?.quantity as number,
       }))
     : [];
 
@@ -159,7 +162,8 @@ export function sanitizeCreateOrderPayload(
 }
 
 /**
- * Kiểm tra tính hợp lệ của payload `CreateOrderRequestDto` trước khi gọi API
+ * Kiểm tra tính hợp lệ của payload `CreateOrderRequestDto` trước khi gọi API.
+ * Từ chối thẳng mọi dữ liệu sai (bao gồm quantity thập phân, không phải number, vượt ngưỡng).
  */
 export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
   isValid: boolean;
@@ -200,6 +204,49 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
     };
   }
 
+  // Kiểm tra kiểu dữ liệu gốc của từng dòng trước khi chuẩn hóa
+  for (let i = 0; i < raw.items.length; i++) {
+    const rawItem = raw.items[i];
+    if (!rawItem || typeof rawItem !== "object") {
+      return {
+        isValid: false,
+        error: createOrderError(
+          `Dữ liệu dòng sản phẩm thứ ${i + 1} không hợp lệ.`,
+          400,
+          "VALIDATION_ERROR"
+        ),
+      };
+    }
+
+    if (
+      typeof rawItem.quantity !== "number" ||
+      !Number.isFinite(rawItem.quantity) ||
+      !Number.isInteger(rawItem.quantity) ||
+      rawItem.quantity < MIN_ORDER_QUANTITY ||
+      rawItem.quantity > MAX_ORDER_QUANTITY
+    ) {
+      return {
+        isValid: false,
+        error: createOrderError(
+          `Số lượng mỗi dòng sản phẩm phải là số nguyên từ ${MIN_ORDER_QUANTITY} đến ${MAX_ORDER_QUANTITY}.`,
+          400,
+          "VALIDATION_ERROR"
+        ),
+      };
+    }
+
+    if (!Array.isArray(rawItem.toppingIds)) {
+      return {
+        isValid: false,
+        error: createOrderError(
+          `Danh sách topping ở dòng ${i + 1} không hợp lệ.`,
+          400,
+          "VALIDATION_ERROR"
+        ),
+      };
+    }
+  }
+
   const sanitized = sanitizeCreateOrderPayload(raw);
   const seenConfigKeys = new Set<string>();
 
@@ -228,32 +275,6 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
       };
     }
 
-    if (
-      !Number.isInteger(item.quantity) ||
-      item.quantity < MIN_ORDER_QUANTITY ||
-      item.quantity > MAX_ORDER_QUANTITY
-    ) {
-      return {
-        isValid: false,
-        error: createOrderError(
-          `Số lượng mỗi dòng sản phẩm phải là số nguyên từ ${MIN_ORDER_QUANTITY} đến ${MAX_ORDER_QUANTITY}.`,
-          400,
-          "VALIDATION_ERROR"
-        ),
-      };
-    }
-
-    if (!Array.isArray(item.toppingIds)) {
-      return {
-        isValid: false,
-        error: createOrderError(
-          `Danh sách topping ở dòng ${i + 1} không hợp lệ.`,
-          400,
-          "VALIDATION_ERROR"
-        ),
-      };
-    }
-
     if (item.toppingIds.some((tid) => !tid || !isValidUuid(tid))) {
       return {
         isValid: false,
@@ -272,7 +293,13 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
           `Mỗi dòng sản phẩm chỉ được chọn tối đa ${MAX_TOPPINGS_PER_ITEM} loại topping.`,
           400,
           "INVALID_CART",
-          [{ productId: item.productId, itemIndex: i, reason: "TOO_MANY_TOPPINGS" }]
+          [
+            {
+              productId: item.productId,
+              itemIndex: i,
+              reason: "TOO_MANY_TOPPINGS",
+            },
+          ]
         ),
       };
     }
@@ -284,7 +311,13 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
           "Không được chọn trùng lặp cùng một loại topping trong 1 dòng món.",
           400,
           "INVALID_CART",
-          [{ productId: item.productId, itemIndex: i, reason: "DUPLICATE_TOPPING" }]
+          [
+            {
+              productId: item.productId,
+              itemIndex: i,
+              reason: "DUPLICATE_TOPPING",
+            },
+          ]
         ),
       };
     }
@@ -319,9 +352,12 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
 }
 
 /**
- * Kiểm tra cấu trúc dữ liệu `CreateOrderResponseDto` trả về từ máy chủ (HTTP 201 Created)
+ * Kiểm tra chặt chẽ toàn bộ các trường bắt buộc trong `CreateOrderResponseDto` trả về từ máy chủ (HTTP 201 Created).
+ * Tuyệt đối không tự điền giá trị mặc định che giấu dữ liệu sai hoặc thiếu từ Backend.
  */
-function validateOrderResponseData(data: unknown): CreateOrderResponseDto {
+export function validateOrderResponseData(
+  data: unknown
+): CreateOrderResponseDto {
   if (!data || typeof data !== "object") {
     throw createOrderError(
       "Phản hồi đơn hàng từ máy chủ không hợp lệ.",
@@ -331,62 +367,257 @@ function validateOrderResponseData(data: unknown): CreateOrderResponseDto {
   }
 
   const record = data as Record<string, unknown>;
-  if (
-    typeof record.id !== "string" ||
-    !record.id.trim() ||
-    typeof record.status !== "string" ||
-    !Array.isArray(record.items) ||
-    typeof record.subtotalVnd !== "number" ||
-    !Number.isSafeInteger(record.subtotalVnd) ||
-    typeof record.discountVnd !== "number" ||
-    !Number.isSafeInteger(record.discountVnd) ||
-    typeof record.totalVnd !== "number" ||
-    !Number.isSafeInteger(record.totalVnd) ||
-    typeof record.createdAt !== "string"
-  ) {
+
+  if (typeof record.id !== "string" || !isValidUuid(record.id.trim())) {
     throw createOrderError(
-      "Dữ liệu snapshot đơn hàng trả về từ máy chủ không đầy đủ.",
+      "Mã đơn hàng (id) trả về từ máy chủ không hợp lệ.",
       500,
       "SERVER_ERROR"
     );
   }
 
+  if (record.status !== "PENDING") {
+    throw createOrderError(
+      "Trạng thái đơn hàng mới tạo (status) phải là PENDING theo hợp đồng API.",
+      500,
+      "SERVER_ERROR"
+    );
+  }
+
+  if (!Array.isArray(record.items) || record.items.length === 0) {
+    throw createOrderError(
+      "Danh sách món trong phản hồi đơn hàng (items) bị rỗng hoặc không hợp lệ.",
+      500,
+      "SERVER_ERROR"
+    );
+  }
+
+  if (
+    record.couponCode !== null &&
+    (typeof record.couponCode !== "string" || !record.couponCode.trim())
+  ) {
+    throw createOrderError(
+      "Trường couponCode trong phản hồi đơn hàng không hợp lệ.",
+      500,
+      "SERVER_ERROR"
+    );
+  }
+
+  if (
+    typeof record.subtotalVnd !== "number" ||
+    !Number.isSafeInteger(record.subtotalVnd) ||
+    record.subtotalVnd < 0 ||
+    typeof record.discountVnd !== "number" ||
+    !Number.isSafeInteger(record.discountVnd) ||
+    record.discountVnd < 0 ||
+    typeof record.totalVnd !== "number" ||
+    !Number.isSafeInteger(record.totalVnd) ||
+    record.totalVnd < 0
+  ) {
+    throw createOrderError(
+      "Dữ liệu tổng tiền (subtotalVnd, discountVnd, totalVnd) từ máy chủ không hợp lệ.",
+      500,
+      "SERVER_ERROR"
+    );
+  }
+
+  if (
+    typeof record.createdAt !== "string" ||
+    !record.createdAt.trim() ||
+    Number.isNaN(Date.parse(record.createdAt))
+  ) {
+    throw createOrderError(
+      "Thời gian tạo đơn (createdAt) từ máy chủ không đúng chuẩn ISO 8601.",
+      500,
+      "SERVER_ERROR"
+    );
+  }
+
+  const validatedItems: OrderItemSnapshotDto[] = record.items.map(
+    (rawItem: unknown, idx: number) => {
+      if (!rawItem || typeof rawItem !== "object") {
+        throw createOrderError(
+          `Dữ liệu dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      const item = rawItem as Record<string, unknown>;
+
+      if (typeof item.id !== "string" || !isValidUuid(item.id.trim())) {
+        throw createOrderError(
+          `Thiếu hoặc sai định dạng id ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (
+        typeof item.productId !== "string" ||
+        !isValidUuid(item.productId.trim())
+      ) {
+        throw createOrderError(
+          `Thiếu hoặc sai định dạng productId ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (
+        typeof item.productName !== "string" ||
+        !item.productName.trim()
+      ) {
+        throw createOrderError(
+          `Thiếu productName ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (
+        typeof item.size !== "string" ||
+        !VALID_DRINK_SIZES.includes(item.size as DrinkSize)
+      ) {
+        throw createOrderError(
+          `Kích cỡ (size) ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (
+        typeof item.sizeMultiplierPercent !== "number" ||
+        !Number.isSafeInteger(item.sizeMultiplierPercent) ||
+        item.sizeMultiplierPercent <= 0
+      ) {
+        throw createOrderError(
+          `Hệ số kích cỡ (sizeMultiplierPercent) ở dòng món thứ ${idx + 1} không hợp lệ.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (
+        typeof item.basePriceVnd !== "number" ||
+        !Number.isSafeInteger(item.basePriceVnd) ||
+        item.basePriceVnd < 0
+      ) {
+        throw createOrderError(
+          `Giá gốc (basePriceVnd) ở dòng món thứ ${idx + 1} không hợp lệ.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (
+        typeof item.quantity !== "number" ||
+        !Number.isSafeInteger(item.quantity) ||
+        item.quantity < MIN_ORDER_QUANTITY ||
+        item.quantity > MAX_ORDER_QUANTITY
+      ) {
+        throw createOrderError(
+          `Số lượng (quantity) ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (
+        typeof item.unitPriceVnd !== "number" ||
+        !Number.isSafeInteger(item.unitPriceVnd) ||
+        item.unitPriceVnd < 0 ||
+        typeof item.lineTotalVnd !== "number" ||
+        !Number.isSafeInteger(item.lineTotalVnd) ||
+        item.lineTotalVnd < 0
+      ) {
+        throw createOrderError(
+          `Đơn giá hoặc thành tiền ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      if (!Array.isArray(item.toppings)) {
+        throw createOrderError(
+          `Danh sách toppings ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không phải mảng.`,
+          500,
+          "SERVER_ERROR"
+        );
+      }
+
+      const validatedToppings: OrderToppingSnapshotDto[] = item.toppings.map(
+        (rawTop: unknown, topIdx: number) => {
+          if (!rawTop || typeof rawTop !== "object") {
+            throw createOrderError(
+              `Topping thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
+              500,
+              "SERVER_ERROR"
+            );
+          }
+
+          const top = rawTop as Record<string, unknown>;
+          if (typeof top.id !== "string" || !isValidUuid(top.id.trim())) {
+            throw createOrderError(
+              `Mã topping (id) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
+              500,
+              "SERVER_ERROR"
+            );
+          }
+
+          if (typeof top.name !== "string" || !top.name.trim()) {
+            throw createOrderError(
+              `Tên topping (name) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
+              500,
+              "SERVER_ERROR"
+            );
+          }
+
+          if (
+            typeof top.priceVnd !== "number" ||
+            !Number.isSafeInteger(top.priceVnd) ||
+            top.priceVnd < 0
+          ) {
+            throw createOrderError(
+              `Giá topping (priceVnd) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
+              500,
+              "SERVER_ERROR"
+            );
+          }
+
+          return {
+            id: top.id.trim(),
+            name: top.name.trim(),
+            priceVnd: top.priceVnd,
+          };
+        }
+      );
+
+      return {
+        id: item.id.trim(),
+        productId: item.productId.trim(),
+        productName: item.productName.trim(),
+        size: item.size as DrinkSize,
+        sizeMultiplierPercent: item.sizeMultiplierPercent,
+        basePriceVnd: item.basePriceVnd,
+        quantity: item.quantity,
+        unitPriceVnd: item.unitPriceVnd,
+        lineTotalVnd: item.lineTotalVnd,
+        toppings: validatedToppings,
+      };
+    }
+  );
+
   return {
     id: record.id.trim(),
-    status: record.status as CreateOrderResponseDto["status"],
-    items: record.items.map((rawItem: unknown) => {
-      const item = (rawItem || {}) as Record<string, unknown>;
-      const toppings = Array.isArray(item.toppings)
-        ? item.toppings.map((rawTop: unknown) => {
-            const top = (rawTop || {}) as Record<string, unknown>;
-            return {
-              id: String(top.id || ""),
-              name: String(top.name || ""),
-              priceVnd: Number(top.priceVnd || 0),
-            };
-          })
-        : [];
-      return {
-        id: String(item.id || ""),
-        productId: String(item.productId || ""),
-        productName: String(item.productName || ""),
-        size: (item.size as DrinkSize) || "S",
-        sizeMultiplierPercent: Number(item.sizeMultiplierPercent || 100),
-        basePriceVnd: Number(item.basePriceVnd || 0),
-        quantity: Number(item.quantity || 1),
-        unitPriceVnd: Number(item.unitPriceVnd || 0),
-        lineTotalVnd: Number(item.lineTotalVnd || 0),
-        toppings,
-      };
-    }),
+    status: "PENDING",
+    items: validatedItems,
     couponCode:
-      typeof record.couponCode === "string" && record.couponCode.trim()
-        ? record.couponCode.trim()
-        : null,
+      typeof record.couponCode === "string" ? record.couponCode.trim() : null,
     subtotalVnd: record.subtotalVnd,
     discountVnd: record.discountVnd,
     totalVnd: record.totalVnd,
-    createdAt: record.createdAt,
+    createdAt: record.createdAt.trim(),
   };
 }
 
@@ -394,7 +625,8 @@ function validateOrderResponseData(data: unknown): CreateOrderResponseDto {
  * Gọi API `POST /orders` tới Backend thật để tạo đơn hàng `PENDING` từ giỏ hàng hiện tại (SCRUM-43).
  * - Kiểm tra chặt chẽ JWT trước khi gửi request.
  * - Chỉ gửi `{ items: [{ productId, size, toppingIds, quantity }], couponCode? }`.
- * - Tuyệt đối không tạo đơn hàng giả ở phía Client khi Backend lỗi.
+ * - TUYỆT ĐỐI KHÔNG tự động gửi lại (retry) `POST /orders` khi `fetch` bị lỗi mạng.
+ * - Chỉ chấp nhận đúng HTTP `201 Created` theo API Contract v2.1 / v3.0.
  */
 export async function createOrderApi(
   rawPayload: CreateOrderRequestDto,
@@ -437,14 +669,12 @@ export async function createOrderApi(
 
   const sanitizedPayload = validation.payload;
 
-  // 3. Gửi request tới Backend `POST /orders`
-  const isBrowser = typeof window !== "undefined";
-  const primaryUrl = isBrowser
-    ? "/api/backend/orders"
-    : `${API_BASE_URL}/orders`;
-  const fallbackUrl = isBrowser
-    ? `${API_BASE_URL}/orders`
-    : "/api/backend/orders";
+  // 3. Gửi duy nhất 1 request tới Backend `POST /orders`
+  // TUYỆT ĐỐI KHÔNG tự động gửi lại (retry) khi fetch lỗi mạng vì request đầu tiên có thể đã tạo Order trên Server
+  const endpoint =
+    typeof window !== "undefined"
+      ? "/api/backend/orders"
+      : `${API_BASE_URL}/orders`;
 
   const requestInit: RequestInit = {
     method: "POST",
@@ -459,23 +689,28 @@ export async function createOrderApi(
 
   let response: Response;
   try {
-    response = await fetch(primaryUrl, requestInit);
+    response = await fetch(endpoint, requestInit);
   } catch {
-    try {
-      response = await fetch(fallbackUrl, requestInit);
-    } catch {
-      throw createOrderError(
-        "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại dịch vụ.",
-        503,
-        "NETWORK_ERROR"
-      );
-    }
+    throw createOrderError(
+      "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại kết nối trước khi thử lại.",
+      503,
+      "NETWORK_ERROR"
+    );
   }
 
-  // 4. Xử lý thành công HTTP 201 Created
-  if (response.status === 201 || response.ok) {
+  // 4. Chỉ coi HTTP 201 Created là thành công đúng hợp đồng API Contract v2.1 Mục 8.3
+  if (response.status === 201) {
     const rawData = await response.json().catch(() => null);
     return validateOrderResponseData(rawData);
+  }
+
+  // Nếu máy chủ trả về một mã 2xx khác 201 (ví dụ 200 hoặc 204), coi là sai hợp đồng API
+  if (response.status >= 200 && response.status < 300) {
+    throw createOrderError(
+      `Phản hồi từ máy chủ không đúng hợp đồng POST /orders (nhận HTTP ${response.status}, yêu cầu HTTP 201 Created).`,
+      500,
+      "SERVER_ERROR"
+    );
   }
 
   // 5. Xử lý các mã lỗi HTTP từ Backend (400, 401, 409, 5xx)

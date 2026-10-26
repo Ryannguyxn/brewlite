@@ -159,7 +159,9 @@ export function generateCartItemKey(
 }
 
 /**
- * Gộp các dòng món trùng cấu hình (productId, size, toppingIds) khi hydrate từ localStorage
+ * Gộp các dòng món trùng cấu hình (productId, size, toppingIds).
+ * TUYỆT ĐỐI KHÔNG dùng Math.min() để âm thầm cắt mất quantity vượt giới hạn MAX_ORDER_QUANTITY (10 ly).
+ * Nếu tổng số lượng gộp vượt quá MAX_ORDER_QUANTITY, ném lỗi để từ chối dữ liệu không hợp lệ.
  */
 export function mergeDuplicateCartItems(items: CartItem[]): CartItem[] {
   const mergedMap = new Map<string, CartItem>();
@@ -169,10 +171,12 @@ export function mergeDuplicateCartItems(items: CartItem[]): CartItem[] {
     const existing = mergedMap.get(key);
 
     if (existing) {
-      const nextQty = Math.min(
-        MAX_ORDER_QUANTITY,
-        existing.quantity + item.quantity
-      );
+      const nextQty = existing.quantity + item.quantity;
+      if (nextQty > MAX_ORDER_QUANTITY) {
+        throw new Error(
+          `Tổng số lượng khi gộp của món "${existing.productName}" (${nextQty} ly) vượt quá giới hạn tối đa ${MAX_ORDER_QUANTITY} ly/dòng.`
+        );
+      }
       mergedMap.set(key, {
         ...existing,
         quantity: nextQty,
@@ -465,15 +469,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return { success: false, message: "Giá sản phẩm không hợp lệ." };
       }
 
-      const requestedQty = Math.trunc(input.quantity || 1);
+      const requestedQty = input.quantity;
       if (
+        typeof requestedQty !== "number" ||
+        !Number.isFinite(requestedQty) ||
         !Number.isInteger(requestedQty) ||
         requestedQty < MIN_ORDER_QUANTITY ||
         requestedQty > MAX_ORDER_QUANTITY
       ) {
         return {
           success: false,
-          message: `Số lượng mỗi lần thêm phải từ ${MIN_ORDER_QUANTITY} đến ${MAX_ORDER_QUANTITY} ly.`,
+          message: `Số lượng mỗi lần thêm phải là số nguyên từ ${MIN_ORDER_QUANTITY} đến ${MAX_ORDER_QUANTITY} ly.`,
         };
       }
 
@@ -573,18 +579,19 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (existingIndex >= 0) {
-        // Đã có món trong giỏ
+        // Đã có món trong giỏ: kiểm tra tổng số lượng sau khi cộng dồn, KHÔNG dùng Math.min() để tự ý cắt bớt
         const current = items[existingIndex];
-        if (current.quantity >= MAX_ORDER_QUANTITY) {
-          const msg = `Đã đạt giới hạn tối đa ${MAX_ORDER_QUANTITY} ly cho món này trong giỏ hàng.`;
+        const newQty = current.quantity + requestedQty;
+        if (newQty > MAX_ORDER_QUANTITY) {
+          const remaining = Math.max(0, MAX_ORDER_QUANTITY - current.quantity);
+          const msg =
+            remaining > 0
+              ? `Không thể thêm ${requestedQty} ly. Món "${current.productName}" hiện đã có ${current.quantity} ly trong giỏ (chỉ có thể thêm tối đa ${remaining} ly nữa, giới hạn ${MAX_ORDER_QUANTITY} ly/dòng).`
+              : `Đã đạt giới hạn tối đa ${MAX_ORDER_QUANTITY} ly cho món "${current.productName}" trong giỏ hàng.`;
           showFeedback(msg, "warning");
           return { success: false, message: msg };
         }
 
-        const newQty = Math.min(
-          MAX_ORDER_QUANTITY,
-          current.quantity + requestedQty
-        );
         const updatedItems = [...items];
         updatedItems[existingIndex] = {
           ...current,

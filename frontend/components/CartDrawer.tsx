@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
+import type { CreateOrderResponseDto } from "@/mock-data";
 import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 import { getDisplayCustomerName } from "@/services/auth.service";
 import {
@@ -11,6 +12,18 @@ import {
 } from "@/services/order.service";
 
 type CheckoutDrawerStep = "cart" | "review";
+
+type OrderCallOutcome =
+  | {
+      type: "success";
+      order: CreateOrderResponseDto;
+    }
+  | {
+      type: "error";
+      statusCode: number;
+      code: string;
+      message: string;
+    };
 
 export default function CartDrawer() {
   const {
@@ -43,7 +56,8 @@ export default function CartDrawer() {
 
   const [checkoutStep, setCheckoutStep] = useState<CheckoutDrawerStep>("cart");
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
-  const [scrum44NoticeOpen, setScrum44NoticeOpen] = useState(false);
+  const [orderCallOutcome, setOrderCallOutcome] =
+    useState<OrderCallOutcome | null>(null);
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
   const submittingRef = useRef(false);
 
@@ -55,7 +69,7 @@ export default function CartDrawer() {
 
   const handleCloseDrawer = () => {
     setConfirmClearOpen(false);
-    setScrum44NoticeOpen(false);
+    setOrderCallOutcome(null);
     setVoucherNoticeVisible(false);
     closeCart();
   };
@@ -77,7 +91,7 @@ export default function CartDrawer() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && isCartOpen) {
         setConfirmClearOpen(false);
-        setScrum44NoticeOpen(false);
+        setOrderCallOutcome(null);
         setVoucherNoticeVisible(false);
         closeCart();
       }
@@ -114,6 +128,7 @@ export default function CartDrawer() {
         setPendingCheckout(false);
         if (items.length > 0) {
           setVoucherNoticeVisible(false);
+          setOrderCallOutcome(null);
           setCheckoutStep("review");
           openCart();
         }
@@ -156,12 +171,13 @@ export default function CartDrawer() {
     }
 
     setVoucherNoticeVisible(false);
+    setOrderCallOutcome(null);
     setCheckoutStep("review");
   };
 
   /**
    * Bước 2 (Checkout) -> Gọi Create Order API (POST /orders) (SCRUM-43)
-   * Phần xử lý loading/error UI chi tiết và hiển thị dữ liệu Order Response thuộc SCRUM-44
+   * Phân biệt rõ ràng trạng thái tạo đơn THÀNH CÔNG (201 Created) và THẤT BẠI (4xx/5xx/Network).
    */
   const handleConfirmCreateOrder = async () => {
     if (submittingRef.current) return;
@@ -180,14 +196,31 @@ export default function CartDrawer() {
       return;
     }
 
-    const payload = mapToCreateOrderPayload();
+    let payload;
+    try {
+      payload = mapToCreateOrderPayload();
+    } catch (err: unknown) {
+      setOrderCallOutcome({
+        type: "error",
+        statusCode: 400,
+        code: "INVALID_CART",
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "Dữ liệu giỏ hàng không hợp lệ.",
+      });
+      return;
+    }
+
     submittingRef.current = true;
 
     try {
-      await createOrderApi(payload, accessToken);
+      const createdOrder = await createOrderApi(payload, accessToken);
       // TUYỆT ĐỐI KHÔNG xóa giỏ hàng khi đơn ở trạng thái PENDING (AC-US-CART-04-02, BR-07, API Contract v3.0)
-      // Hiển thị thông báo SCRUM-44 đang phát triển cho phần xử lý Order Response
-      setScrum44NoticeOpen(true);
+      setOrderCallOutcome({
+        type: "success",
+        order: createdOrder,
+      });
     } catch (err: unknown) {
       const orderErr = err as Partial<OrderServiceError>;
       if (orderErr?.statusCode === 401 || orderErr?.code === "UNAUTHORIZED") {
@@ -198,8 +231,20 @@ export default function CartDrawer() {
         );
         return;
       }
-      // Phần xử lý loading/error UI chi tiết và dữ liệu Order Response thuộc SCRUM-44
-      setScrum44NoticeOpen(true);
+
+      setOrderCallOutcome({
+        type: "error",
+        statusCode:
+          typeof orderErr?.statusCode === "number" ? orderErr.statusCode : 500,
+        code:
+          typeof orderErr?.code === "string" && orderErr.code.trim()
+            ? orderErr.code.trim()
+            : "SERVER_ERROR",
+        message:
+          typeof orderErr?.message === "string" && orderErr.message.trim()
+            ? orderErr.message.trim()
+            : "Không thể tạo đơn hàng. Vui lòng kiểm tra lại và thử lại.",
+      });
     } finally {
       submittingRef.current = false;
     }
@@ -240,6 +285,7 @@ export default function CartDrawer() {
                 type="button"
                 onClick={() => {
                   setVoucherNoticeVisible(false);
+                  setOrderCallOutcome(null);
                   setCheckoutStep("cart");
                 }}
                 className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer whitespace-nowrap"
@@ -585,6 +631,7 @@ export default function CartDrawer() {
                     type="button"
                     onClick={() => {
                       setVoucherNoticeVisible(false);
+                      setOrderCallOutcome(null);
                       setCheckoutStep("cart");
                     }}
                     className="text-[12px] font-label-md text-primary hover:underline cursor-pointer whitespace-nowrap"
@@ -863,6 +910,7 @@ export default function CartDrawer() {
                 type="button"
                 onClick={() => {
                   setVoucherNoticeVisible(false);
+                  setOrderCallOutcome(null);
                   setCheckoutStep("cart");
                 }}
                 className="px-4 py-3 rounded-xl border border-outline-variant text-on-surface font-label-lg text-label-lg font-semibold hover:bg-surface-container transition-colors cursor-pointer whitespace-nowrap flex-shrink-0"
@@ -926,42 +974,95 @@ export default function CartDrawer() {
           </div>
         )}
 
-        {/* Modal thông báo SCRUM-44 đang phát triển (Integrate Cart with Order flow: xử lý loading/error và dữ liệu order response) */}
-        {scrum44NoticeOpen && (
+        {/* Modal phân biệt rõ kết quả gọi POST /orders: THÀNH CÔNG (201) vs THẤT BẠI */}
+        {orderCallOutcome?.type === "success" && (
           <div
-            id="scrum44NoticeModal"
+            id="orderSuccessNoticeModal"
+            role="status"
             className="absolute inset-0 bg-on-surface/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
           >
             <div className="bg-surface rounded-xl p-5 shadow-2xl max-w-sm w-full space-y-4">
               <div className="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center mx-auto">
-                <span className="material-symbols-outlined text-[24px]">
-                  construction
+                <span className="material-symbols-outlined text-[26px]">
+                  check_circle
                 </span>
               </div>
-              <div className="text-center">
+              <div className="text-center space-y-1">
                 <h3 className="font-title-md text-title-md font-bold text-on-surface">
-                  Đã gọi Create Order (POST /orders)
+                  Tạo đơn hàng thành công!
                 </h3>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1 leading-relaxed">
-                  Luồng Checkout (Cart → yêu cầu Login nếu chưa xác thực →
-                  Checkout → gọi <code className="font-mono">POST /orders</code>
-                  ) của <strong>SCRUM-43</strong> đã thực thi. Chức năng{" "}
-                  <strong>
-                    Integrate Cart with Order flow: xử lý loading/error và dữ
-                    liệu order response
-                  </strong>{" "}
-                  hiện đang được phát triển cho <strong>SCRUM-44</strong>.
+                <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                  Máy chủ đã tạo đơn hàng (HTTP <code className="font-mono">201 Created</code>) ở trạng thái{" "}
+                  <strong>{orderCallOutcome.order.status}</strong>.
                 </p>
               </div>
-              <div className="bg-surface-container-low p-2.5 rounded-lg text-left text-[11px] font-mono text-on-surface-variant max-h-32 overflow-y-auto">
-                <pre>{JSON.stringify(mapToCreateOrderPayload(), null, 2)}</pre>
+              <div className="bg-surface-container-low p-3 rounded-lg text-[12px] space-y-1.5 border border-outline-variant/40">
+                <div className="flex justify-between gap-2">
+                  <span className="text-on-surface-variant">Mã đơn:</span>
+                  <span className="font-mono font-bold text-on-surface truncate">
+                    {orderCallOutcome.order.id}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-on-surface-variant">Tổng tiền Server:</span>
+                  <span className="font-bold text-primary">
+                    {formatVnd(orderCallOutcome.order.totalVnd)}
+                  </span>
+                </div>
               </div>
+              <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
+                Giao diện hiển thị chi tiết dữ liệu Order Response và luồng
+                loading/error đang được phát triển tiếp ở{" "}
+                <strong>SCRUM-44</strong>.
+              </p>
               <button
                 type="button"
-                onClick={() => setScrum44NoticeOpen(false)}
+                onClick={() => setOrderCallOutcome(null)}
                 className="w-full py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-md hover:bg-primary-container transition-colors cursor-pointer"
               >
                 Đã hiểu
+              </button>
+            </div>
+          </div>
+        )}
+
+        {orderCallOutcome?.type === "error" && (
+          <div
+            id="orderErrorNoticeModal"
+            role="alert"
+            className="absolute inset-0 bg-on-surface/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          >
+            <div className="bg-surface rounded-xl p-5 shadow-2xl max-w-sm w-full space-y-4 border border-error/30">
+              <div className="w-12 h-12 rounded-full bg-error/10 text-error flex items-center justify-center mx-auto">
+                <span className="material-symbols-outlined text-[26px]">
+                  error
+                </span>
+              </div>
+              <div className="text-center space-y-1">
+                <h3 className="font-title-md text-title-md font-bold text-error">
+                  Tạo đơn hàng không thành công
+                </h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                  Đơn hàng <strong>chưa được tạo</strong>. Máy chủ trả về mã lỗi{" "}
+                  <code className="font-mono text-error font-semibold">
+                    {orderCallOutcome.code}
+                  </code>{" "}
+                  (HTTP {orderCallOutcome.statusCode}).
+                </p>
+              </div>
+              <div className="bg-error/5 p-3 rounded-lg text-[12px] text-error border border-error/20 leading-relaxed">
+                {orderCallOutcome.message}
+              </div>
+              <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
+                Phần xử lý giao diện loading/error chi tiết cho luồng Order đang
+                được phát triển ở <strong>SCRUM-44</strong>.
+              </p>
+              <button
+                type="button"
+                onClick={() => setOrderCallOutcome(null)}
+                className="w-full py-2.5 px-3 rounded-lg bg-error text-on-primary font-label-md hover:opacity-90 transition-opacity cursor-pointer"
+              >
+                Đóng thông báo
               </button>
             </div>
           </div>

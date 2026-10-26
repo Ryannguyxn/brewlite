@@ -6,12 +6,14 @@ import { type CartItem, useCart } from "@/context/CartContext";
 import type {
   CreateOrderRequestDto,
   CreateOrderResponseDto,
+  OrderSubmissionErrorState,
 } from "@/mock-data";
 import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 import { getDisplayCustomerName } from "@/services/auth.service";
 import {
   createOrderApi,
-  describeOrderErrorDetails,
+  getFriendlyOrderErrorTitle,
+  toOrderSubmissionErrorState,
   type OrderServiceError,
 } from "@/services/order.service";
 
@@ -78,6 +80,8 @@ export interface ExecuteCheckoutSubmissionDeps {
   setIsSubmittingOrder: (submitting: boolean) => void;
   setCheckoutStep: (step: CheckoutDrawerStep) => void;
   setOrderCallOutcome: (outcome: OrderCallOutcome | null) => void;
+  setActiveOrder?: (order: CreateOrderResponseDto | null) => void;
+  setOrderError?: (error: OrderSubmissionErrorState | null) => void;
   verifySession: () => boolean;
   handleUnauthorizedCheckout: (reasonMessage?: string) => void;
   mapToCreateOrderPayload: () => CreateOrderRequestDto;
@@ -89,11 +93,11 @@ export interface ExecuteCheckoutSubmissionDeps {
 }
 
 /**
- * Điều phối gọi API `POST /orders` tại Bước 2 (Checkout) (SCRUM-43):
+ * Điều phối gọi API `POST /orders` tại Bước 2 (Checkout) (SCRUM-43 & SCRUM-44):
  * - Chặn double-click / double-submit đồng thời bằng cả `submittingRef` và `isSubmittingOrder`.
  * - Bật trạng thái loading (`setIsSubmittingOrder(true)`) ngay khi bắt đầu gửi request và tắt trong `finally`.
  * - Xử lý 401 UNAUTHORIZED: quay về bước `"cart"`, xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login Modal.
- * - Xử lý 201 Created (`status: "PENDING"`): lưu `orderCallOutcome = { type: "success", order }` và giữ nguyên giỏ hàng.
+ * - Xử lý 201 Created (`status: "PENDING"`): lưu `orderCallOutcome = { type: "success", order }`, đồng bộ `activeOrder` vào `CartContext` và giữ nguyên giỏ hàng.
  * - Xử lý lỗi mạng / lỗi đọc response (`isOutcomeUncertain = true`) và lỗi 400/409 (`isOutcomeUncertain = false` kèm `detailLines`).
  */
 export async function executeCheckoutOrderSubmission(
@@ -121,8 +125,7 @@ export async function executeCheckoutOrderSubmission(
   try {
     payload = deps.mapToCreateOrderPayload();
   } catch (err: unknown) {
-    const preSendOutcome: OrderCallOutcome = {
-      type: "error",
+    const preSendState = toOrderSubmissionErrorState({
       statusCode: 400,
       code: "INVALID_CART",
       message:
@@ -130,8 +133,16 @@ export async function executeCheckoutOrderSubmission(
           ? err.message
           : "Dữ liệu giỏ hàng không hợp lệ.",
       isOutcomeUncertain: false,
-      detailLines: [],
+    });
+    const preSendOutcome: OrderCallOutcome = {
+      type: "error",
+      statusCode: preSendState.statusCode,
+      code: preSendState.code,
+      message: preSendState.message,
+      isOutcomeUncertain: preSendState.isOutcomeUncertain,
+      detailLines: preSendState.detailLines,
     };
+    deps.setOrderError?.(preSendState);
     deps.setOrderCallOutcome(preSendOutcome);
     return { skipped: false, outcome: preSendOutcome };
   }
@@ -149,11 +160,13 @@ export async function executeCheckoutOrderSubmission(
 
   deps.submittingRef.current = true;
   deps.setIsSubmittingOrder(true);
+  deps.setOrderError?.(null);
   deps.setOrderCallOutcome(null);
 
   try {
     const createdOrder = await callCreateOrder(payload, deps.accessToken);
     // TUYỆT ĐỐI KHÔNG xóa giỏ hàng khi đơn ở trạng thái PENDING (AC-US-CART-04-02, BR-07, API Contract v3.0)
+    deps.setActiveOrder?.(createdOrder);
     const successOutcome: OrderCallOutcome = {
       type: "success",
       order: createdOrder,
@@ -171,34 +184,17 @@ export async function executeCheckoutOrderSubmission(
       return { skipped: false, outcome: null };
     }
 
-    const resolvedStatus =
-      typeof orderErr?.statusCode === "number" ? orderErr.statusCode : 500;
-    const resolvedCode =
-      typeof orderErr?.code === "string" && orderErr.code.trim()
-        ? orderErr.code.trim()
-        : "SERVER_ERROR";
-    const isUncertain =
-      typeof orderErr?.isOutcomeUncertain === "boolean"
-        ? orderErr.isOutcomeUncertain
-        : resolvedStatus >= 500 || resolvedCode === "NETWORK_ERROR";
-
+    const normalizedErr = toOrderSubmissionErrorState(err, productNamesById);
     const errorOutcome: OrderCallOutcome = {
       type: "error",
-      statusCode: resolvedStatus,
-      code: resolvedCode,
-      message:
-        typeof orderErr?.message === "string" && orderErr.message.trim()
-          ? orderErr.message.trim()
-          : isUncertain
-          ? "Không thể xác nhận phản hồi từ máy chủ sau khi gửi yêu cầu đặt hàng. Đơn hàng có thể đã được ghi nhận trên hệ thống."
-          : "Không thể tạo đơn hàng. Vui lòng kiểm tra lại thông tin giỏ hàng.",
-      isOutcomeUncertain: isUncertain,
-      detailLines: describeOrderErrorDetails(
-        orderErr?.details,
-        productNamesById
-      ),
+      statusCode: normalizedErr.statusCode,
+      code: normalizedErr.code,
+      message: normalizedErr.message,
+      isOutcomeUncertain: normalizedErr.isOutcomeUncertain,
+      detailLines: normalizedErr.detailLines,
     };
 
+    deps.setOrderError?.(normalizedErr);
     deps.setOrderCallOutcome(errorOutcome);
     return { skipped: false, outcome: errorOutcome };
   } finally {
@@ -221,6 +217,7 @@ export default function CartDrawer({
   const {
     items,
     totalQuantity,
+    subtotalVnd,
     formattedSubtotal,
     isCartOpen,
     openCart,
@@ -233,6 +230,11 @@ export default function CartDrawer({
     feedbackType,
     dismissFeedback,
     mapToCreateOrderPayload,
+    activeOrder: contextActiveOrder,
+    isSubmittingOrder: contextIsSubmittingOrder,
+    setActiveOrder: setContextActiveOrder,
+    setIsSubmittingOrder: setContextIsSubmittingOrder,
+    setOrderError: setContextOrderError,
   } = useCart();
 
   const {
@@ -249,13 +251,27 @@ export default function CartDrawer({
   const [checkoutStep, setCheckoutStep] =
     useState<CheckoutDrawerStep>(initialCheckoutStep);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
-  const [isSubmittingOrder, setIsSubmittingOrder] = useState(
+  const [localIsSubmittingOrder, setLocalIsSubmittingOrder] = useState(
     initialIsSubmittingOrder
   );
   const [orderCallOutcome, setOrderCallOutcome] =
     useState<OrderCallOutcome | null>(initialOrderOutcome);
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
   const submittingRef = useRef(initialIsSubmittingOrder);
+
+  const isSubmittingOrder =
+    localIsSubmittingOrder || Boolean(contextIsSubmittingOrder);
+
+  const setSyncedIsSubmittingOrder = (submitting: boolean) => {
+    setLocalIsSubmittingOrder(submitting);
+    setContextIsSubmittingOrder?.(submitting);
+  };
+
+  // Đơn hàng PENDING đang hoạt động (từ kết quả vừa tạo hoặc đã lưu trong CartContext)
+  const displayedActiveOrder: CreateOrderResponseDto | null =
+    orderCallOutcome?.type === "success"
+      ? orderCallOutcome.order
+      : contextActiveOrder ?? null;
 
   // Tính toán bước hiển thị thực tế mà không cần gọi setState đồng bộ trong useEffect
   const activeStep: CheckoutDrawerStep = useMemo(
@@ -375,7 +391,7 @@ export default function CartDrawer({
   };
 
   /**
-   * Bước 2 (Checkout) -> Gọi Create Order API (POST /orders) (SCRUM-43)
+   * Bước 2 (Checkout) -> Gọi Create Order API (POST /orders) (SCRUM-43 & SCRUM-44)
    * Quản lý đầy đủ trạng thái Loading / Success (201 Created) / Error (phân biệt rõ lỗi từ chối xác định và lỗi trạng thái không chắc chắn).
    */
   const handleConfirmCreateOrder = async () => {
@@ -384,9 +400,11 @@ export default function CartDrawer({
       accessToken,
       submittingRef,
       isSubmittingOrder,
-      setIsSubmittingOrder,
+      setIsSubmittingOrder: setSyncedIsSubmittingOrder,
       setCheckoutStep,
       setOrderCallOutcome,
+      setActiveOrder: setContextActiveOrder,
+      setOrderError: setContextOrderError,
       verifySession,
       handleUnauthorizedCheckout,
       mapToCreateOrderPayload,
@@ -483,7 +501,7 @@ export default function CartDrawer({
             </div>
           </div>
 
-          {/* Tiêu đề theo từng bước của Checkout Flow (SCRUM-43) — không bị xuống dòng */}
+          {/* Tiêu đề theo từng bước của Checkout Flow (SCRUM-43 & SCRUM-44) — không bị xuống dòng */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <span className="material-symbols-outlined text-primary text-[22px] flex-shrink-0">
@@ -574,6 +592,67 @@ export default function CartDrawer({
           className="flex-1 overflow-y-auto px-space-lg py-space-sm space-y-3.5"
           id="cartContentContainer"
         >
+          {/* Thẻ tóm tắt đơn hàng PENDING đã ghi nhận trong phiên (SCRUM-44) */}
+          {displayedActiveOrder && (
+            <div
+              id="activePendingOrderBanner"
+              className="p-3 rounded-xl bg-secondary-container/40 border border-secondary/30 text-[12px] space-y-2 shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 font-bold text-on-surface">
+                  <span className="material-symbols-outlined text-[17px] text-primary">
+                    receipt_long
+                  </span>
+                  <span>Đơn hàng đang chờ thanh toán</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-bold">
+                  {displayedActiveOrder.status}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[11px] text-on-surface-variant">
+                <div className="truncate">
+                  Mã đơn:{" "}
+                  <strong className="font-mono text-on-surface">
+                    {displayedActiveOrder.id}
+                  </strong>
+                </div>
+                <div className="text-right">
+                  Tổng máy chủ:{" "}
+                  <strong className="text-primary">
+                    {formatVnd(displayedActiveOrder.totalVnd)}
+                  </strong>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-outline-variant/30">
+                <button
+                  id="btnViewActiveOrderModal"
+                  type="button"
+                  disabled={isSubmittingOrder}
+                  onClick={() =>
+                    setOrderCallOutcome({
+                      type: "success",
+                      order: displayedActiveOrder,
+                    })
+                  }
+                  className="text-[11px] font-semibold text-primary hover:underline cursor-pointer disabled:opacity-50"
+                >
+                  Xem chi tiết đơn hàng
+                </button>
+                {setContextActiveOrder && (
+                  <button
+                    id="btnDismissActiveOrderBanner"
+                    type="button"
+                    disabled={isSubmittingOrder}
+                    onClick={() => setContextActiveOrder(null)}
+                    className="text-[11px] text-outline hover:text-on-surface cursor-pointer disabled:opacity-50"
+                  >
+                    Ẩn tóm tắt
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* -------------------------------------------------------------- */}
           {/* BƯỚC 1: GIỎ HÀNG ("cart") */}
           {/* -------------------------------------------------------------- */}
@@ -651,11 +730,12 @@ export default function CartDrawer({
                               </div>
                             </div>
 
-                            {/* Nút xóa món */}
+                            {/* Nút xóa món (khóa khi đang gửi POST /orders) */}
                             <button
                               type="button"
+                              disabled={isSubmittingOrder}
                               onClick={() => removeFromCart(item.id)}
-                              className="text-outline hover:text-error transition-colors p-1 rounded hover:bg-surface-container-high cursor-pointer"
+                              className="text-outline hover:text-error transition-colors p-1 rounded hover:bg-surface-container-high cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Xóa món này"
                               aria-label={`Xóa ${item.productName}`}
                             >
@@ -697,8 +777,9 @@ export default function CartDrawer({
                             <div className="flex items-center bg-surface-container rounded-lg p-0.5 shadow-inner">
                               <button
                                 type="button"
+                                disabled={isSubmittingOrder}
                                 onClick={() => decrementQuantity(item.id)}
-                                className="w-7 h-7 flex items-center justify-center rounded bg-surface hover:bg-surface-container-high text-on-surface transition-colors cursor-pointer"
+                                className="w-7 h-7 flex items-center justify-center rounded bg-surface hover:bg-surface-container-high text-on-surface transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 aria-label="Giảm số lượng"
                               >
                                 <span className="material-symbols-outlined text-[15px]">
@@ -710,8 +791,9 @@ export default function CartDrawer({
                               </span>
                               <button
                                 type="button"
+                                disabled={isSubmittingOrder}
                                 onClick={() => incrementQuantity(item.id)}
-                                className="w-7 h-7 flex items-center justify-center rounded bg-surface hover:bg-surface-container-high text-on-surface transition-colors cursor-pointer"
+                                className="w-7 h-7 flex items-center justify-center rounded bg-surface hover:bg-surface-container-high text-on-surface transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 aria-label="Tăng số lượng"
                               >
                                 <span className="material-symbols-outlined text-[15px]">
@@ -961,8 +1043,9 @@ export default function CartDrawer({
                 <button
                   id="btnApplyVoucher"
                   type="button"
+                  disabled={isSubmittingOrder}
                   onClick={handleVoucherAttempt}
-                  className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                  className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Áp dụng
                 </button>
@@ -1009,6 +1092,7 @@ export default function CartDrawer({
                   <button
                     id="btnCartQuickLogin"
                     type="button"
+                    disabled={isSubmittingOrder}
                     onClick={() =>
                       openAuthModal("login", {
                         resumeCheckout: false,
@@ -1016,7 +1100,7 @@ export default function CartDrawer({
                           "Đăng nhập để lưu thông tin và sẵn sàng đặt hàng. Giỏ hàng của bạn được giữ nguyên.",
                       })
                     }
-                    className="text-primary font-label-md font-bold hover:underline whitespace-nowrap cursor-pointer"
+                    className="text-primary font-label-md font-bold hover:underline whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Đăng nhập
                   </button>
@@ -1051,8 +1135,9 @@ export default function CartDrawer({
             <button
               id="btnCheckoutAction"
               type="button"
+              disabled={isSubmittingOrder}
               onClick={handleProceedToCheckout}
-              className="w-full py-3.5 px-space-md bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-between group active:scale-[0.99] cursor-pointer whitespace-nowrap"
+              className="w-full py-3.5 px-space-md bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-between group active:scale-[0.99] cursor-pointer whitespace-nowrap disabled:opacity-70 disabled:cursor-not-allowed"
             >
               <div className="flex items-center gap-2 whitespace-nowrap">
                 <span className="material-symbols-outlined text-[20px]">
@@ -1171,7 +1256,7 @@ export default function CartDrawer({
           </div>
         )}
 
-        {/* Modal hiển thị kết quả tạo đơn THÀNH CÔNG (HTTP 201 Created) */}
+        {/* Modal hiển thị kết quả tạo đơn THÀNH CÔNG (HTTP 201 Created — SCRUM-44) */}
         {orderCallOutcome?.type === "success" && (
           <div
             id="orderSuccessNoticeModal"
@@ -1214,37 +1299,60 @@ export default function CartDrawer({
                   <span className="text-on-surface-variant whitespace-nowrap">
                     Thời gian tạo:
                   </span>
-                  <span className="text-on-surface font-medium text-right">
+                  <span
+                    id="createdOrderCreatedAtText"
+                    className="text-on-surface font-medium text-right"
+                  >
                     {new Date(
                       orderCallOutcome.order.createdAt
                     ).toLocaleString("vi-VN")}
                   </span>
                 </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-on-surface-variant whitespace-nowrap">
+                    Mã khuyến mãi:
+                  </span>
+                  <span
+                    id="createdOrderCouponText"
+                    className="font-mono text-on-surface font-medium text-right"
+                  >
+                    {orderCallOutcome.order.couponCode || "Không áp dụng"}
+                  </span>
+                </div>
               </div>
 
-              {/* Danh sách món snapshot chuẩn từ Server */}
+              {/* Danh sách món snapshot đầy đủ từ Server (OrderItemSnapshotDto) */}
               <div className="bg-surface-container-low p-3 rounded-lg text-[12px] space-y-2 border border-outline-variant/40">
                 <div className="font-semibold text-on-surface border-b border-surface-container-high pb-1">
                   Chi tiết đơn hàng đã ghi nhận ({orderCallOutcome.order.items.length}{" "}
                   dòng)
                 </div>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
                   {orderCallOutcome.order.items.map((item) => (
                     <div
                       key={item.id}
-                      className="flex justify-between items-start gap-2 text-[11px]"
+                      className="flex justify-between items-start gap-2 text-[11px] pb-1.5 border-b border-surface-container last:border-b-0 last:pb-0"
                     >
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 space-y-0.5">
                         <div className="font-semibold text-on-surface truncate">
                           {item.quantity}x {item.productName} (
                           {item.size === "ONE_SIZE"
                             ? "Tiêu chuẩn"
-                            : `Size ${item.size}`}
-                          )
+                            : `Size ${item.size}`}{" "}
+                          • {item.sizeMultiplierPercent}%)
+                        </div>
+                        <div className="text-outline text-[10px]">
+                          Giá gốc: {formatVnd(item.basePriceVnd)} • Đơn giá máy
+                          chủ: {formatVnd(item.unitPriceVnd)} × {item.quantity}
                         </div>
                         {item.toppings.length > 0 && (
                           <div className="text-on-surface-variant truncate">
-                            +{item.toppings.map((t) => t.name).join(", ")}
+                            +
+                            {item.toppings
+                              .map(
+                                (t) => `${t.name} (+${formatVnd(t.priceVnd)})`
+                              )
+                              .join(", ")}
                           </div>
                         )}
                       </div>
@@ -1258,22 +1366,22 @@ export default function CartDrawer({
                 <div className="pt-2 border-t border-surface-container-high space-y-1">
                   <div className="flex justify-between text-[11px] text-on-surface-variant">
                     <span>Tạm tính máy chủ:</span>
-                    <span>{formatVnd(orderCallOutcome.order.subtotalVnd)}</span>
+                    <span id="createdOrderSubtotalText">
+                      {formatVnd(orderCallOutcome.order.subtotalVnd)}
+                    </span>
                   </div>
-                  {orderCallOutcome.order.discountVnd > 0 && (
-                    <div className="flex justify-between text-[11px] text-tertiary font-medium">
-                      <span>
-                        Giảm giá
-                        {orderCallOutcome.order.couponCode
-                          ? ` (${orderCallOutcome.order.couponCode})`
-                          : ""}
-                        :
-                      </span>
-                      <span>
-                        -{formatVnd(orderCallOutcome.order.discountVnd)}
-                      </span>
-                    </div>
-                  )}
+                  <div className="flex justify-between text-[11px] text-tertiary font-medium">
+                    <span>
+                      Giảm giá
+                      {orderCallOutcome.order.couponCode
+                        ? ` (${orderCallOutcome.order.couponCode})`
+                        : ""}
+                      :
+                    </span>
+                    <span id="createdOrderDiscountText">
+                      -{formatVnd(orderCallOutcome.order.discountVnd)}
+                    </span>
+                  </div>
                   <div className="flex justify-between text-[13px] font-bold text-primary pt-0.5">
                     <span>Tổng thanh toán:</span>
                     <span id="createdOrderTotalText">
@@ -1281,6 +1389,21 @@ export default function CartDrawer({
                     </span>
                   </div>
                 </div>
+
+                {/* Thông báo đối soát nếu giá máy chủ khác tạm tính phía Client (API Contract v2.1 §8.3 & §9.1) */}
+                {(orderCallOutcome.order.subtotalVnd !== subtotalVnd ||
+                  orderCallOutcome.order.totalVnd !== subtotalVnd) && (
+                  <div
+                    id="serverPriceReconciliationNote"
+                    className="mt-2 p-2 rounded bg-primary/10 text-[11px] text-on-surface leading-relaxed"
+                  >
+                    Tổng thanh toán chính thức từ máy chủ là{" "}
+                    <strong className="text-primary">
+                      {formatVnd(orderCallOutcome.order.totalVnd)}
+                    </strong>{" "}
+                    (tạm tính trên giỏ hàng: {formattedSubtotal}).
+                  </div>
+                )}
               </div>
 
               <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
@@ -1384,7 +1507,7 @@ export default function CartDrawer({
                   </button>
                 </>
               ) : (
-                /* TRƯỜNG HỢP 2: TỪ CHỐI XÁC ĐỊNH (400 Validation/Invalid Cart, 409 Insufficient Stock/Pending Order Exists) */
+                /* TRƯỜNG HỢP 2: TỪ CHỐI XÁC ĐỊNH (400 Validation/Invalid Cart/Coupon, 409 Insufficient Stock/Pending Order Exists) */
                 <>
                   <div className="text-center space-y-1">
                     <h3
@@ -1396,7 +1519,11 @@ export default function CartDrawer({
                         : "Không thể tạo đơn hàng"}
                     </h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
-                      Yêu cầu bị từ chối với mã{" "}
+                      {getFriendlyOrderErrorTitle(
+                        orderCallOutcome.code,
+                        orderCallOutcome.isOutcomeUncertain
+                      )}{" "}
+                      • Mã{" "}
                       <code className="font-mono text-error font-semibold">
                         {orderCallOutcome.code}
                       </code>{" "}
@@ -1420,7 +1547,8 @@ export default function CartDrawer({
 
                   <div className="flex gap-2">
                     {(orderCallOutcome.code === "INVALID_CART" ||
-                      orderCallOutcome.code === "INSUFFICIENT_STOCK") && (
+                      orderCallOutcome.code === "INSUFFICIENT_STOCK" ||
+                      orderCallOutcome.code === "VALIDATION_ERROR") && (
                       <button
                         type="button"
                         onClick={() => {

@@ -7,6 +7,7 @@ import {
   type InvalidCartDetail,
   type OrderErrorCode,
   type OrderItemSnapshotDto,
+  type OrderSubmissionErrorState,
   type OrderToppingSnapshotDto,
 } from "@/mock-data";
 import {
@@ -23,7 +24,7 @@ import {
 } from "./auth.service";
 
 // ============================================================================
-// ORDER & CHECKOUT SERVICE — SPRINT 2 (SCRUM-43)
+// ORDER & CHECKOUT SERVICE — SPRINT 2 & 3 (SCRUM-43 & SCRUM-44)
 // Đối chiếu chuẩn 100% với:
 // - docs/api/BrewLite_API_Contract_v3.0.md & Appendix A (v2.1 Mục 5.3, 8, 9)
 // - database/schema.dbml & backend/prisma/schema.prisma
@@ -35,8 +36,8 @@ import {
 // 3. Không tự động gửi lại (retry) POST /orders khi fetch bị lỗi mạng vì request
 //    đầu tiên có thể đã tạo Order thành công trên máy chủ.
 // 4. Chỉ coi HTTP 201 Created là thành công cho POST /orders (không chấp nhận mọi 2xx).
-// 5. Kiểm tra chặt chẽ toàn bộ trường bắt buộc trong CreateOrderResponseDto,
-//    không tự điền giá trị mặc định che giấu dữ liệu sai.
+// 5. Kiểm tra chặt chẽ toàn bộ trường bắt buộc và bất biến toán học (ERD invariants)
+//    trong CreateOrderResponseDto, không tự điền giá trị mặc định che giấu dữ liệu sai.
 // 6. Phân biệt rõ lỗi từ chối xác định trước khi tạo đơn (isOutcomeUncertain = false)
 //    và lỗi mạng / lỗi đọc response sau khi đã gửi request (isOutcomeUncertain = true).
 // ============================================================================
@@ -237,6 +238,90 @@ export function describeOrderErrorDetails(
   }
 
   return messages;
+}
+
+/**
+ * Trả về tiêu đề thông báo lỗi thân thiện theo đúng mã lỗi trong API Contract v3.0 (SCRUM-44).
+ */
+export function getFriendlyOrderErrorTitle(
+  code: OrderErrorCode | string,
+  isOutcomeUncertain: boolean
+): string {
+  if (isOutcomeUncertain) {
+    return "Chưa thể xác nhận trạng thái đơn hàng";
+  }
+
+  switch (code) {
+    case "PENDING_ORDER_EXISTS":
+      return "Đang có đơn hàng chờ xử lý";
+    case "INSUFFICIENT_STOCK":
+      return "Sản phẩm hoặc topping không đủ tồn kho";
+    case "INVALID_CART":
+      return "Cấu hình giỏ hàng cần cập nhật";
+    case "INVALID_COUPON":
+    case "COUPON_UNAVAILABLE":
+      return "Mã khuyến mãi không khả dụng";
+    case "VALIDATION_ERROR":
+      return "Dữ liệu đặt hàng không hợp lệ";
+    default:
+      return "Không thể tạo đơn hàng";
+  }
+}
+
+/**
+ * Chuẩn hóa đối tượng lỗi từ `createOrderApi` hoặc luồng Checkout thành `OrderSubmissionErrorState`
+ * để đồng bộ giữa `CartContext` và `CartDrawer` (SCRUM-44).
+ */
+export function toOrderSubmissionErrorState(
+  err: unknown,
+  productNamesById?: Record<string, string>
+): OrderSubmissionErrorState {
+  const orderErr = err as Partial<OrderServiceError>;
+  const resolvedStatus =
+    typeof orderErr?.statusCode === "number" ? orderErr.statusCode : 500;
+  const resolvedCode =
+    typeof orderErr?.code === "string" && orderErr.code.trim()
+      ? orderErr.code.trim()
+      : "SERVER_ERROR";
+  const isUncertain =
+    typeof orderErr?.isOutcomeUncertain === "boolean"
+      ? orderErr.isOutcomeUncertain
+      : resolvedStatus >= 500 ||
+        resolvedCode === "NETWORK_ERROR" ||
+        resolvedCode === "SERVER_ERROR" ||
+        resolvedCode === "INTERNAL_ERROR";
+
+  const defaultMessageByCode = (): string => {
+    if (isUncertain) {
+      return "Không thể xác nhận phản hồi từ máy chủ sau khi gửi yêu cầu đặt hàng. Đơn hàng có thể đã được ghi nhận trên hệ thống.";
+    }
+    switch (resolvedCode) {
+      case "PENDING_ORDER_EXISTS":
+        return "Tài khoản của bạn đang có một đơn hàng ở trạng thái PENDING chờ xử lý. Vui lòng hoàn tất hoặc hủy đơn hiện tại trước khi tạo đơn mới.";
+      case "INSUFFICIENT_STOCK":
+        return "Một hoặc nhiều sản phẩm/topping trong giỏ hàng hiện không đủ số lượng tồn kho.";
+      case "INVALID_CART":
+        return "Một số món trong giỏ hàng có cấu hình không hợp lệ hoặc đã thay đổi trạng thái.";
+      case "INVALID_COUPON":
+        return "Mã khuyến mãi không tồn tại, đã hết hạn hoặc chưa đạt giá trị đơn hàng tối thiểu.";
+      case "COUPON_UNAVAILABLE":
+        return "Mã khuyến mãi đã hết lượt sử dụng.";
+      default:
+        return "Không thể tạo đơn hàng. Vui lòng kiểm tra lại thông tin giỏ hàng.";
+    }
+  };
+
+  return {
+    statusCode: resolvedStatus,
+    code: resolvedCode,
+    message:
+      typeof orderErr?.message === "string" && orderErr.message.trim()
+        ? orderErr.message.trim()
+        : defaultMessageByCode(),
+    isOutcomeUncertain: isUncertain,
+    detailLines: describeOrderErrorDetails(orderErr?.details, productNamesById),
+    details: orderErr?.details,
+  };
 }
 
 /**
@@ -521,7 +606,8 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
 }
 
 /**
- * Kiểm tra chặt chẽ toàn bộ các trường bắt buộc trong `CreateOrderResponseDto` trả về từ máy chủ (HTTP 201 Created).
+ * Kiểm tra chặt chẽ toàn bộ các trường bắt buộc và bất biến toán học (ERD & API Contract v3.0 §7)
+ * trong `CreateOrderResponseDto` trả về từ máy chủ (HTTP 201 Created).
  * Tuyệt đối không tự điền giá trị mặc định che giấu dữ liệu sai hoặc thiếu từ Backend.
  * Vì hàm này chỉ chạy sau khi request đã được gửi tới máy chủ, mọi lỗi phát sinh tại đây
  * đều mang `isOutcomeUncertain = true` (đơn hàng có thể đã được tạo trên Backend).
@@ -593,10 +679,12 @@ export function validateOrderResponseData(
     record.discountVnd < 0 ||
     typeof record.totalVnd !== "number" ||
     !Number.isSafeInteger(record.totalVnd) ||
-    record.totalVnd < 0
+    record.totalVnd < 0 ||
+    record.discountVnd > record.subtotalVnd ||
+    record.totalVnd !== record.subtotalVnd - record.discountVnd
   ) {
     throw createOrderError(
-      "Dữ liệu tổng tiền (subtotalVnd, discountVnd, totalVnd) từ máy chủ không hợp lệ.",
+      "Dữ liệu tổng tiền (subtotalVnd, discountVnd, totalVnd) từ máy chủ không hợp lệ hoặc vi phạm bất biến totalVnd = subtotalVnd - discountVnd.",
       500,
       "SERVER_ERROR",
       undefined,
@@ -730,10 +818,11 @@ export function validateOrderResponseData(
         item.unitPriceVnd < 0 ||
         typeof item.lineTotalVnd !== "number" ||
         !Number.isSafeInteger(item.lineTotalVnd) ||
-        item.lineTotalVnd < 0
+        item.lineTotalVnd < 0 ||
+        item.lineTotalVnd !== item.unitPriceVnd * item.quantity
       ) {
         throw createOrderError(
-          `Đơn giá hoặc thành tiền ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
+          `Đơn giá hoặc thành tiền ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ (yêu cầu lineTotalVnd = unitPriceVnd * quantity).`,
           500,
           "SERVER_ERROR",
           undefined,
@@ -821,6 +910,20 @@ export function validateOrderResponseData(
     }
   );
 
+  const computedItemsSubtotal = validatedItems.reduce(
+    (sum, item) => sum + item.lineTotalVnd,
+    0
+  );
+  if (computedItemsSubtotal !== record.subtotalVnd) {
+    throw createOrderError(
+      "Tổng thành tiền các dòng món (lineTotalVnd) không khớp với subtotalVnd từ máy chủ.",
+      500,
+      "SERVER_ERROR",
+      undefined,
+      true
+    );
+  }
+
   return {
     id: record.id.trim(),
     status: "PENDING",
@@ -835,7 +938,7 @@ export function validateOrderResponseData(
 }
 
 /**
- * Gọi API `POST /orders` tới Backend thật để tạo đơn hàng `PENDING` từ giỏ hàng hiện tại (SCRUM-43).
+ * Gọi API `POST /orders` tới Backend thật để tạo đơn hàng `PENDING` từ giỏ hàng hiện tại (SCRUM-43 & SCRUM-44).
  * - Kiểm tra chặt chẽ JWT trước khi gửi request.
  * - Chỉ gửi `{ items: [{ productId, size, toppingIds, quantity }], couponCode? }`.
  * - TUYỆT ĐỐI KHÔNG tự động gửi lại (retry) `POST /orders` khi `fetch` bị lỗi mạng.

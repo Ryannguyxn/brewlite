@@ -20,6 +20,7 @@ import {
 import type {
   CreateOrderRequestDto,
   CreateOrderResponseDto,
+  OrderSubmissionErrorState,
 } from "@/mock-data";
 import {
   getStoredToken,
@@ -28,9 +29,11 @@ import {
 import {
   createOrderApi,
   describeOrderErrorDetails,
+  getFriendlyOrderErrorTitle,
   normalizeCouponCode,
   type OrderServiceError,
   sanitizeCreateOrderPayload,
+  toOrderSubmissionErrorState,
   validateCouponCodeInput,
   validateCreateOrderPayload,
   validateOrderResponseData,
@@ -141,6 +144,7 @@ function renderCartDrawerMarkup(options: {
   initialCheckoutStep?: "cart" | "review";
   initialIsSubmittingOrder?: boolean;
   initialOrderOutcome?: OrderCallOutcome | null;
+  activeOrder?: CreateOrderResponseDto | null;
   onClearCart?: () => void;
 }): string {
   const items = options.items ?? createSampleCartItems();
@@ -169,6 +173,13 @@ function renderCartDrawerMarkup(options: {
     toggleCart: () => {},
     dismissFeedback: () => {},
     mapToCreateOrderPayload: () => buildCreateOrderPayloadFromCart(items),
+    activeOrder: options.activeOrder ?? null,
+    isSubmittingOrder: options.initialIsSubmittingOrder ?? false,
+    orderError: null,
+    setActiveOrder: () => {},
+    setIsSubmittingOrder: () => {},
+    setOrderError: () => {},
+    clearOrderFlowState: () => {},
   };
 
   const authValue: AuthContextType = {
@@ -218,7 +229,7 @@ function renderCartDrawerMarkup(options: {
   );
 }
 
-describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
+describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Automated Tests", () => {
   beforeEach(() => {
     localStorageMock.clear();
     sessionStorageMock.clear();
@@ -318,30 +329,33 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
         false
       );
       assert.equal(validateCouponCodeInput("A".repeat(31)).isValid, false);
-      assert.deepEqual( sanitizeCreateOrderPayload({
-        items: [
-          {
-            productId: "550e8400-e29b-41d4-a716-446655440000",
-            size: "S",
-            toppingIds: [],
-            quantity: 1,
-          },
-        ],
-        couponCode: "   ",
-      }), {
-        items: [
-          {
-            productId: "550e8400-e29b-41d4-a716-446655440000",
-            size: "S",
-            toppingIds: [],
-            quantity: 1,
-          },
-        ],
-      });
+      assert.deepEqual(
+        sanitizeCreateOrderPayload({
+          items: [
+            {
+              productId: "550e8400-e29b-41d4-a716-446655440000",
+              size: "S",
+              toppingIds: [],
+              quantity: 1,
+            },
+          ],
+          couponCode: "   ",
+        }),
+        {
+          items: [
+            {
+              productId: "550e8400-e29b-41d4-a716-446655440000",
+              size: "S",
+              toppingIds: [],
+              quantity: 1,
+            },
+          ],
+        }
+      );
     });
   });
 
-  describe("2. Error Details Mapping per API Contract (INSUFFICIENT_STOCK & INVALID_CART)", () => {
+  describe("2. Error Details Mapping & Error State Normalization per API Contract (SCRUM-43 & SCRUM-44)", () => {
     it("maps INSUFFICIENT_STOCK details with requestedQuantity and availableQuantity per API Contract §8.7", () => {
       const productId = "550e8400-e29b-41d4-a716-446655440000";
       const lines = describeOrderErrorDetails(
@@ -383,6 +397,33 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
       assert.ok(lines[6].includes("Dòng món #7") && lines[6].includes("tối đa 3 loại topping"));
       assert.ok(lines[7].includes("Dòng món #8") && lines[7].includes("Trùng cấu hình"));
       assert.ok(lines[8].includes("Dòng món #9") && lines[8].includes("bảng giá"));
+    });
+
+    it("normalizes error codes (INVALID_COUPON, COUPON_UNAVAILABLE, PENDING_ORDER_EXISTS, INTERNAL_ERROR) via toOrderSubmissionErrorState", () => {
+      const couponErr = toOrderSubmissionErrorState({
+        statusCode: 400,
+        code: "INVALID_COUPON",
+        isOutcomeUncertain: false,
+      });
+      assert.equal(couponErr.isOutcomeUncertain, false);
+      assert.equal(
+        getFriendlyOrderErrorTitle(couponErr.code, couponErr.isOutcomeUncertain),
+        "Mã khuyến mãi không khả dụng"
+      );
+      assert.ok(couponErr.message.includes("Mã khuyến mãi"));
+
+      const internalErr = toOrderSubmissionErrorState({
+        statusCode: 500,
+        code: "INTERNAL_ERROR",
+      });
+      assert.equal(internalErr.isOutcomeUncertain, true);
+      assert.equal(
+        getFriendlyOrderErrorTitle(
+          internalErr.code,
+          internalErr.isOutcomeUncertain
+        ),
+        "Chưa thể xác nhận trạng thái đơn hàng"
+      );
     });
   });
 
@@ -588,11 +629,17 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
     });
   });
 
-  describe("5. 201 Created (PENDING) Order Success & Response Validation", () => {
-    it("accepts HTTP 201 Created with valid PENDING order response, preserves Cart, and renders #orderSuccessNoticeModal", async () => {
+  describe("5. 201 Created (PENDING) Order Success, ERD Invariants & Complete Snapshot Rendering (SCRUM-44)", () => {
+    it("accepts HTTP 201 Created with valid PENDING order response, syncs activeOrder to CartContext, preserves Cart, and renders full OrderResponse snapshot", async () => {
       const mockToken = createValidMockJwt();
       const cartItems = createSampleCartItems();
-      const validOrder = createValidOrderResponse();
+      const validOrder: CreateOrderResponseDto = {
+        ...createValidOrderResponse(),
+        couponCode: "WELCOME10",
+        subtotalVnd: 118000,
+        discountVnd: 11800,
+        totalVnd: 106200,
+      };
 
       const savedFetch = globalThis.fetch;
       let capturedAuthHeader = "";
@@ -609,6 +656,7 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
       };
 
       let capturedOutcome: OrderCallOutcome | null = null;
+      let syncedActiveOrder: CreateOrderResponseDto | null = null;
       let clearCartCalled = false;
       localStorageMock.setItem("brewlite_cart_v1", JSON.stringify(cartItems));
       const clearCartSpy = () => {
@@ -627,6 +675,9 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
           setCheckoutStep: () => {},
           setOrderCallOutcome: (val) => {
             capturedOutcome = val;
+          },
+          setActiveOrder: (order) => {
+            syncedActiveOrder = order;
           },
           verifySession: () => true,
           handleUnauthorizedCheckout: () => {},
@@ -651,11 +702,13 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
         assert.ok(outcome && outcome.type === "success");
         assert.equal(outcome.order.id, validOrder.id);
         assert.equal(outcome.order.status, "PENDING");
+        assert.deepEqual(syncedActiveOrder, validOrder);
 
         const successHtml = renderCartDrawerMarkup({
           items: cartItems,
           initialCheckoutStep: "review",
           initialOrderOutcome: outcome,
+          activeOrder: syncedActiveOrder,
           onClearCart: clearCartSpy,
         });
 
@@ -676,15 +729,26 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
           "Cart items in localStorage must remain intact after 201 PENDING order creation"
         );
         assert.ok(successHtml.includes('id="orderSuccessNoticeModal"'));
+        assert.ok(successHtml.includes('id="activePendingOrderBanner"'));
         assert.ok(successHtml.includes(validOrder.id));
         assert.ok(successHtml.includes("PENDING"));
+        assert.ok(successHtml.includes("WELCOME10"));
+        assert.ok(successHtml.includes("120%"));
+        assert.ok(successHtml.includes("45.000"));
+        assert.ok(successHtml.includes("59.000"));
         assert.ok(successHtml.includes("118.000"));
+        assert.ok(successHtml.includes("11.800"));
+        assert.ok(successHtml.includes("106.200"));
+        assert.ok(
+          successHtml.includes('id="serverPriceReconciliationNote"'),
+          "Must display server-vs-client reconciliation note when totalVnd differs from client subtotal"
+        );
       } finally {
         globalThis.fetch = savedFetch;
       }
     });
 
-    it("rejects HTTP 200 OK (requires 201 Created) and rejects missing required fields in Order Response with isOutcomeUncertain=true", async () => {
+    it("rejects HTTP 200 OK (requires 201 Created) and rejects missing required fields or ERD arithmetic invariant violations in Order Response with isOutcomeUncertain=true", async () => {
       const mockToken = createValidMockJwt();
       const orderDto: CreateOrderRequestDto = {
         items: [
@@ -729,6 +793,37 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
             return true;
           }
         );
+
+        // ERD pricing invariant violation: totalVnd !== subtotalVnd - discountVnd
+        const invalidTotalOrder = createValidOrderResponse();
+        invalidTotalOrder.discountVnd = 10000;
+        invalidTotalOrder.totalVnd = 118000; // should be 108000
+        assert.throws(
+          () => {
+            validateOrderResponseData(invalidTotalOrder);
+          },
+          (err: OrderServiceError) => {
+            assert.equal(err.isOutcomeUncertain, true);
+            assert.ok(err.message.includes("totalVnd = subtotalVnd - discountVnd"));
+            return true;
+          }
+        );
+
+        // ERD line total invariant violation: lineTotalVnd !== unitPriceVnd * quantity
+        const invalidLineOrder = createValidOrderResponse();
+        invalidLineOrder.items[0].lineTotalVnd = 99000;
+        invalidLineOrder.subtotalVnd = 99000;
+        invalidLineOrder.totalVnd = 99000;
+        assert.throws(
+          () => {
+            validateOrderResponseData(invalidLineOrder);
+          },
+          (err: OrderServiceError) => {
+            assert.equal(err.isOutcomeUncertain, true);
+            assert.ok(err.message.includes("lineTotalVnd = unitPriceVnd * quantity"));
+            return true;
+          }
+        );
       } finally {
         globalThis.fetch = savedFetch;
       }
@@ -747,7 +842,8 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
         throw new TypeError("Failed to fetch");
       };
 
-      let capturedOutcome: OrderCallOutcome | null = null;
+      let capturedOutcome = null as OrderCallOutcome | null;
+      let syncedOrderError = null as OrderSubmissionErrorState | null;
 
       try {
         const res = await executeCheckoutOrderSubmission({
@@ -759,6 +855,9 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
           setCheckoutStep: () => {},
           setOrderCallOutcome: (val) => {
             capturedOutcome = val;
+          },
+          setOrderError: (err) => {
+            syncedOrderError = err;
           },
           verifySession: () => true,
           handleUnauthorizedCheckout: () => {},
@@ -776,6 +875,7 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
         assert.equal(outcome.code, "NETWORK_ERROR");
         assert.equal(outcome.statusCode, 503);
         assert.equal(outcome.isOutcomeUncertain, true);
+        assert.ok(syncedOrderError && syncedOrderError.isOutcomeUncertain);
 
         const uncertainErrorHtml = renderCartDrawerMarkup({
           items: cartItems,

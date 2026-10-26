@@ -6,12 +6,15 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type {
   CreateOrderItemDto,
   CreateOrderRequestDto,
+  CreateOrderResponseDto,
   DrinkSize,
+  OrderSubmissionErrorState,
 } from "@/mock-data";
 import {
   calculateLineTotalVnd,
@@ -22,14 +25,20 @@ import {
   MAX_TOPPINGS_PER_ITEM,
   MIN_ORDER_QUANTITY,
 } from "@/services/api.service";
-import { sanitizeCreateOrderPayload } from "@/services/order.service";
+import {
+  createOrderApi,
+  sanitizeCreateOrderPayload,
+  toOrderSubmissionErrorState,
+  validateOrderResponseData,
+} from "@/services/order.service";
 
 // ============================================================================
-// ĐỊNH NGHĨA KIỂU DỮ LIỆU GIỎ HÀNG (API CONTRACT v2.1 / v3.0 & SPRINT 2)
+// ĐỊNH NGHĨA KIỂU DỮ LIỆU GIỎ HÀNG & ORDER FLOW (API CONTRACT v2.1 / v3.0 & SCRUM-44)
 // ============================================================================
 
 export const MAX_CART_ITEMS = 20;
 export const CART_STORAGE_KEY = "brewlite_cart_v1";
+export const ACTIVE_ORDER_STORAGE_KEY = "brewlite_active_order_v1";
 
 export interface CartItemTopping {
   id: string;
@@ -89,6 +98,17 @@ export interface AddToCartInput {
 export type { CreateOrderItemDto };
 export type CreateOrderDto = CreateOrderRequestDto;
 
+export type SubmitOrderFromCartResult =
+  | {
+      ok: true;
+      order: CreateOrderResponseDto;
+    }
+  | {
+      ok: false;
+      skipped?: boolean;
+      error: OrderSubmissionErrorState;
+    };
+
 export interface CartContextValue {
   /** Danh sách các dòng món trong giỏ */
   items: CartItem[];
@@ -131,6 +151,29 @@ export interface CartContextValue {
   dismissFeedback: () => void;
   /** Chuyển đổi giỏ hàng sang payload chuẩn bị cho POST /orders */
   mapToCreateOrderPayload: (couponCodeOverride?: string) => CreateOrderDto;
+  /** Đơn hàng PENDING vừa khởi tạo thành công từ giỏ hàng (SCRUM-44) */
+  activeOrder?: CreateOrderResponseDto | null;
+  /** Trạng thái đang gửi request POST /orders (khóa chỉnh sửa giỏ hàng khi true) (SCRUM-44) */
+  isSubmittingOrder?: boolean;
+  /** Trạng thái lỗi gần nhất của luồng tạo đơn (SCRUM-44) */
+  orderError?: OrderSubmissionErrorState | null;
+  /** Lưu hoặc xóa dữ liệu đơn hàng PENDING hiện tại (SCRUM-44) */
+  setActiveOrder?: (order: CreateOrderResponseDto | null) => void;
+  /** Cập nhật trạng thái đang gửi POST /orders (SCRUM-44) */
+  setIsSubmittingOrder?: (submitting: boolean) => void;
+  /** Cập nhật trạng thái lỗi của luồng đặt hàng (SCRUM-44) */
+  setOrderError?: (error: OrderSubmissionErrorState | null) => void;
+  /** Xóa trạng thái lỗi và đơn hàng tạm trong luồng Checkout (SCRUM-44) */
+  clearOrderFlowState?: () => void;
+  /** Gửi yêu cầu POST /orders trực tiếp từ CartContext và lưu snapshot Order Response (SCRUM-44) */
+  submitOrderFromCart?: (options?: {
+    accessToken?: string | null;
+    couponCodeOverride?: string;
+    createOrderFn?: (
+      payload: CreateOrderRequestDto,
+      tokenOverride?: string | null
+    ) => Promise<CreateOrderResponseDto>;
+  }) => Promise<SubmitOrderFromCartResult>;
 }
 
 export const CartContext = createContext<CartContextValue | null>(null);
@@ -380,6 +423,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState<boolean>(false);
   const [couponCode, setCouponCodeState] = useState<string>("");
 
+  const [activeOrder, setActiveOrderState] =
+    useState<CreateOrderResponseDto | null>(null);
+  const [isSubmittingOrder, setIsSubmittingOrderState] =
+    useState<boolean>(false);
+  const [orderError, setOrderErrorState] =
+    useState<OrderSubmissionErrorState | null>(null);
+  const isSubmittingOrderRef = useRef<boolean>(false);
+
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState<
     "success" | "warning" | "error" | null
@@ -389,7 +440,45 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setCouponCodeState(code);
   }, []);
 
-  // Khôi phục giỏ hàng từ localStorage khi khởi động (SSR Safe + Chặt chẽ)
+  const setIsSubmittingOrder = useCallback((submitting: boolean) => {
+    isSubmittingOrderRef.current = submitting;
+    setIsSubmittingOrderState(submitting);
+  }, []);
+
+  const setActiveOrder = useCallback(
+    (order: CreateOrderResponseDto | null) => {
+      setActiveOrderState(order);
+      try {
+        if (typeof sessionStorage !== "undefined") {
+          if (order) {
+            sessionStorage.setItem(
+              ACTIVE_ORDER_STORAGE_KEY,
+              JSON.stringify(order)
+            );
+          } else {
+            sessionStorage.removeItem(ACTIVE_ORDER_STORAGE_KEY);
+          }
+        }
+      } catch {
+        // Bỏ qua lỗi sessionStorage
+      }
+    },
+    []
+  );
+
+  const setOrderError = useCallback(
+    (error: OrderSubmissionErrorState | null) => {
+      setOrderErrorState(error);
+    },
+    []
+  );
+
+  const clearOrderFlowState = useCallback(() => {
+    setOrderErrorState(null);
+    setActiveOrder(null);
+  }, [setActiveOrder]);
+
+  // Khôi phục giỏ hàng từ localStorage và đơn hàng PENDING từ sessionStorage khi khởi động (SSR Safe + Chặt chẽ)
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CART_STORAGE_KEY);
@@ -423,6 +512,27 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([]));
       } catch {
         // Bỏ qua lỗi localStorage
+      }
+    }
+
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        const storedOrder = sessionStorage.getItem(ACTIVE_ORDER_STORAGE_KEY);
+        if (storedOrder) {
+          const parsedOrder = validateOrderResponseData(
+            JSON.parse(storedOrder)
+          );
+          setActiveOrderState(parsedOrder);
+        }
+      }
+    } catch {
+      setActiveOrderState(null);
+      try {
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.removeItem(ACTIVE_ORDER_STORAGE_KEY);
+        }
+      } catch {
+        // Bỏ qua lỗi sessionStorage
       }
     } finally {
       setIsHydrated(true);
@@ -470,12 +580,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   // Thao tác mở/đóng drawer
   const openCart = useCallback(() => setIsCartOpen(true), []);
-  const closeCart = useCallback(() => setIsCartOpen(false), []);
-  const toggleCart = useCallback(() => setIsCartOpen((prev) => !prev), []);
+  const closeCart = useCallback(() => {
+    if (isSubmittingOrderRef.current) return;
+    setIsCartOpen(false);
+  }, []);
+  const toggleCart = useCallback(() => {
+    if (isSubmittingOrderRef.current) return;
+    setIsCartOpen((prev) => !prev);
+  }, []);
 
   // [MUST FIX 2 & 3]: Thêm món vào giỏ hàng đảm bảo tính đồng bộ kết quả trả về và đồng bộ topping
   const addToCart = useCallback(
     (input: AddToCartInput): { success: boolean; message: string } => {
+      if (isSubmittingOrderRef.current || isSubmittingOrder) {
+        const msg =
+          "Hệ thống đang xử lý yêu cầu đặt hàng. Vui lòng chờ giây lát trước khi thay đổi giỏ hàng.";
+        showFeedback(msg, "warning");
+        return { success: false, message: msg };
+      }
+
       // 1. Validate thông tin cơ bản
       if (!input.productId || !input.productId.trim()) {
         return { success: false, message: "ID sản phẩm không hợp lệ." };
@@ -666,12 +789,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       showFeedback(msg, "success");
       return { success: true, message: msg };
     },
-    [items, showFeedback]
+    [items, isSubmittingOrder, showFeedback]
   );
 
-  // Cập nhật số lượng của dòng món
+  // Cập nhật số lượng của dòng món (khóa khi đang gửi POST /orders)
   const updateQuantity = useCallback(
     (itemId: string, newQuantity: number) => {
+      if (isSubmittingOrderRef.current || isSubmittingOrder) return;
+
+      if (
+        typeof newQuantity !== "number" ||
+        !Number.isFinite(newQuantity) ||
+        !Number.isInteger(newQuantity)
+      ) {
+        showFeedback("Số lượng cập nhật phải là số nguyên hợp lệ.", "error");
+        return;
+      }
+
       setItems((prevItems) => {
         if (newQuantity <= 0) {
           const itemToRemove = prevItems.find((i) => i.id === itemId);
@@ -681,31 +815,35 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           return prevItems.filter((i) => i.id !== itemId);
         }
 
-        const clamped = Math.min(MAX_ORDER_QUANTITY, Math.trunc(newQuantity));
         if (newQuantity > MAX_ORDER_QUANTITY) {
           showFeedback(
             `Số lượng tối đa cho mỗi dòng là ${MAX_ORDER_QUANTITY} ly.`,
             "warning"
           );
+          return prevItems;
         }
 
         return prevItems.map((item) => {
           if (item.id === itemId) {
             return {
               ...item,
-              quantity: clamped,
-              lineTotalVnd: calculateLineTotalVnd(item.unitPriceVnd, clamped),
+              quantity: newQuantity,
+              lineTotalVnd: calculateLineTotalVnd(
+                item.unitPriceVnd,
+                newQuantity
+              ),
             };
           }
           return item;
         });
       });
     },
-    [showFeedback]
+    [isSubmittingOrder, showFeedback]
   );
 
   const incrementQuantity = useCallback(
     (itemId: string) => {
+      if (isSubmittingOrderRef.current || isSubmittingOrder) return;
       setItems((prevItems) => {
         const item = prevItems.find((i) => i.id === itemId);
         if (!item) return prevItems;
@@ -728,11 +866,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         );
       });
     },
-    [showFeedback]
+    [isSubmittingOrder, showFeedback]
   );
 
   const decrementQuantity = useCallback(
     (itemId: string) => {
+      if (isSubmittingOrderRef.current || isSubmittingOrder) return;
       setItems((prevItems) => {
         const item = prevItems.find((i) => i.id === itemId);
         if (!item) return prevItems;
@@ -752,12 +891,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         );
       });
     },
-    [showFeedback]
+    [isSubmittingOrder, showFeedback]
   );
 
-  // Xóa 1 dòng món khỏi giỏ
+  // Xóa 1 dòng món khỏi giỏ (khóa khi đang gửi POST /orders)
   const removeFromCart = useCallback(
     (itemId: string) => {
+      if (isSubmittingOrderRef.current || isSubmittingOrder) return;
       setItems((prevItems) => {
         const item = prevItems.find((i) => i.id === itemId);
         if (item) {
@@ -766,14 +906,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return prevItems.filter((i) => i.id !== itemId);
       });
     },
-    [showFeedback]
+    [isSubmittingOrder, showFeedback]
   );
 
-  // Xóa toàn bộ giỏ hàng
+  // Xóa toàn bộ giỏ hàng (khóa khi đang gửi POST /orders)
   const clearCart = useCallback(() => {
+    if (isSubmittingOrderRef.current || isSubmittingOrder) return;
     setItems([]);
     showFeedback("Đã làm rỗng giỏ hàng");
-  }, [showFeedback]);
+  }, [isSubmittingOrder, showFeedback]);
 
   // Chuyển đổi giỏ hàng sang định dạng CreateOrderDto theo API Contract v2.1 Mục 8.2
   // Tuyệt đối chỉ gửi { items: [{ productId, size, toppingIds, quantity }], couponCode? }
@@ -784,6 +925,86 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return buildCreateOrderPayloadFromCart(items, rawCoupon);
     },
     [items, couponCode]
+  );
+
+  // Gửi yêu cầu POST /orders trực tiếp từ CartContext và đồng bộ trạng thái loading / error / activeOrder (SCRUM-44)
+  const submitOrderFromCart = useCallback(
+    async (options?: {
+      accessToken?: string | null;
+      couponCodeOverride?: string;
+      createOrderFn?: (
+        payload: CreateOrderRequestDto,
+        tokenOverride?: string | null
+      ) => Promise<CreateOrderResponseDto>;
+    }): Promise<SubmitOrderFromCartResult> => {
+      if (isSubmittingOrderRef.current || isSubmittingOrder) {
+        return {
+          ok: false,
+          skipped: true,
+          error: {
+            statusCode: 409,
+            code: "PENDING_ORDER_EXISTS",
+            message: "Đang xử lý yêu cầu đặt hàng, vui lòng chờ giây lát.",
+            isOutcomeUncertain: false,
+            detailLines: [],
+          },
+        };
+      }
+
+      let payload: CreateOrderRequestDto;
+      try {
+        payload = mapToCreateOrderPayload(options?.couponCodeOverride);
+      } catch (err: unknown) {
+        const preSendError = toOrderSubmissionErrorState({
+          statusCode: 400,
+          code: "INVALID_CART",
+          message:
+            err instanceof Error && err.message
+              ? err.message
+              : "Dữ liệu giỏ hàng không hợp lệ.",
+          isOutcomeUncertain: false,
+        });
+        setOrderError(preSendError);
+        return { ok: false, error: preSendError };
+      }
+
+      const productNamesById: Record<string, string> = {};
+      for (const item of items) {
+        if (item.productId && item.productName) {
+          productNamesById[item.productId.trim()] = item.productName.trim();
+          productNamesById[item.productId.trim().toLowerCase()] =
+            item.productName.trim();
+        }
+      }
+
+      const callCreateOrder = options?.createOrderFn || createOrderApi;
+      setIsSubmittingOrder(true);
+      setOrderError(null);
+
+      try {
+        const createdOrder = await callCreateOrder(
+          payload,
+          options?.accessToken
+        );
+        // Giữ nguyên giỏ hàng khi đơn ở trạng thái PENDING (AC-US-CART-04-02, BR-07, API Contract v3.0)
+        setActiveOrder(createdOrder);
+        return { ok: true, order: createdOrder };
+      } catch (err: unknown) {
+        const errorState = toOrderSubmissionErrorState(err, productNamesById);
+        setOrderError(errorState);
+        return { ok: false, error: errorState };
+      } finally {
+        setIsSubmittingOrder(false);
+      }
+    },
+    [
+      items,
+      isSubmittingOrder,
+      mapToCreateOrderPayload,
+      setActiveOrder,
+      setIsSubmittingOrder,
+      setOrderError,
+    ]
   );
 
   const value: CartContextValue = {
@@ -808,6 +1029,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     toggleCart,
     dismissFeedback,
     mapToCreateOrderPayload,
+    activeOrder,
+    isSubmittingOrder,
+    orderError,
+    setActiveOrder,
+    setIsSubmittingOrder,
+    setOrderError,
+    clearOrderFlowState,
+    submitOrderFromCart,
   };
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

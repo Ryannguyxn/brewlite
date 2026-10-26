@@ -11,7 +11,7 @@ import {
 import { API_BASE_URL } from "./api.service";
 
 // ============================================================================
-// AUTH SERVICE — SPRINT 2 (SCRUM-41)
+// AUTH SERVICE — SPRINT 2 & 3 (SCRUM-41, SCRUM-43, SCRUM-44)
 // Đối chiếu chuẩn 100% với:
 // - docs/api/BrewLite_API_Contract_v2.1.md (Mục 5, 6, 7)
 // - Backend Auth Controller & Service
@@ -21,6 +21,7 @@ import { API_BASE_URL } from "./api.service";
 
 export const TOKEN_STORAGE_KEY = "brewlite_auth_token_v1";
 export const USER_STORAGE_KEY = "brewlite_auth_user_v1";
+export const ACTIVE_ORDER_SESSION_KEY = "brewlite_active_order_v1";
 
 /**
  * Cấu hình chế độ xác thực:
@@ -241,11 +242,14 @@ export function getStoredUser(): AuthUser | null {
 }
 
 /**
- * Lưu token và thông tin User an toàn sau khi đăng nhập thành công
+ * Lưu token và thông tin User an toàn sau khi đăng nhập thành công.
+ * Nếu trong sessionStorage đang có snapshot đơn hàng PENDING của một user khác,
+ * xóa ngay để tránh lộ mã đơn và tổng tiền giữa hai tài khoản dùng chung tab (SCRUM-44).
  */
 export function setStoredSession(token: string, user: AuthUser): void {
   if (typeof window === "undefined") return;
   try {
+    const normalizedUserId = (user.id || "").trim().toLowerCase();
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
     const safeUser: AuthUser = {
       id: user.id,
@@ -253,14 +257,34 @@ export function setStoredSession(token: string, user: AuthUser): void {
       fullName: user.fullName ?? null,
     };
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(safeUser));
+
+    if (typeof sessionStorage !== "undefined") {
+      const rawActiveOrder = sessionStorage.getItem(ACTIVE_ORDER_SESSION_KEY);
+      if (rawActiveOrder) {
+        try {
+          const parsed = JSON.parse(rawActiveOrder) as Record<string, unknown>;
+          const storedOwnerId =
+            typeof parsed?.ownerUserId === "string"
+              ? parsed.ownerUserId.trim().toLowerCase()
+              : "";
+          if (!storedOwnerId || storedOwnerId !== normalizedUserId) {
+            sessionStorage.removeItem(ACTIVE_ORDER_SESSION_KEY);
+          }
+        } catch {
+          sessionStorage.removeItem(ACTIVE_ORDER_SESSION_KEY);
+        }
+      }
+    }
   } catch {
     // Bỏ qua lỗi lưu session
   }
 }
 
 /**
- * Đăng xuất và xóa phiên đăng nhập.
- * TUYỆT ĐỐI BẢO LƯU GIỎ HÀNG (Cart) theo API Contract v2.1 Mục 7.5 & 9.2!
+ * Đăng xuất / xóa phiên đăng nhập hết hạn hoặc 401:
+ * - Xóa JWT token và thông tin AuthUser trong localStorage.
+ * - Xóa snapshot đơn hàng PENDING trong sessionStorage (`brewlite_active_order_v1`) vì đơn hàng gắn với tài khoản.
+ * - TUYỆT ĐỐI BẢO LƯU GIỎ HÀNG (Cart `brewlite_cart_v1`) theo API Contract v2.1 Mục 7.5 & 9.2!
  */
 export function clearStoredSession(): void {
   if (typeof window === "undefined") return;
@@ -268,7 +292,14 @@ export function clearStoredSession(): void {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     localStorage.removeItem(USER_STORAGE_KEY);
   } catch {
-    // Bỏ qua lỗi xóa session
+    // Bỏ qua lỗi xóa localStorage
+  }
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem(ACTIVE_ORDER_SESSION_KEY);
+    }
+  } catch {
+    // Bỏ qua lỗi xóa sessionStorage
   }
 }
 
@@ -301,7 +332,7 @@ export async function registerApi(dto: RegisterRequestDto): Promise<RegisterResp
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(normalizedDto),
     });
-  } catch (netErr) {
+  } catch {
     // Lỗi mạng hoặc Backend chưa chạy trong Real Mode: Báo lỗi thật sự, không giả lập thành công!
     const err: Error & { statusCode?: number; code?: string } = new Error(
       "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại dịch vụ."
@@ -377,7 +408,7 @@ export async function loginApi(dto: LoginRequestDto): Promise<LoginResponseDto> 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(normalizedDto),
     });
-  } catch (netErr) {
+  } catch {
     const err: Error & { statusCode?: number; code?: string } = new Error(
       "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại dịch vụ."
     );

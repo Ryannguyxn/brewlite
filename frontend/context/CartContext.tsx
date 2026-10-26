@@ -11,7 +11,6 @@ import React, {
 import type {
   CreateOrderItemDto,
   CreateOrderRequestDto,
-  CreateOrderResponseDto,
   DrinkSize,
 } from "@/mock-data";
 import {
@@ -107,10 +106,6 @@ export interface CartContextValue {
   couponCode: string;
   /** Cập nhật mã giảm giá */
   setCouponCode: (code: string) => void;
-  /** Đơn hàng PENDING vừa được tạo thành công từ máy chủ (POST /orders) */
-  lastCreatedOrder: CreateOrderResponseDto | null;
-  /** Lưu hoặc xóa thông tin đơn hàng vừa tạo */
-  setLastCreatedOrder: (order: CreateOrderResponseDto | null) => void;
   /** Thông báo feedback ngắn hạn (Toast) */
   feedbackMessage: string | null;
   feedbackType: "success" | "warning" | "error" | null;
@@ -355,8 +350,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [isHydrated, setIsHydrated] = useState<boolean>(false);
   const [couponCode, setCouponCodeState] = useState<string>("");
-  const [lastCreatedOrder, setLastCreatedOrder] =
-    useState<CreateOrderResponseDto | null>(null);
 
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState<
@@ -782,8 +775,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     isCartOpen,
     couponCode,
     setCouponCode,
-    lastCreatedOrder,
-    setLastCreatedOrder,
     feedbackMessage,
     feedbackType,
     addToCart,

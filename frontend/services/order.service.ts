@@ -9,7 +9,6 @@ import {
 } from "@/mock-data";
 import {
   API_BASE_URL,
-  formatVnd,
   isValidUuid,
   MAX_ORDER_QUANTITY,
   MAX_TOPPINGS_PER_ITEM,
@@ -22,25 +21,21 @@ import {
 } from "./auth.service";
 
 // ============================================================================
-// ORDER & CHECKOUT SERVICE — SPRINT 2 & 3 (SCRUM-43)
+// ORDER & CHECKOUT SERVICE — SPRINT 2 (SCRUM-43)
 // Đối chiếu chuẩn 100% với:
 // - docs/api/BrewLite_API_Contract_v3.0.md & Appendix A (v2.1 Mục 5.3, 8, 9)
 // - database/schema.dbml & backend/prisma/schema.prisma
 // - backend/src/orders/orders.controller.ts & orders.service.ts
 //
-// Nguyên tắc bất biến:
-// 1. Chỉ gửi { items: [{ productId, size, toppingIds, quantity }], couponCode? }
-//    TUYỆT ĐỐI KHÔNG gửi userId, status, price, unitPriceVnd, lineTotalVnd,
-//    subtotalVnd, discountVnd, totalVnd hay pointsEarned từ Client.
-// 2. Bắt buộc gửi kèm header Authorization: Bearer <JWT_ACCESS_TOKEN>.
-// 3. Phân loại lỗi dựa trên machine-readable `code` và `details` (không parse text `message`).
-// 4. Khi gặp 401 UNAUTHORIZED (hoặc token hết hạn): xóa phiên Auth nhưng BẢO LƯU GIỎ HÀNG.
-// 5. Khi tạo Order PENDING (201 Created): BẢO LƯU GIỎ HÀNG (chỉ xóa Cart sau khi Payment SUCCESS ở Sprint 3).
+// Phạm vi SCRUM-43:
+// - Chuẩn hóa & kiểm tra payload Checkout -> Gọi API Create Order (`POST /orders`)
+// - Đính kèm Authorization: Bearer <JWT_ACCESS_TOKEN>
+// - Bảo toàn trạng thái Giỏ hàng (Cart) khi chuyển qua Login / 401 / tạo đơn PENDING
+// (Phần xử lý loading/error UI chi tiết và hiển thị dữ liệu Order Response thuộc SCRUM-44)
 // ============================================================================
 
 export const MAX_ORDER_ITEMS = 20;
 export const MAX_COUPON_CODE_LENGTH = 30;
-export const ACTIVE_PENDING_ORDER_STORAGE_KEY = "brewlite_pending_order_v1";
 
 const VALID_DRINK_SIZES: readonly DrinkSize[] = [
   "S",
@@ -53,21 +48,6 @@ export interface OrderServiceError extends Error {
   statusCode: number;
   code: OrderErrorCode | string;
   details?: InvalidCartDetail[] | InsufficientStockDetail[] | unknown;
-}
-
-export interface FormattedOrderError {
-  statusCode: number;
-  code: OrderErrorCode | string;
-  title: string;
-  description: string;
-  detailLines: string[];
-  isUnauthorized: boolean;
-  isCouponError: boolean;
-  isCartError: boolean;
-  isStockError: boolean;
-  isPendingOrderConflict: boolean;
-  isServerError: boolean;
-  isNetworkError: boolean;
 }
 
 function createOrderError(
@@ -339,244 +319,6 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
 }
 
 /**
- * Mô tả tiếng Việt cho từng mã `details[].reason` của lỗi `INVALID_CART`
- * (Tuân thủ API Contract v2.1 Mục 8.3.1 & 8.7: chỉ dựa vào `code` và `details[].reason`, không parse text `message`)
- */
-export function describeInvalidCartReason(reason: string): string {
-  switch (reason) {
-    case "PRODUCT_NOT_FOUND":
-      return "Sản phẩm không còn tồn tại trong danh mục phục vụ (ORD-CAT-01).";
-    case "PRODUCT_UNAVAILABLE":
-      return "Sản phẩm hoặc danh mục của sản phẩm hiện đang tạm ngừng phục vụ (ORD-CAT-02).";
-    case "INVALID_SIZE":
-      return "Kích cỡ đã chọn không tương thích với chính sách kích cỡ (sizePolicy) của sản phẩm (ORD-CAT-03/04).";
-    case "TOPPING_NOT_FOUND":
-      return "Topping đã chọn không tồn tại trên hệ thống (ORD-CAT-05).";
-    case "TOPPING_NOT_ALLOWED":
-      return "Topping đã chọn không áp dụng cho sản phẩm này (ORD-CAT-05).";
-    case "TOPPING_UNAVAILABLE":
-      return "Topping đã chọn hiện đang tạm hết hàng (ORD-CAT-06).";
-    case "DUPLICATE_TOPPING":
-      return "Có topping bị chọn trùng lặp trong cùng một món (ORD-CAT-07).";
-    case "TOO_MANY_TOPPINGS":
-      return "Số lượng topping vượt quá giới hạn tối đa 3 loại/món (ORD-CAT-07).";
-    case "DUPLICATE_CONFIGURATION":
-      return "Có các dòng sản phẩm trùng lặp cùng cấu hình kích cỡ và topping.";
-    case "INVALID_PRICE_DATA":
-      return "Dữ liệu giá của sản phẩm không hợp lệ khi đối chiếu máy chủ (ORD-CAT-08).";
-    default:
-      return "Cấu hình món trong giỏ hàng không còn hợp lệ.";
-  }
-}
-
-/**
- * Phân tích lỗi trả về từ `createOrderApi` dựa hoàn toàn vào `code`, `statusCode` và `details`
- * theo đúng API Contract v2.1 Mục 5.3, 8.3.1, 8.7 & v3.0.
- */
-export function formatOrderError(
-  err: unknown,
-  cartItems: Array<{ productId: string; productName: string }> = []
-): FormattedOrderError {
-  const errorObj = (err || {}) as Partial<OrderServiceError>;
-  const statusCode =
-    typeof errorObj.statusCode === "number" ? errorObj.statusCode : 500;
-  const code =
-    typeof errorObj.code === "string" && errorObj.code.trim()
-      ? errorObj.code.trim()
-      : statusCode === 401
-      ? "UNAUTHORIZED"
-      : statusCode === 409
-      ? "PENDING_ORDER_EXISTS"
-      : statusCode === 400
-      ? "VALIDATION_ERROR"
-      : statusCode === 503
-      ? "NETWORK_ERROR"
-      : "SERVER_ERROR";
-
-  const findProductName = (productId?: string, itemIndex?: number): string => {
-    if (productId) {
-      const normalizedId = productId.trim().toLowerCase();
-      const found = cartItems.find(
-        (c) => c.productId.trim().toLowerCase() === normalizedId
-      );
-      if (found) return found.productName;
-    }
-    if (
-      typeof itemIndex === "number" &&
-      itemIndex >= 0 &&
-      itemIndex < cartItems.length
-    ) {
-      return cartItems[itemIndex].productName;
-    }
-    return productId ? `Sản phẩm (${productId.slice(0, 8)}...)` : "Món trong giỏ";
-  };
-
-  if (code === "UNAUTHORIZED" || statusCode === 401) {
-    return {
-      statusCode: 401,
-      code: "UNAUTHORIZED",
-      title: "Phiên đăng nhập đã hết hạn hoặc chưa xác thực",
-      description:
-        "Vui lòng đăng nhập lại để tiếp tục đặt hàng. Toàn bộ giỏ hàng của bạn vẫn được giữ nguyên.",
-      detailLines: [],
-      isUnauthorized: true,
-      isCouponError: false,
-      isCartError: false,
-      isStockError: false,
-      isPendingOrderConflict: false,
-      isServerError: false,
-      isNetworkError: false,
-    };
-  }
-
-  if (code === "INSUFFICIENT_STOCK") {
-    const details = Array.isArray(errorObj.details)
-      ? (errorObj.details as InsufficientStockDetail[])
-      : [];
-    const detailLines = details.map((d) => {
-      const name = findProductName(d.productId);
-      const reqQty =
-        typeof d.requestedQuantity === "number" ? d.requestedQuantity : "?";
-      const availQty =
-        typeof d.availableQuantity === "number" ? d.availableQuantity : 0;
-      return `${name}: Yêu cầu ${reqQty} phần nhưng kho chỉ còn ${availQty} phần.`;
-    });
-
-    return {
-      statusCode: 409,
-      code: "INSUFFICIENT_STOCK",
-      title: "Số lượng tồn kho không đủ",
-      description:
-        "Một số sản phẩm trong giỏ hàng hiện không đủ số lượng tồn kho tại quầy. Vui lòng giảm số lượng hoặc đổi món khác.",
-      detailLines,
-      isUnauthorized: false,
-      isCouponError: false,
-      isCartError: false,
-      isStockError: true,
-      isPendingOrderConflict: false,
-      isServerError: false,
-      isNetworkError: false,
-    };
-  }
-
-  if (code === "PENDING_ORDER_EXISTS") {
-    return {
-      statusCode: 409,
-      code: "PENDING_ORDER_EXISTS",
-      title: "Bạn đang có đơn hàng chờ thanh toán",
-      description:
-        "Tài khoản của bạn hiện đã có một đơn hàng ở trạng thái PENDING hoặc PAYMENT_FAILED chưa hoàn tất. Theo quy tắc hệ thống, mỗi khách hàng chỉ có tối đa 1 đơn hàng chưa thanh toán tại một thời điểm.",
-      detailLines: [],
-      isUnauthorized: false,
-      isCouponError: false,
-      isCartError: false,
-      isStockError: false,
-      isPendingOrderConflict: true,
-      isServerError: false,
-      isNetworkError: false,
-    };
-  }
-
-  if (code === "INVALID_COUPON" || code === "COUPON_UNAVAILABLE") {
-    return {
-      statusCode: statusCode === 409 ? 409 : 400,
-      code,
-      title: "Mã khuyến mãi không thể áp dụng",
-      description:
-        "Mã khuyến mãi không tồn tại, chưa đến thời gian áp dụng, đã hết hạn, chưa đạt giá trị đơn tối thiểu hoặc đã hết lượt sử dụng. Vui lòng kiểm tra hoặc xóa mã khuyến mãi để tiếp tục.",
-      detailLines: [],
-      isUnauthorized: false,
-      isCouponError: true,
-      isCartError: false,
-      isStockError: false,
-      isPendingOrderConflict: false,
-      isServerError: false,
-      isNetworkError: false,
-    };
-  }
-
-  if (code === "INVALID_CART") {
-    const details = Array.isArray(errorObj.details)
-      ? (errorObj.details as InvalidCartDetail[])
-      : [];
-    const detailLines = details.map((d) => {
-      const name = findProductName(d.productId, d.itemIndex);
-      const reasonDesc = describeInvalidCartReason(String(d.reason || ""));
-      return `${name}: ${reasonDesc}`;
-    });
-
-    return {
-      statusCode: 400,
-      code: "INVALID_CART",
-      title: "Dữ liệu giỏ hàng cần cập nhật",
-      description:
-        "Một số món hoặc tùy chọn kích cỡ/topping trong giỏ hàng không còn hợp lệ theo thực đơn máy chủ. Giỏ hàng vẫn được giữ nguyên để bạn chỉnh sửa.",
-      detailLines,
-      isUnauthorized: false,
-      isCouponError: false,
-      isCartError: true,
-      isStockError: false,
-      isPendingOrderConflict: false,
-      isServerError: false,
-      isNetworkError: false,
-    };
-  }
-
-  if (code === "VALIDATION_ERROR") {
-    return {
-      statusCode: 400,
-      code: "VALIDATION_ERROR",
-      title: "Dữ liệu yêu cầu đặt hàng không hợp lệ",
-      description:
-        errorObj.message ||
-        "Định dạng dữ liệu giỏ hàng hoặc mã khuyến mãi chưa đúng quy chuẩn (1–20 dòng, mỗi dòng 1–10 ly, tối đa 3 topping).",
-      detailLines: [],
-      isUnauthorized: false,
-      isCouponError: false,
-      isCartError: true,
-      isStockError: false,
-      isPendingOrderConflict: false,
-      isServerError: false,
-      isNetworkError: false,
-    };
-  }
-
-  if (code === "NETWORK_ERROR" || statusCode === 503) {
-    return {
-      statusCode: 503,
-      code: "NETWORK_ERROR",
-      title: "Không thể kết nối đến máy chủ",
-      description:
-        "Không thể kết nối đến máy chủ Backend (POST /orders). Vui lòng kiểm tra kết nối mạng hoặc dịch vụ Backend và thử lại. Giỏ hàng của bạn được giữ nguyên.",
-      detailLines: [],
-      isUnauthorized: false,
-      isCouponError: false,
-      isCartError: false,
-      isStockError: false,
-      isPendingOrderConflict: false,
-      isServerError: false,
-      isNetworkError: true,
-    };
-  }
-
-  return {
-    statusCode: statusCode >= 500 ? statusCode : 500,
-    code: "SERVER_ERROR",
-    title: "Sự cố máy chủ khi tạo đơn hàng",
-    description:
-      "Máy chủ đang gặp sự cố ngoài dự kiến và đã hoàn tác (rollback) giao dịch an toàn. Vui lòng thử lại sau ít phút.",
-    detailLines: [],
-    isUnauthorized: false,
-    isCouponError: false,
-    isCartError: false,
-    isStockError: false,
-    isPendingOrderConflict: false,
-    isServerError: true,
-    isNetworkError: false,
-  };
-}
-
-/**
  * Kiểm tra cấu trúc dữ liệu `CreateOrderResponseDto` trả về từ máy chủ (HTTP 201 Created)
  */
 function validateOrderResponseData(data: unknown): CreateOrderResponseDto {
@@ -649,7 +391,7 @@ function validateOrderResponseData(data: unknown): CreateOrderResponseDto {
 }
 
 /**
- * Gọi API `POST /orders` tới Backend thật để tạo đơn hàng `PENDING` từ giỏ hàng hiện tại.
+ * Gọi API `POST /orders` tới Backend thật để tạo đơn hàng `PENDING` từ giỏ hàng hiện tại (SCRUM-43).
  * - Kiểm tra chặt chẽ JWT trước khi gửi request.
  * - Chỉ gửi `{ items: [{ productId, size, toppingIds, quantity }], couponCode? }`.
  * - Tuyệt đối không tạo đơn hàng giả ở phía Client khi Backend lỗi.
@@ -777,42 +519,3 @@ export async function createOrderApi(
     errorData?.details
   );
 }
-
-/**
- * Định dạng thời gian tạo đơn hàng (ISO 8601 UTC) sang chuỗi hiển thị tiếng Việt
- */
-export function formatOrderTimestamp(isoString: string): string {
-  try {
-    const date = new Date(isoString);
-    if (Number.isNaN(date.getTime())) return isoString;
-    return date.toLocaleString("vi-VN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  } catch {
-    return isoString;
-  }
-}
-
-/**
- * Tính thời điểm hết hạn dự kiến (+15 phút từ createdAt theo database/schema.dbml & FR-ORD-007)
- */
-export function calculateOrderExpiresAtDisplay(createdAtIso: string): string {
-  try {
-    const created = new Date(createdAtIso);
-    if (Number.isNaN(created.getTime())) return "15 phút sau khi tạo";
-    const expires = new Date(created.getTime() + 15 * 60 * 1000);
-    return expires.toLocaleTimeString("vi-VN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "15 phút sau khi tạo";
-  }
-}
-
-export { formatVnd };

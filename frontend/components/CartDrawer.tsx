@@ -8,6 +8,7 @@ import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 import { getDisplayCustomerName } from "@/services/auth.service";
 import {
   createOrderApi,
+  describeOrderErrorDetails,
   type OrderServiceError,
 } from "@/services/order.service";
 
@@ -23,6 +24,8 @@ type OrderCallOutcome =
       statusCode: number;
       code: string;
       message: string;
+      isOutcomeUncertain: boolean;
+      detailLines: string[];
     };
 
 export default function CartDrawer() {
@@ -56,6 +59,7 @@ export default function CartDrawer() {
 
   const [checkoutStep, setCheckoutStep] = useState<CheckoutDrawerStep>("cart");
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [orderCallOutcome, setOrderCallOutcome] =
     useState<OrderCallOutcome | null>(null);
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
@@ -68,6 +72,7 @@ export default function CartDrawer() {
       : checkoutStep;
 
   const handleCloseDrawer = () => {
+    if (submittingRef.current || isSubmittingOrder) return;
     setConfirmClearOpen(false);
     setOrderCallOutcome(null);
     setVoucherNoticeVisible(false);
@@ -86,10 +91,15 @@ export default function CartDrawer() {
     };
   }, [isCartOpen]);
 
-  // Xử lý phím Escape để đóng drawer
+  // Xử lý phím Escape để đóng drawer (chặn đóng khi đang gửi POST /orders)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isCartOpen) {
+      if (
+        e.key === "Escape" &&
+        isCartOpen &&
+        !submittingRef.current &&
+        !isSubmittingOrder
+      ) {
         setConfirmClearOpen(false);
         setOrderCallOutcome(null);
         setVoucherNoticeVisible(false);
@@ -98,7 +108,7 @@ export default function CartDrawer() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCartOpen, closeCart]);
+  }, [isCartOpen, isSubmittingOrder, closeCart]);
 
   // Tự động tắt feedback sau 3s
   useEffect(() => {
@@ -148,6 +158,7 @@ export default function CartDrawer() {
    * Không cho nhận ký tự và hiển thị thông báo chức năng sẽ phát triển sau
    */
   const handleVoucherAttempt = () => {
+    if (isSubmittingOrder) return;
     setVoucherNoticeVisible(true);
   };
 
@@ -156,7 +167,7 @@ export default function CartDrawer() {
    * Kiểm tra giỏ hàng -> Kiểm tra trạng thái đăng nhập (JWT)
    */
   const handleProceedToCheckout = () => {
-    if (items.length === 0) return;
+    if (items.length === 0 || isSubmittingOrder) return;
 
     // Kiểm tra trạng thái xác thực & hạn dùng JWT
     const hasValidSession = verifySession();
@@ -177,10 +188,10 @@ export default function CartDrawer() {
 
   /**
    * Bước 2 (Checkout) -> Gọi Create Order API (POST /orders) (SCRUM-43)
-   * Phân biệt rõ ràng trạng thái tạo đơn THÀNH CÔNG (201 Created) và THẤT BẠI (4xx/5xx/Network).
+   * Quản lý đầy đủ trạng thái Loading / Success (201 Created) / Error (phân biệt rõ lỗi từ chối xác định và lỗi trạng thái không chắc chắn).
    */
   const handleConfirmCreateOrder = async () => {
-    if (submittingRef.current) return;
+    if (submittingRef.current || isSubmittingOrder) return;
     if (items.length === 0) {
       setCheckoutStep("cart");
       return;
@@ -200,6 +211,7 @@ export default function CartDrawer() {
     try {
       payload = mapToCreateOrderPayload();
     } catch (err: unknown) {
+      // Lỗi kiểm tra giỏ hàng tại Client trước khi gửi request -> chắc chắn chưa gửi lên Server (isOutcomeUncertain = false)
       setOrderCallOutcome({
         type: "error",
         statusCode: 400,
@@ -208,11 +220,15 @@ export default function CartDrawer() {
           err instanceof Error && err.message
             ? err.message
             : "Dữ liệu giỏ hàng không hợp lệ.",
+        isOutcomeUncertain: false,
+        detailLines: [],
       });
       return;
     }
 
     submittingRef.current = true;
+    setIsSubmittingOrder(true);
+    setOrderCallOutcome(null);
 
     try {
       const createdOrder = await createOrderApi(payload, accessToken);
@@ -232,21 +248,33 @@ export default function CartDrawer() {
         return;
       }
 
+      const resolvedStatus =
+        typeof orderErr?.statusCode === "number" ? orderErr.statusCode : 500;
+      const resolvedCode =
+        typeof orderErr?.code === "string" && orderErr.code.trim()
+          ? orderErr.code.trim()
+          : "SERVER_ERROR";
+      const isUncertain =
+        typeof orderErr?.isOutcomeUncertain === "boolean"
+          ? orderErr.isOutcomeUncertain
+          : resolvedStatus >= 500 || resolvedCode === "NETWORK_ERROR";
+
       setOrderCallOutcome({
         type: "error",
-        statusCode:
-          typeof orderErr?.statusCode === "number" ? orderErr.statusCode : 500,
-        code:
-          typeof orderErr?.code === "string" && orderErr.code.trim()
-            ? orderErr.code.trim()
-            : "SERVER_ERROR",
+        statusCode: resolvedStatus,
+        code: resolvedCode,
         message:
           typeof orderErr?.message === "string" && orderErr.message.trim()
             ? orderErr.message.trim()
-            : "Không thể tạo đơn hàng. Vui lòng kiểm tra lại và thử lại.",
+            : isUncertain
+            ? "Không thể xác nhận phản hồi từ máy chủ sau khi gửi yêu cầu đặt hàng. Đơn hàng có thể đã được ghi nhận trên hệ thống."
+            : "Không thể tạo đơn hàng. Vui lòng kiểm tra lại thông tin giỏ hàng.",
+        isOutcomeUncertain: isUncertain,
+        detailLines: describeOrderErrorDetails(orderErr?.details),
       });
     } finally {
       submittingRef.current = false;
+      setIsSubmittingOrder(false);
     }
   };
 
@@ -269,6 +297,7 @@ export default function CartDrawer() {
         id="cartDrawerPanel"
         role="dialog"
         aria-modal="true"
+        aria-busy={isSubmittingOrder}
         aria-label="Giỏ hàng và Đặt hàng"
         className={`fixed inset-y-0 right-0 z-50 w-full sm:w-[460px] max-w-full bg-surface-container-lowest shadow-[-12px_0_40px_rgba(30,21,16,0.18)] flex flex-col justify-between overflow-hidden transition-transform duration-300 ease-out transform ${
           isCartOpen ? "translate-x-0" : "translate-x-full"
@@ -283,12 +312,14 @@ export default function CartDrawer() {
               <button
                 id="btnBackToCartStep"
                 type="button"
+                disabled={isSubmittingOrder}
                 onClick={() => {
+                  if (isSubmittingOrder) return;
                   setVoucherNoticeVisible(false);
                   setOrderCallOutcome(null);
                   setCheckoutStep("cart");
                 }}
-                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer whitespace-nowrap"
+                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   arrow_back
@@ -298,8 +329,9 @@ export default function CartDrawer() {
             ) : (
               <button
                 type="button"
+                disabled={isSubmittingOrder}
                 onClick={handleCloseDrawer}
-                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer whitespace-nowrap"
+                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   arrow_back
@@ -312,17 +344,20 @@ export default function CartDrawer() {
               {activeStep === "cart" && items.length > 0 && (
                 <button
                   type="button"
+                  disabled={isSubmittingOrder}
                   onClick={() => setConfirmClearOpen(true)}
-                  className="text-outline hover:text-error transition-colors font-label-md text-label-md px-2 py-1 rounded hover:bg-surface-container-high cursor-pointer whitespace-nowrap"
+                  className="text-outline hover:text-error transition-colors font-label-md text-label-md px-2 py-1 rounded hover:bg-surface-container-high cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Xóa toàn bộ giỏ hàng"
                 >
                   Xóa tất cả
                 </button>
               )}
               <button
+                id="btnCloseCartDrawer"
                 type="button"
+                disabled={isSubmittingOrder}
                 onClick={handleCloseDrawer}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-surface-container-high hover:bg-surface-container text-on-surface transition-colors cursor-pointer flex-shrink-0"
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-surface-container-high hover:bg-surface-container text-on-surface transition-colors cursor-pointer flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Đóng giỏ hàng"
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -592,6 +627,30 @@ export default function CartDrawer() {
           {/* -------------------------------------------------------------- */}
           {activeStep === "review" && (
             <div id="checkoutReviewSection" className="space-y-4 py-1">
+              {/* Banner hiển thị trạng thái Loading khi đang gửi POST /orders */}
+              {isSubmittingOrder && (
+                <div
+                  id="checkoutSubmittingBanner"
+                  role="status"
+                  aria-live="polite"
+                  className="p-3.5 rounded-xl bg-primary/10 border border-primary/30 text-primary flex items-center gap-3 shadow-sm"
+                >
+                  <span className="material-symbols-outlined text-[22px] animate-spin flex-shrink-0">
+                    progress_activity
+                  </span>
+                  <div className="text-[12px] leading-relaxed">
+                    <div className="font-bold">
+                      Đang gửi yêu cầu tạo đơn hàng tới máy chủ...
+                    </div>
+                    <div className="text-on-surface-variant text-[11px]">
+                      Hệ thống đang kiểm tra tồn kho và khởi tạo đơn hàng{" "}
+                      <code className="font-mono">PENDING</code>. Vui lòng chờ
+                      trong giây lát.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Thông tin khách hàng đã xác thực */}
               <div
                 id="checkoutCustomerCard"
@@ -628,13 +687,16 @@ export default function CartDrawer() {
                     Chi tiết món ({items.length} dòng • {totalQuantity} ly)
                   </span>
                   <button
+                    id="btnEditCartInReview"
                     type="button"
+                    disabled={isSubmittingOrder}
                     onClick={() => {
+                      if (isSubmittingOrder) return;
                       setVoucherNoticeVisible(false);
                       setOrderCallOutcome(null);
                       setCheckoutStep("cart");
                     }}
-                    className="text-[12px] font-label-md text-primary hover:underline cursor-pointer whitespace-nowrap"
+                    className="text-[12px] font-label-md text-primary hover:underline cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Chỉnh sửa giỏ
                   </button>
@@ -708,8 +770,9 @@ export default function CartDrawer() {
                   </div>
                   <button
                     type="button"
+                    disabled={isSubmittingOrder}
                     onClick={handleVoucherAttempt}
-                    className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                    className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Áp dụng
                   </button>
@@ -907,13 +970,16 @@ export default function CartDrawer() {
 
             <div className="flex gap-2.5">
               <button
+                id="btnBackFromReviewFooter"
                 type="button"
+                disabled={isSubmittingOrder}
                 onClick={() => {
+                  if (isSubmittingOrder) return;
                   setVoucherNoticeVisible(false);
                   setOrderCallOutcome(null);
                   setCheckoutStep("cart");
                 }}
-                className="px-4 py-3 rounded-xl border border-outline-variant text-on-surface font-label-lg text-label-lg font-semibold hover:bg-surface-container transition-colors cursor-pointer whitespace-nowrap flex-shrink-0"
+                className="px-4 py-3 rounded-xl border border-outline-variant text-on-surface font-label-lg text-label-lg font-semibold hover:bg-surface-container transition-colors cursor-pointer whitespace-nowrap flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Quay lại
               </button>
@@ -921,13 +987,28 @@ export default function CartDrawer() {
               <button
                 id="btnConfirmCreateOrder"
                 type="button"
+                disabled={isSubmittingOrder}
+                aria-busy={isSubmittingOrder}
                 onClick={handleConfirmCreateOrder}
-                className="flex-1 py-3 px-4 bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+                className="flex-1 py-3 px-4 bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap disabled:opacity-75 disabled:cursor-wait"
               >
-                <span className="material-symbols-outlined text-[20px] flex-shrink-0">
-                  check_circle
-                </span>
-                <span className="whitespace-nowrap">Xác nhận Đặt hàng</span>
+                {isSubmittingOrder ? (
+                  <>
+                    <span className="material-symbols-outlined text-[20px] animate-spin flex-shrink-0">
+                      progress_activity
+                    </span>
+                    <span className="whitespace-nowrap">
+                      Đang xử lý đặt hàng...
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[20px] flex-shrink-0">
+                      check_circle
+                    </span>
+                    <span className="whitespace-nowrap">Xác nhận Đặt hàng</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -974,14 +1055,15 @@ export default function CartDrawer() {
           </div>
         )}
 
-        {/* Modal phân biệt rõ kết quả gọi POST /orders: THÀNH CÔNG (201) vs THẤT BẠI */}
+        {/* Modal hiển thị kết quả tạo đơn THÀNH CÔNG (HTTP 201 Created) */}
         {orderCallOutcome?.type === "success" && (
           <div
             id="orderSuccessNoticeModal"
             role="status"
+            aria-live="polite"
             className="absolute inset-0 bg-on-surface/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
           >
-            <div className="bg-surface rounded-xl p-5 shadow-2xl max-w-sm w-full space-y-4">
+            <div className="bg-surface rounded-xl p-5 shadow-2xl max-w-sm w-full space-y-3.5 max-h-[90vh] overflow-y-auto">
               <div className="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center mx-auto">
                 <span className="material-symbols-outlined text-[26px]">
                   check_circle
@@ -992,78 +1074,255 @@ export default function CartDrawer() {
                   Tạo đơn hàng thành công!
                 </h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
-                  Máy chủ đã tạo đơn hàng (HTTP <code className="font-mono">201 Created</code>) ở trạng thái{" "}
-                  <strong>{orderCallOutcome.order.status}</strong>.
+                  Máy chủ đã khởi tạo đơn hàng và giữ chỗ tồn kho ở trạng thái{" "}
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-bold">
+                    {orderCallOutcome.order.status}
+                  </span>
                 </p>
               </div>
+
+              {/* Thông tin định danh & thời gian từ Order Response */}
               <div className="bg-surface-container-low p-3 rounded-lg text-[12px] space-y-1.5 border border-outline-variant/40">
                 <div className="flex justify-between gap-2">
-                  <span className="text-on-surface-variant">Mã đơn:</span>
-                  <span className="font-mono font-bold text-on-surface truncate">
+                  <span className="text-on-surface-variant whitespace-nowrap">
+                    Mã đơn hàng:
+                  </span>
+                  <span
+                    id="createdOrderIdText"
+                    className="font-mono font-bold text-on-surface truncate"
+                  >
                     {orderCallOutcome.order.id}
                   </span>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-on-surface-variant">Tổng tiền Server:</span>
-                  <span className="font-bold text-primary">
-                    {formatVnd(orderCallOutcome.order.totalVnd)}
+                  <span className="text-on-surface-variant whitespace-nowrap">
+                    Thời gian tạo:
+                  </span>
+                  <span className="text-on-surface font-medium text-right">
+                    {new Date(
+                      orderCallOutcome.order.createdAt
+                    ).toLocaleString("vi-VN")}
                   </span>
                 </div>
               </div>
+
+              {/* Danh sách món snapshot chuẩn từ Server */}
+              <div className="bg-surface-container-low p-3 rounded-lg text-[12px] space-y-2 border border-outline-variant/40">
+                <div className="font-semibold text-on-surface border-b border-surface-container-high pb-1">
+                  Chi tiết đơn hàng đã ghi nhận ({orderCallOutcome.order.items.length}{" "}
+                  dòng)
+                </div>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {orderCallOutcome.order.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex justify-between items-start gap-2 text-[11px]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-on-surface truncate">
+                          {item.quantity}x {item.productName} (
+                          {item.size === "ONE_SIZE"
+                            ? "Tiêu chuẩn"
+                            : `Size ${item.size}`}
+                          )
+                        </div>
+                        {item.toppings.length > 0 && (
+                          <div className="text-on-surface-variant truncate">
+                            +{item.toppings.map((t) => t.name).join(", ")}
+                          </div>
+                        )}
+                      </div>
+                      <span className="font-semibold text-primary whitespace-nowrap">
+                        {formatVnd(item.lineTotalVnd)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t border-surface-container-high space-y-1">
+                  <div className="flex justify-between text-[11px] text-on-surface-variant">
+                    <span>Tạm tính máy chủ:</span>
+                    <span>{formatVnd(orderCallOutcome.order.subtotalVnd)}</span>
+                  </div>
+                  {orderCallOutcome.order.discountVnd > 0 && (
+                    <div className="flex justify-between text-[11px] text-tertiary font-medium">
+                      <span>
+                        Giảm giá
+                        {orderCallOutcome.order.couponCode
+                          ? ` (${orderCallOutcome.order.couponCode})`
+                          : ""}
+                        :
+                      </span>
+                      <span>
+                        -{formatVnd(orderCallOutcome.order.discountVnd)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-[13px] font-bold text-primary pt-0.5">
+                    <span>Tổng thanh toán:</span>
+                    <span id="createdOrderTotalText">
+                      {formatVnd(orderCallOutcome.order.totalVnd)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
-                Giao diện hiển thị chi tiết dữ liệu Order Response và luồng
-                loading/error đang được phát triển tiếp ở{" "}
-                <strong>SCRUM-44</strong>.
+                Giỏ hàng vẫn được bảo toàn nguyên vẹn trong suốt thời gian đơn
+                hàng ở trạng thái <strong>PENDING</strong> chờ thanh toán.
               </p>
-              <button
-                type="button"
-                onClick={() => setOrderCallOutcome(null)}
-                className="w-full py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-md hover:bg-primary-container transition-colors cursor-pointer"
-              >
-                Đã hiểu
-              </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOrderCallOutcome(null)}
+                  className="flex-1 py-2.5 px-3 rounded-lg border border-outline-variant text-on-surface font-label-md hover:bg-surface-container transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Đóng thông báo
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseDrawer}
+                  className="flex-1 py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-md hover:bg-primary-container transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Về thực đơn
+                </button>
+              </div>
             </div>
           </div>
         )}
 
+        {/* Modal hiển thị kết quả LỖI / TRẠNG THÁI KHÔNG CHẮC CHẮN khi gọi POST /orders */}
         {orderCallOutcome?.type === "error" && (
           <div
             id="orderErrorNoticeModal"
             role="alert"
+            aria-live="assertive"
             className="absolute inset-0 bg-on-surface/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
           >
-            <div className="bg-surface rounded-xl p-5 shadow-2xl max-w-sm w-full space-y-4 border border-error/30">
-              <div className="w-12 h-12 rounded-full bg-error/10 text-error flex items-center justify-center mx-auto">
+            <div
+              className={`bg-surface rounded-xl p-5 shadow-2xl max-w-sm w-full space-y-4 border ${
+                orderCallOutcome.isOutcomeUncertain
+                  ? "border-tertiary/40"
+                  : "border-error/30"
+              }`}
+            >
+              <div
+                className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto ${
+                  orderCallOutcome.isOutcomeUncertain
+                    ? "bg-tertiary/15 text-tertiary"
+                    : "bg-error/10 text-error"
+                }`}
+              >
                 <span className="material-symbols-outlined text-[26px]">
-                  error
+                  {orderCallOutcome.isOutcomeUncertain
+                    ? "sync_problem"
+                    : "error"}
                 </span>
               </div>
-              <div className="text-center space-y-1">
-                <h3 className="font-title-md text-title-md font-bold text-error">
-                  Tạo đơn hàng không thành công
-                </h3>
-                <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
-                  Đơn hàng <strong>chưa được tạo</strong>. Máy chủ trả về mã lỗi{" "}
-                  <code className="font-mono text-error font-semibold">
-                    {orderCallOutcome.code}
-                  </code>{" "}
-                  (HTTP {orderCallOutcome.statusCode}).
-                </p>
-              </div>
-              <div className="bg-error/5 p-3 rounded-lg text-[12px] text-error border border-error/20 leading-relaxed">
-                {orderCallOutcome.message}
-              </div>
-              <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
-                Phần xử lý giao diện loading/error chi tiết cho luồng Order đang
-                được phát triển ở <strong>SCRUM-44</strong>.
-              </p>
-              <button
-                type="button"
-                onClick={() => setOrderCallOutcome(null)}
-                className="w-full py-2.5 px-3 rounded-lg bg-error text-on-primary font-label-md hover:opacity-90 transition-opacity cursor-pointer"
-              >
-                Đóng thông báo
-              </button>
+
+              {orderCallOutcome.isOutcomeUncertain ? (
+                /* TRƯỜNG HỢP 1: TRẠNG THÁI ĐƠN HÀNG KHÔNG CHẮC CHẮN (Lỗi mạng / lỗi đọc response / 5xx sau khi đã gửi POST /orders) */
+                <>
+                  <div className="text-center space-y-1">
+                    <h3
+                      id="orderErrorModalTitle"
+                      className="font-title-md text-title-md font-bold text-tertiary"
+                    >
+                      Chưa thể xác nhận trạng thái đơn hàng
+                    </h3>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                      Yêu cầu đặt hàng đã được gửi đi nhưng phản hồi bị gián
+                      đoạn (mã{" "}
+                      <code className="font-mono font-semibold text-tertiary">
+                        {orderCallOutcome.code}
+                      </code>{" "}
+                      • HTTP {orderCallOutcome.statusCode}).{" "}
+                      <strong>
+                        Máy chủ có thể đã ghi nhận và tạo đơn hàng của bạn.
+                      </strong>
+                    </p>
+                  </div>
+
+                  <div className="bg-tertiary/10 p-3 rounded-lg text-[12px] text-on-surface border border-tertiary/30 leading-relaxed">
+                    {orderCallOutcome.message}
+                  </div>
+
+                  <div
+                    id="uncertainOrderWarningBox"
+                    className="p-2.5 rounded-lg bg-surface-container-high text-[11px] text-on-surface-variant leading-relaxed border border-outline-variant/40"
+                  >
+                    <strong className="text-on-surface">
+                      Lưu ý tránh tạo trùng đơn:
+                    </strong>{" "}
+                    Vì yêu cầu đã được gửi tới máy chủ, vui lòng kiểm tra lại
+                    trạng thái đơn hàng hiện tại trước khi thao tác đặt lại.
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setOrderCallOutcome(null)}
+                    className="w-full py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-md hover:bg-primary-container transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Đã hiểu, kiểm tra lại trước khi đặt tiếp
+                  </button>
+                </>
+              ) : (
+                /* TRƯỜNG HỢP 2: TỪ CHỐI XÁC ĐỊNH (400 Validation/Invalid Cart, 409 Insufficient Stock/Pending Order Exists) */
+                <>
+                  <div className="text-center space-y-1">
+                    <h3
+                      id="orderErrorModalTitle"
+                      className="font-title-md text-title-md font-bold text-error"
+                    >
+                      {orderCallOutcome.code === "PENDING_ORDER_EXISTS"
+                        ? "Đang có đơn hàng chờ xử lý"
+                        : "Không thể tạo đơn hàng"}
+                    </h3>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                      Yêu cầu bị từ chối với mã{" "}
+                      <code className="font-mono text-error font-semibold">
+                        {orderCallOutcome.code}
+                      </code>{" "}
+                      (HTTP {orderCallOutcome.statusCode}).
+                    </p>
+                  </div>
+
+                  <div className="bg-error/5 p-3 rounded-lg text-[12px] text-error border border-error/20 leading-relaxed space-y-1.5">
+                    <div>{orderCallOutcome.message}</div>
+                    {orderCallOutcome.detailLines.length > 0 && (
+                      <ul className="list-disc pl-4 space-y-1 text-[11px] text-on-surface">
+                        {orderCallOutcome.detailLines.map((line, idx) => (
+                          <li key={idx}>{line}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    {(orderCallOutcome.code === "INVALID_CART" ||
+                      orderCallOutcome.code === "INSUFFICIENT_STOCK") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderCallOutcome(null);
+                          setCheckoutStep("cart");
+                        }}
+                        className="flex-1 py-2.5 px-3 rounded-lg border border-outline-variant text-on-surface font-label-md hover:bg-surface-container transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Chỉnh sửa giỏ
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setOrderCallOutcome(null)}
+                      className="flex-1 py-2.5 px-3 rounded-lg bg-error text-on-primary font-label-md hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap"
+                    >
+                      Đóng thông báo
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

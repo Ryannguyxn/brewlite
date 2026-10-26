@@ -37,6 +37,8 @@ import {
 // 4. Chỉ coi HTTP 201 Created là thành công cho POST /orders (không chấp nhận mọi 2xx).
 // 5. Kiểm tra chặt chẽ toàn bộ trường bắt buộc trong CreateOrderResponseDto,
 //    không tự điền giá trị mặc định che giấu dữ liệu sai.
+// 6. Phân biệt rõ lỗi từ chối xác định trước khi tạo đơn (isOutcomeUncertain = false)
+//    và lỗi mạng / lỗi đọc response sau khi đã gửi request (isOutcomeUncertain = true).
 // ============================================================================
 
 export const MAX_ORDER_ITEMS = 20;
@@ -52,6 +54,13 @@ const VALID_DRINK_SIZES: readonly DrinkSize[] = [
 export interface OrderServiceError extends Error {
   statusCode: number;
   code: OrderErrorCode | string;
+  /**
+   * `true` khi request `POST /orders` đã được gửi đi nhưng gặp lỗi mạng, lỗi đọc/parse
+   * hoặc lỗi kiểm tra dữ liệu phản hồi / 5xx từ máy chủ — tức là Backend CÓ THỂ đã tạo
+   * đơn hàng thành công. UI phải hiển thị trạng thái không chắc chắn để tránh hướng
+   * người dùng bấm đặt lại ngay gây trùng đơn.
+   */
+  isOutcomeUncertain: boolean;
   details?: InvalidCartDetail[] | InsufficientStockDetail[] | unknown;
 }
 
@@ -59,15 +68,113 @@ function createOrderError(
   message: string,
   statusCode: number,
   code: OrderErrorCode | string,
-  details?: unknown
+  details?: unknown,
+  isOutcomeUncertain = false
 ): OrderServiceError {
   const err = new Error(message) as OrderServiceError;
   err.statusCode = statusCode;
   err.code = code;
+  err.isOutcomeUncertain = isOutcomeUncertain;
   if (details !== undefined) {
     err.details = details;
   }
   return err;
+}
+
+/**
+ * Chuyển đổi mảng `details` từ phản hồi lỗi Backend (400 INVALID_CART, 409 INSUFFICIENT_STOCK, v.v.)
+ * sang danh sách thông điệp tiếng Việt dễ hiểu cho người dùng ở màn hình Checkout.
+ */
+export function describeOrderErrorDetails(details: unknown): string[] {
+  if (!Array.isArray(details) || details.length === 0) {
+    return [];
+  }
+
+  const messages: string[] = [];
+
+  for (const rawItem of details) {
+    if (!rawItem || typeof rawItem !== "object") continue;
+    const item = rawItem as Record<string, unknown>;
+
+    // Trường hợp 409 INSUFFICIENT_STOCK
+    if (
+      typeof item.requestedQty === "number" &&
+      typeof item.availableQty === "number"
+    ) {
+      const name =
+        typeof item.name === "string" && item.name.trim()
+          ? item.name.trim()
+          : typeof item.itemId === "string"
+          ? item.itemId
+          : "Sản phẩm/Topping";
+      const itemTypeLabel = item.itemType === "TOPPING" ? "Topping" : "Món";
+      messages.push(
+        `${itemTypeLabel} "${name}" không đủ tồn kho (yêu cầu: ${item.requestedQty}, còn lại: ${item.availableQty}).`
+      );
+      continue;
+    }
+
+    // Trường hợp 400 INVALID_CART
+    if (typeof item.reason === "string") {
+      const linePrefix =
+        typeof item.itemIndex === "number"
+          ? `Dòng món #${item.itemIndex + 1}`
+          : "Món trong giỏ";
+      switch (item.reason) {
+        case "PRODUCT_NOT_FOUND":
+          messages.push(
+            `${linePrefix}: Sản phẩm không tồn tại trên hệ thống.`
+          );
+          break;
+        case "PRODUCT_INACTIVE":
+          messages.push(`${linePrefix}: Sản phẩm hiện đã ngừng kinh doanh.`);
+          break;
+        case "PRODUCT_OUT_OF_STOCK":
+          messages.push(`${linePrefix}: Sản phẩm hiện đã tạm hết hàng.`);
+          break;
+        case "INVALID_SIZE_FOR_CATEGORY":
+          messages.push(
+            `${linePrefix}: Kích cỡ đã chọn không áp dụng cho danh mục sản phẩm này.`
+          );
+          break;
+        case "TOPPING_NOT_ALLOWED_FOR_PRODUCT":
+          messages.push(
+            `${linePrefix}: Sản phẩm này không hỗ trợ thêm topping.`
+          );
+          break;
+        case "TOPPING_NOT_FOUND_OR_INACTIVE":
+          messages.push(
+            `${linePrefix}: Có topping không tồn tại hoặc đã ngừng phục vụ.`
+          );
+          break;
+        case "TOPPING_OUT_OF_STOCK":
+          messages.push(`${linePrefix}: Có topping hiện đã hết hàng.`);
+          break;
+        case "DUPLICATE_TOPPING":
+          messages.push(
+            `${linePrefix}: Không được chọn trùng một loại topping trong cùng 1 dòng món.`
+          );
+          break;
+        case "TOO_MANY_TOPPINGS":
+          messages.push(
+            `${linePrefix}: Vượt quá giới hạn tối đa ${MAX_TOPPINGS_PER_ITEM} loại topping cho 1 dòng món.`
+          );
+          break;
+        case "DUPLICATE_CONFIGURATION":
+          messages.push(
+            `${linePrefix}: Trùng cấu hình sản phẩm, kích cỡ và topping với một dòng khác.`
+          );
+          break;
+        default:
+          messages.push(
+            `${linePrefix}: Dữ liệu cấu hình không hợp lệ (${item.reason}).`
+          );
+          break;
+      }
+    }
+  }
+
+  return messages;
 }
 
 /**
@@ -354,15 +461,19 @@ export function validateCreateOrderPayload(raw: CreateOrderRequestDto): {
 /**
  * Kiểm tra chặt chẽ toàn bộ các trường bắt buộc trong `CreateOrderResponseDto` trả về từ máy chủ (HTTP 201 Created).
  * Tuyệt đối không tự điền giá trị mặc định che giấu dữ liệu sai hoặc thiếu từ Backend.
+ * Vì hàm này chỉ chạy sau khi request đã được gửi tới máy chủ, mọi lỗi phát sinh tại đây
+ * đều mang `isOutcomeUncertain = true` (đơn hàng có thể đã được tạo trên Backend).
  */
 export function validateOrderResponseData(
   data: unknown
 ): CreateOrderResponseDto {
   if (!data || typeof data !== "object") {
     throw createOrderError(
-      "Phản hồi đơn hàng từ máy chủ không hợp lệ.",
+      "Phản hồi đơn hàng từ máy chủ không hợp lệ hoặc không thể đọc dữ liệu.",
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
@@ -372,7 +483,9 @@ export function validateOrderResponseData(
     throw createOrderError(
       "Mã đơn hàng (id) trả về từ máy chủ không hợp lệ.",
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
@@ -380,7 +493,9 @@ export function validateOrderResponseData(
     throw createOrderError(
       "Trạng thái đơn hàng mới tạo (status) phải là PENDING theo hợp đồng API.",
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
@@ -388,7 +503,9 @@ export function validateOrderResponseData(
     throw createOrderError(
       "Danh sách món trong phản hồi đơn hàng (items) bị rỗng hoặc không hợp lệ.",
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
@@ -399,7 +516,9 @@ export function validateOrderResponseData(
     throw createOrderError(
       "Trường couponCode trong phản hồi đơn hàng không hợp lệ.",
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
@@ -417,7 +536,9 @@ export function validateOrderResponseData(
     throw createOrderError(
       "Dữ liệu tổng tiền (subtotalVnd, discountVnd, totalVnd) từ máy chủ không hợp lệ.",
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
@@ -429,7 +550,9 @@ export function validateOrderResponseData(
     throw createOrderError(
       "Thời gian tạo đơn (createdAt) từ máy chủ không đúng chuẩn ISO 8601.",
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
@@ -439,7 +562,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Dữ liệu dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -449,7 +574,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Thiếu hoặc sai định dạng id ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -460,7 +587,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Thiếu hoặc sai định dạng productId ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -471,7 +600,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Thiếu productName ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -482,7 +613,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Kích cỡ (size) ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -494,7 +627,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Hệ số kích cỡ (sizeMultiplierPercent) ở dòng món thứ ${idx + 1} không hợp lệ.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -506,7 +641,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Giá gốc (basePriceVnd) ở dòng món thứ ${idx + 1} không hợp lệ.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -519,7 +656,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Số lượng (quantity) ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -534,7 +673,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Đơn giá hoặc thành tiền ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không hợp lệ.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -542,7 +683,9 @@ export function validateOrderResponseData(
         throw createOrderError(
           `Danh sách toppings ở dòng món thứ ${idx + 1} trong phản hồi đơn hàng không phải mảng.`,
           500,
-          "SERVER_ERROR"
+          "SERVER_ERROR",
+          undefined,
+          true
         );
       }
 
@@ -552,7 +695,9 @@ export function validateOrderResponseData(
             throw createOrderError(
               `Topping thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
               500,
-              "SERVER_ERROR"
+              "SERVER_ERROR",
+              undefined,
+              true
             );
           }
 
@@ -561,7 +706,9 @@ export function validateOrderResponseData(
             throw createOrderError(
               `Mã topping (id) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
               500,
-              "SERVER_ERROR"
+              "SERVER_ERROR",
+              undefined,
+              true
             );
           }
 
@@ -569,7 +716,9 @@ export function validateOrderResponseData(
             throw createOrderError(
               `Tên topping (name) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
               500,
-              "SERVER_ERROR"
+              "SERVER_ERROR",
+              undefined,
+              true
             );
           }
 
@@ -581,7 +730,9 @@ export function validateOrderResponseData(
             throw createOrderError(
               `Giá topping (priceVnd) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} không hợp lệ.`,
               500,
-              "SERVER_ERROR"
+              "SERVER_ERROR",
+              undefined,
+              true
             );
           }
 
@@ -632,14 +783,16 @@ export async function createOrderApi(
   rawPayload: CreateOrderRequestDto,
   tokenOverride?: string | null
 ): Promise<CreateOrderResponseDto> {
-  // 1. Kiểm tra JWT token hợp lệ và chưa hết hạn trước khi gửi request
+  // 1. Kiểm tra JWT token hợp lệ và chưa hết hạn trước khi gửi request (chưa gửi request -> isOutcomeUncertain = false)
   const candidateToken = tokenOverride || getStoredToken();
   if (!candidateToken) {
     clearStoredSession();
     throw createOrderError(
       "Vui lòng đăng nhập để tiến hành đặt hàng.",
       401,
-      "UNAUTHORIZED"
+      "UNAUTHORIZED",
+      undefined,
+      false
     );
   }
 
@@ -650,11 +803,13 @@ export async function createOrderApi(
     throw createOrderError(
       "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.",
       401,
-      "UNAUTHORIZED"
+      "UNAUTHORIZED",
+      undefined,
+      false
     );
   }
 
-  // 2. Validate và chuẩn hóa payload nghiêm ngặt theo API Contract v2.1 Mục 8.2 & 9.3
+  // 2. Validate và chuẩn hóa payload nghiêm ngặt theo API Contract v2.1 Mục 8.2 & 9.3 (chưa gửi request -> isOutcomeUncertain = false)
   const validation = validateCreateOrderPayload(rawPayload);
   if (!validation.isValid || !validation.payload) {
     throw (
@@ -662,7 +817,9 @@ export async function createOrderApi(
       createOrderError(
         "Dữ liệu đơn hàng không hợp lệ.",
         400,
-        "VALIDATION_ERROR"
+        "VALIDATION_ERROR",
+        undefined,
+        false
       )
     );
   }
@@ -691,31 +848,48 @@ export async function createOrderApi(
   try {
     response = await fetch(endpoint, requestInit);
   } catch {
+    // Request đã được phát đi trên mạng: Backend có thể đã nhận và tạo Order thành công -> isOutcomeUncertain = true
     throw createOrderError(
-      "Không thể kết nối đến máy chủ Backend. Vui lòng kiểm tra lại kết nối trước khi thử lại.",
+      "Kết nối đến máy chủ bị gián đoạn sau khi gửi yêu cầu đặt hàng. Đơn hàng của bạn có thể đã được hệ thống ghi nhận — vui lòng kiểm tra lại trạng thái đơn hàng trước khi thử lại để tránh tạo trùng đơn.",
       503,
-      "NETWORK_ERROR"
+      "NETWORK_ERROR",
+      undefined,
+      true
     );
   }
 
   // 4. Chỉ coi HTTP 201 Created là thành công đúng hợp đồng API Contract v2.1 Mục 8.3
   if (response.status === 201) {
-    const rawData = await response.json().catch(() => null);
+    let rawData: unknown;
+    try {
+      rawData = await response.json();
+    } catch {
+      throw createOrderError(
+        "Máy chủ đã phản hồi HTTP 201 Created nhưng xảy ra lỗi khi đọc dữ liệu phản hồi. Đơn hàng có thể đã được tạo trên hệ thống — vui lòng không bấm đặt lại ngay.",
+        500,
+        "SERVER_ERROR",
+        undefined,
+        true
+      );
+    }
     return validateOrderResponseData(rawData);
   }
 
-  // Nếu máy chủ trả về một mã 2xx khác 201 (ví dụ 200 hoặc 204), coi là sai hợp đồng API
+  // Nếu máy chủ trả về một mã 2xx khác 201 (ví dụ 200 hoặc 204), coi là sai hợp đồng API nhưng trạng thái đơn là không chắc chắn (isOutcomeUncertain = true)
   if (response.status >= 200 && response.status < 300) {
     throw createOrderError(
-      `Phản hồi từ máy chủ không đúng hợp đồng POST /orders (nhận HTTP ${response.status}, yêu cầu HTTP 201 Created).`,
+      `Phản hồi từ máy chủ không đúng hợp đồng POST /orders (nhận HTTP ${response.status}, yêu cầu HTTP 201 Created). Đơn hàng có thể đã được xử lý trên máy chủ.`,
       500,
-      "SERVER_ERROR"
+      "SERVER_ERROR",
+      undefined,
+      true
     );
   }
 
   // 5. Xử lý các mã lỗi HTTP từ Backend (400, 401, 409, 5xx)
   const errorData = await response.json().catch(() => null);
   const is5xx = response.status >= 500 && response.status <= 599;
+  const isDeterministic4xx = response.status >= 400 && response.status < 500;
 
   if (response.status === 401 || errorData?.code === "UNAUTHORIZED") {
     // Token hết hạn hoặc user không còn tồn tại: xóa phiên Auth nhưng BẢO LƯU GIỎ HÀNG
@@ -724,7 +898,8 @@ export async function createOrderApi(
       "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.",
       401,
       "UNAUTHORIZED",
-      errorData?.details
+      errorData?.details,
+      false
     );
   }
 
@@ -744,13 +919,17 @@ export async function createOrderApi(
     : typeof errorData?.message === "string" && errorData.message.trim()
     ? errorData.message.trim()
     : is5xx
-    ? "Máy chủ đang gặp sự cố khi xử lý đơn hàng."
+    ? "Máy chủ gặp sự cố trong quá trình phản hồi yêu cầu đặt hàng. Trạng thái đơn hàng hiện chưa thể xác nhận chắc chắn."
     : `Không thể tạo đơn hàng (HTTP ${response.status}).`;
 
+  // Với các lỗi 4xx tường minh từ Backend (400 INVALID_CART / VALIDATION_ERROR / INVALID_COUPON, 409 INSUFFICIENT_STOCK / PENDING_ORDER_EXISTS / COUPON_UNAVAILABLE),
+  // Backend đã từ chối tạo đơn mới trước khi commit -> isOutcomeUncertain = false.
+  // Ngược lại, với 5xx hoặc lỗi không xác định sau khi đã gửi request -> isOutcomeUncertain = true.
   throw createOrderError(
     rawMessage,
     response.status,
     resolvedCode,
-    errorData?.details
+    errorData?.details,
+    !isDeterministic4xx
   );
 }

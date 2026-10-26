@@ -8,6 +8,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { calculateLoyaltyPoints } from '../promotions/promotion-policy.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import type { CreatePaymentDto } from './dto/create-payment.dto.js';
@@ -168,9 +169,9 @@ export class PaymentsService extends PaymentProcessor {
               throw new Error('Unsafe payment amount');
             const outcome = this.mock.evaluate(dto);
             const success = outcome.paymentStatus === 'SUCCESS';
-            const pointsEarned = success ? Number(order.totalVnd / 10000n) : 0;
-            if (pointsEarned > 2147483647)
-              throw new Error('Points exceed database range');
+            const pointsEarned = success
+              ? calculateLoyaltyPoints(order.totalVnd)
+              : 0;
             const paymentId = randomUUID();
             const response = {
               paymentId,

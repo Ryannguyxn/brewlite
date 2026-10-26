@@ -159,7 +159,7 @@ describe('Payments real database transactions', () => {
   }
   function pay(
     f: Fixture,
-    key = randomUUID(),
+    key: string = randomUUID(),
     details: object = { cardNumber: fullCard },
     method = 'CARD',
     extra: object = {},
@@ -458,10 +458,229 @@ describe('Payments real database transactions', () => {
     ).rejects.toMatchObject({ code: 'P2002' });
   });
 
+  describe('SCRUM-55 canonical requests and immutable receipts', () => {
+    it('replays reordered fields, uppercase UUIDs and ignored extras', async () => {
+      const f = await fixture({ coupon: true });
+      const key = randomUUID();
+      const first = await pay(f, key).expect(200);
+      const token = await jwt.signAsync({ sub: f.userId.toUpperCase() });
+      await request(app!.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${token}`)
+        .set('Idempotency-Key', key)
+        .send({
+          paymentDetails: { ignored: true, cardNumber: fullCard },
+          method: 'CARD',
+          orderId: f.orderId.toUpperCase(),
+          pointsEarned: 999,
+        })
+        .expect(200)
+        .expect('Idempotency-Replayed', 'true')
+        .expect(first.body);
+      expect(await count(f)).toBe(1);
+      expect(
+        (await prisma.user.findUniqueOrThrow({ where: { id: f.userId } }))
+          .loyaltyPoints,
+      ).toBe(9);
+    });
+    it('treats key casing as significant', async () => {
+      const f = await fixture();
+      const key = 'case-sensitive-key';
+      await pay(f, key, { cardNumber: '1234567890120002' }).expect(200);
+      await pay(f, key.toUpperCase(), { cardNumber: '1234567890120002' })
+        .expect(200)
+        .expect('Idempotency-Replayed', 'false');
+      expect(await count(f)).toBe(2);
+    });
+    it.each([8, 64])(
+      'accepts and replays a key of length %i',
+      async (length) => {
+        const f = await fixture();
+        const key = 'k'.repeat(length);
+        const first = await pay(f, key).expect(200);
+        await pay(f, key)
+          .expect(200)
+          .expect('Idempotency-Replayed', 'true')
+          .expect(first.body);
+        expect(await count(f)).toBe(1);
+      },
+    );
+    it('keeps FAILED receipt after a later attempt succeeds without repeating effects', async () => {
+      const f = await fixture({ coupon: true });
+      const key = randomUUID();
+      const details = { cardNumber: '1234567890120002' };
+      const failed = await pay(f, key, details).expect(200);
+      await pay(f).expect(200);
+      await pay(f, key, details)
+        .expect(200)
+        .expect('Idempotency-Replayed', 'true')
+        .expect(failed.body);
+      expect(await count(f)).toBe(2);
+      expect(
+        (await prisma.order.findUniqueOrThrow({ where: { id: f.orderId } }))
+          .status,
+      ).toBe('PAID');
+      expect(
+        (await prisma.user.findUniqueOrThrow({ where: { id: f.userId } }))
+          .loyaltyPoints,
+      ).toBe(9);
+      expect(
+        (
+          await prisma.couponRedemption.findUniqueOrThrow({
+            where: { orderId: f.orderId },
+          })
+        ).status,
+      ).toBe('CONSUMED');
+      expect(
+        (await prisma.coupon.findUniqueOrThrow({ where: { id: f.couponId! } }))
+          .activeUsageCount,
+      ).toBe(1);
+      expect(
+        (await prisma.product.findUniqueOrThrow({ where: { id: productId } }))
+          .stock,
+      ).toBe(8);
+    });
+    it('rejects reuse of a user key for another owned Order', async () => {
+      const f = await fixture();
+      const key = randomUUID();
+      await pay(f, key).expect(200);
+      const next = await prisma.order.create({
+        data: {
+          userId: f.userId,
+          subtotalVnd: 98000n,
+          totalVnd: 98000n,
+          expiresAt: new Date(Date.now() + 900000),
+        },
+      });
+      await pay({ ...f, orderId: next.id }, key)
+        .expect(409)
+        .expect((r) => expect(r.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT'));
+      expect(await prisma.payment.count({ where: { orderId: next.id } })).toBe(
+        0,
+      );
+    });
+    it('validates replay input and rejects a changed method', async () => {
+      const f = await fixture();
+      const key = randomUUID();
+      await pay(f, key, { cardNumber: '1234567890120002' }).expect(200);
+      await pay(f, key, { cardNumber: 'invalid' })
+        .expect(400)
+        .expect((r) => expect(r.body.code).toBe('VALIDATION_ERROR'));
+      await pay(f, key, { phoneNumber: '0912345678' }, 'WALLET')
+        .expect(409)
+        .expect((r) => expect(r.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT'));
+      expect(await count(f)).toBe(1);
+    });
+  });
+
   // Separate real-PostgreSQL connections are essential for lock/concurrency claims.
   describe.skipIf(process.env.PAYMENT_CONCURRENCY_TESTS !== '1')(
     'PostgreSQL concurrency (enable PAYMENT_CONCURRENCY_TESTS=1)',
     () => {
+      async function withHeldLock(
+        f: Fixture,
+        key: string,
+        orderLock: boolean,
+        check: () => Promise<void>,
+      ) {
+        let release!: () => void;
+        let ready!: () => void;
+        let rejectReady!: (error: unknown) => void;
+        let holderError: unknown;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const held = new Promise<void>((resolve, reject) => {
+          ready = resolve;
+          rejectReady = reject;
+        });
+        const holder = prisma
+          .$transaction(
+            async (tx) => {
+              if (orderLock)
+                await tx.$queryRaw`SELECT id FROM orders WHERE id = ${f.orderId}::uuid FOR UPDATE`;
+              else
+                await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([f.userId, key])}, 0))::text AS locked`;
+              ready();
+              await gate;
+            },
+            { timeout: 10000 },
+          )
+          .catch((error: unknown) => {
+            holderError = error;
+            rejectReady(error);
+          });
+        try {
+          await held;
+          await check();
+        } finally {
+          release();
+          await holder;
+        }
+        if (holderError) throw holderError;
+      }
+      it('replays a committed receipt and detects conflict while its advisory key is held', async () => {
+        const f = await fixture({ coupon: true });
+        const key = randomUUID();
+        const first = await pay(f, key).expect(200);
+        await withHeldLock(f, key, false, async () => {
+          await pay(f, key)
+            .expect(200)
+            .expect('Idempotency-Replayed', 'true')
+            .expect(first.body);
+          await pay(f, key, { cardNumber: '1234567890125678' })
+            .expect(409)
+            .expect((r) =>
+              expect(r.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT'),
+            );
+        });
+        expect(await count(f)).toBe(1);
+        expect(
+          (await prisma.user.findUniqueOrThrow({ where: { id: f.userId } }))
+            .loyaltyPoints,
+        ).toBe(9);
+      });
+      it('bounds Order lock waiting and permits retry after timeout rollback', async () => {
+        const f = await fixture();
+        const key = randomUUID();
+        await withHeldLock(f, key, true, async () => {
+          const start = Date.now();
+          await pay(f, key)
+            .expect(409)
+            .expect((r) => expect(r.body.code).toBe('PAYMENT_IN_PROGRESS'));
+          expect(Date.now() - start).toBeLessThan(6000);
+          expect(await count(f)).toBe(0);
+        });
+        await pay(f, key).expect(200).expect('Idempotency-Replayed', 'false');
+        expect(await count(f)).toBe(1);
+      });
+      it('parallel differing payloads cannot reuse the winning key', async () => {
+        const f = await fixture();
+        const key = randomUUID();
+        const cards = [fullCard, '1234567890125678'];
+        const results = await Promise.all(
+          cards.map((cardNumber) => pay(f, key, { cardNumber })),
+        );
+        expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([
+          200, 409,
+        ]);
+        const winner = results.findIndex((r) => r.status === 200);
+        const loser = 1 - winner;
+        expect(['PAYMENT_IN_PROGRESS', 'IDEMPOTENCY_KEY_CONFLICT']).toContain(
+          results[loser].body.code,
+        );
+        await pay(f, key, { cardNumber: cards[winner] })
+          .expect(200)
+          .expect(results[winner].body);
+        await pay(f, key, { cardNumber: cards[loser] })
+          .expect(409)
+          .expect((r) => expect(r.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT'));
+        expect(await count(f)).toBe(1);
+        expect(
+          (await prisma.user.findUniqueOrThrow({ where: { id: f.userId } }))
+            .loyaltyPoints,
+        ).toBe(9);
+      });
       it('same-key parallel requests create one attempt, busy requests replay on retry', async () => {
         const f = await fixture();
         const key = randomUUID();

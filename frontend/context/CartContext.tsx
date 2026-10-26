@@ -8,7 +8,12 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import type { DrinkSize } from "@/mock-data";
+import type {
+  CreateOrderItemDto,
+  CreateOrderRequestDto,
+  CreateOrderResponseDto,
+  DrinkSize,
+} from "@/mock-data";
 import {
   calculateLineTotalVnd,
   calculateSizePriceVnd,
@@ -18,9 +23,10 @@ import {
   MAX_TOPPINGS_PER_ITEM,
   MIN_ORDER_QUANTITY,
 } from "@/services/api.service";
+import { sanitizeCreateOrderPayload } from "@/services/order.service";
 
 // ============================================================================
-// ĐỊNH NGHĨA KIỂU DỮ LIỆU GIỎ HÀNG (API CONTRACT v2.1 & SPRINT 2)
+// ĐỊNH NGHĨA KIỂU DỮ LIỆU GIỎ HÀNG (API CONTRACT v2.1 / v3.0 & SPRINT 2)
 // ============================================================================
 
 export const MAX_CART_ITEMS = 20;
@@ -81,17 +87,8 @@ export interface AddToCartInput {
 }
 
 /** DTO chuyển sang Checkout / Create Order API (POST /orders) theo API Contract v2.1 Mục 8.2 */
-export interface CreateOrderItemDto {
-  productId: string;
-  size: DrinkSize;
-  toppingIds: string[];
-  quantity: number;
-}
-
-export interface CreateOrderDto {
-  items: CreateOrderItemDto[];
-  couponCode?: string;
-}
+export type { CreateOrderItemDto };
+export type CreateOrderDto = CreateOrderRequestDto;
 
 export interface CartContextValue {
   /** Danh sách các dòng món trong giỏ */
@@ -106,6 +103,14 @@ export interface CartContextValue {
   formattedSubtotal: string;
   /** Trạng thái mở/đóng Cart Drawer */
   isCartOpen: boolean;
+  /** Mã giảm giá đang nhập trong giỏ hàng / Checkout */
+  couponCode: string;
+  /** Cập nhật mã giảm giá */
+  setCouponCode: (code: string) => void;
+  /** Đơn hàng PENDING vừa được tạo thành công từ máy chủ (POST /orders) */
+  lastCreatedOrder: CreateOrderResponseDto | null;
+  /** Lưu hoặc xóa thông tin đơn hàng vừa tạo */
+  setLastCreatedOrder: (order: CreateOrderResponseDto | null) => void;
   /** Thông báo feedback ngắn hạn (Toast) */
   feedbackMessage: string | null;
   feedbackType: "success" | "warning" | "error" | null;
@@ -130,7 +135,7 @@ export interface CartContextValue {
   /** Tắt thông báo feedback */
   dismissFeedback: () => void;
   /** Chuyển đổi giỏ hàng sang payload chuẩn bị cho POST /orders */
-  mapToCreateOrderPayload: (couponCode?: string) => CreateOrderDto;
+  mapToCreateOrderPayload: (couponCodeOverride?: string) => CreateOrderDto;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -138,18 +143,53 @@ const CartContext = createContext<CartContextValue | null>(null);
 const VALID_SIZES: readonly DrinkSize[] = ["S", "M", "L", "ONE_SIZE"] as const;
 
 /**
- * Sinh chuỗi định danh duy nhất cho dòng sản phẩm dựa trên thuộc tính
- * (Nếu cùng productId, cùng size, cùng toppingIds và cùng note thì được xem là cùng 1 món)
+ * Sinh chuỗi định danh duy nhất cho dòng sản phẩm dựa trên cấu hình chuẩn:
+ * (productId, size, tập hợp toppingIds không phụ thuộc thứ tự).
+ * Tuân thủ AC-US-CART-01-02 & AC-US-CART-05-01: Hai lần thêm cùng productId,
+ * cùng size và cùng tập toppingIds luôn gộp thành 1 dòng để tránh lỗi
+ * "Duplicate item configuration in cart" từ Backend.
  */
-function generateCartItemKey(
+export function generateCartItemKey(
   productId: string,
   size: DrinkSize,
-  toppingIds: string[],
-  note?: string
+  toppingIds: string[]
 ): string {
-  const sortedToppingKey = [...toppingIds].sort().join(",");
-  const cleanNote = (note || "").trim().toLowerCase();
-  return `${productId}_${size}_[${sortedToppingKey}]_${cleanNote}`;
+  const normalizedProductId = productId.trim().toLowerCase();
+  const sortedToppingKey = [...toppingIds]
+    .map((id) => id.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  return `${normalizedProductId}_${size}_[${sortedToppingKey}]`;
+}
+
+/**
+ * Gộp các dòng món trùng cấu hình (productId, size, toppingIds) khi hydrate từ localStorage
+ */
+export function mergeDuplicateCartItems(items: CartItem[]): CartItem[] {
+  const mergedMap = new Map<string, CartItem>();
+
+  for (const item of items) {
+    const key = generateCartItemKey(item.productId, item.size, item.toppingIds);
+    const existing = mergedMap.get(key);
+
+    if (existing) {
+      const nextQty = Math.min(
+        MAX_ORDER_QUANTITY,
+        existing.quantity + item.quantity
+      );
+      mergedMap.set(key, {
+        ...existing,
+        quantity: nextQty,
+        lineTotalVnd: calculateLineTotalVnd(existing.unitPriceVnd, nextQty),
+        note: item.note || existing.note,
+      });
+    } else if (mergedMap.size < MAX_CART_ITEMS) {
+      mergedMap.set(key, item);
+    }
+  }
+
+  return Array.from(mergedMap.values());
 }
 
 /**
@@ -314,11 +354,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [isHydrated, setIsHydrated] = useState<boolean>(false);
+  const [couponCode, setCouponCodeState] = useState<string>("");
+  const [lastCreatedOrder, setLastCreatedOrder] =
+    useState<CreateOrderResponseDto | null>(null);
 
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState<
     "success" | "warning" | "error" | null
   >(null);
+
+  const setCouponCode = useCallback((code: string) => {
+    setCouponCodeState(code);
+  }, []);
 
   // Khôi phục giỏ hàng từ localStorage khi khởi động (SSR Safe + Chặt chẽ)
   useEffect(() => {
@@ -327,14 +374,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          const sanitizedItems = parsed
-            .map(validateAndSanitizeCartItem)
-            .filter((item): item is CartItem => item !== null)
-            .slice(0, MAX_CART_ITEMS);
+          const sanitizedItems = mergeDuplicateCartItems(
+            parsed
+              .map(validateAndSanitizeCartItem)
+              .filter((item): item is CartItem => item !== null)
+          ).slice(0, MAX_CART_ITEMS);
 
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setItems(sanitizedItems);
 
-          // Nếu có item sai cấu trúc đã bị loại bỏ, dọn sạch localStorage ngay
+          // Nếu có item sai cấu trúc hoặc trùng cấu hình đã được gộp, cập nhật lại localStorage
           if (sanitizedItems.length !== parsed.length) {
             localStorage.setItem(
               CART_STORAGE_KEY,
@@ -441,12 +490,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       // Nếu truyền toppingIds, mọi ID phải có trong rawToppings
       if (rawToppingIds && rawToppingIds.length > 0) {
-        const map = new Map(rawToppings.map((t) => [t.id, t]));
+        const map = new Map(rawToppings.map((t) => [t.id.trim(), t]));
         for (const tid of rawToppingIds) {
-          if (!map.has(tid)) {
+          if (!map.has(tid.trim())) {
             return {
               success: false,
-              message: "Danh sách topping không đồng bộ (thiếu dữ liệu chi tiết topping).",
+              message:
+                "Danh sách topping không đồng bộ (thiếu dữ liệu chi tiết topping).",
             };
           }
         }
@@ -456,7 +506,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const seenToppingIds = new Set<string>();
 
       const toppingsToProcess = rawToppingIds
-        ? rawToppingIds.map((id) => rawToppings.find((t) => t.id === id)!)
+        ? rawToppingIds.map(
+            (id) => rawToppings.find((t) => t.id.trim() === id.trim())!
+          )
         : rawToppings;
 
       for (const t of toppingsToProcess) {
@@ -477,16 +529,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           };
         }
 
-        if (seenToppingIds.has(t.id)) {
+        const cleanId = t.id.trim();
+        if (seenToppingIds.has(cleanId)) {
           return {
             success: false,
             message: "Không được chọn trùng lặp cùng một loại topping.",
           };
         }
 
-        seenToppingIds.add(t.id);
+        seenToppingIds.add(cleanId);
         normalizedToppings.push({
-          id: t.id.trim(),
+          id: cleanId,
           name: t.name.trim(),
           priceVnd: t.priceVnd,
         });
@@ -513,22 +566,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       const cleanNote = (input.note || "").trim().slice(0, 100);
 
-      // 4. [MUST FIX 2]: Tính toán trạng thái dựa trên items hiện tại ĐỒNG BỘ
+      // 4. [MUST FIX 2 & AC-US-CART-01-02]: Gộp dòng theo (productId, size, toppingIds)
       const itemKey = generateCartItemKey(
         input.productId,
         input.size,
-        uniqueToppingIds,
-        cleanNote
+        uniqueToppingIds
       );
 
       const existingIndex = items.findIndex(
         (item) =>
-          generateCartItemKey(
-            item.productId,
-            item.size,
-            item.toppingIds,
-            item.note
-          ) === itemKey
+          generateCartItemKey(item.productId, item.size, item.toppingIds) ===
+          itemKey
       );
 
       if (existingIndex >= 0) {
@@ -549,6 +597,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           ...current,
           quantity: newQty,
           lineTotalVnd: calculateLineTotalVnd(current.unitPriceVnd, newQty),
+          note: cleanNote || current.note,
         };
 
         setItems(updatedItems);
@@ -582,7 +631,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         quantity: requestedQty,
         unitPriceVnd,
         lineTotalVnd: calculateLineTotalVnd(unitPriceVnd, requestedQty),
-        note: cleanNote,
+        note: cleanNote || undefined,
         sizePolicy: input.sizePolicy,
       };
 
@@ -702,22 +751,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [showFeedback]);
 
   // Chuyển đổi giỏ hàng sang định dạng CreateOrderDto theo API Contract v2.1 Mục 8.2
+  // Tuyệt đối chỉ gửi { items: [{ productId, size, toppingIds, quantity }], couponCode? }
   const mapToCreateOrderPayload = useCallback(
-    (couponCode?: string): CreateOrderDto => {
-      const payloadItems: CreateOrderItemDto[] = items.map((item) => ({
+    (couponCodeOverride?: string): CreateOrderDto => {
+      const mergedItems = mergeDuplicateCartItems(items);
+      const rawItems: CreateOrderItemDto[] = mergedItems.map((item) => ({
         productId: item.productId,
         size: item.size,
         toppingIds: item.toppingIds,
         quantity: item.quantity,
       }));
 
-      const cleanCoupon = couponCode?.trim();
-      return {
-        items: payloadItems,
-        ...(cleanCoupon ? { couponCode: cleanCoupon } : {}),
-      };
+      const rawCoupon =
+        couponCodeOverride !== undefined ? couponCodeOverride : couponCode;
+
+      return sanitizeCreateOrderPayload({
+        items: rawItems,
+        ...(rawCoupon ? { couponCode: rawCoupon } : {}),
+      });
     },
-    [items]
+    [items, couponCode]
   );
 
   const value: CartContextValue = {
@@ -727,6 +780,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     subtotalVnd,
     formattedSubtotal,
     isCartOpen,
+    couponCode,
+    setCouponCode,
+    lastCreatedOrder,
+    setLastCreatedOrder,
     feedbackMessage,
     feedbackType,
     addToCart,

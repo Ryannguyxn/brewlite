@@ -9,12 +9,15 @@ import CartDrawer, {
 } from "@/components/CartDrawer";
 import { AuthContext, type AuthContextType } from "@/context/AuthContext";
 import {
+  ACTIVE_ORDER_STORAGE_KEY,
   buildCreateOrderPayloadFromCart,
   CartContext,
   type CartContextValue,
   type CartItem,
   generateCartItemKey,
   mergeDuplicateCartItems,
+  persistActiveOrderForUser,
+  restoreActiveOrderForUser,
   validateAndSanitizeCartItem,
 } from "@/context/CartContext";
 import type {
@@ -23,6 +26,7 @@ import type {
   OrderSubmissionErrorState,
 } from "@/mock-data";
 import {
+  clearStoredSession,
   getStoredToken,
   setStoredSession,
 } from "@/services/auth.service";
@@ -141,6 +145,7 @@ function createValidOrderResponse(): CreateOrderResponseDto {
 function renderCartDrawerMarkup(options: {
   items?: CartItem[];
   isAuthenticated?: boolean;
+  userId?: string;
   initialCheckoutStep?: "cart" | "review";
   initialIsSubmittingOrder?: boolean;
   initialOrderOutcome?: OrderCallOutcome | null;
@@ -149,7 +154,8 @@ function renderCartDrawerMarkup(options: {
 }): string {
   const items = options.items ?? createSampleCartItems();
   const isAuthenticated = options.isAuthenticated ?? true;
-  const mockToken = isAuthenticated ? createValidMockJwt() : null;
+  const userId = options.userId ?? "550e8400-e29b-41d4-a716-446655440000";
+  const mockToken = isAuthenticated ? createValidMockJwt(userId) : null;
 
   const cartValue: CartContextValue = {
     items,
@@ -185,7 +191,7 @@ function renderCartDrawerMarkup(options: {
   const authValue: AuthContextType = {
     user: isAuthenticated
       ? {
-          id: "550e8400-e29b-41d4-a716-446655440000",
+          id: userId,
           email: "khachhang@brewlite.vn",
           fullName: "Nguyễn Văn A",
         }
@@ -195,7 +201,7 @@ function renderCartDrawerMarkup(options: {
     isLoading: false,
     login: async () => {},
     register: async () => ({
-      id: "550e8400-e29b-41d4-a716-446655440000",
+      id: userId,
       email: "khachhang@brewlite.vn",
       fullName: "Nguyễn Văn A",
       createdAt: "2026-10-26T15:00:00.000Z",
@@ -461,13 +467,17 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
       });
     });
 
-    it("handles 401 UNAUTHORIZED from POST /orders by clearing session, preserving Cart, reverting to cart step, and triggering handleUnauthorizedCheckout", async () => {
-      const mockToken = createValidMockJwt();
+    it("handles 401 UNAUTHORIZED from POST /orders by clearing session and activeOrder snapshot, preserving Cart, reverting to cart step, and triggering handleUnauthorizedCheckout", async () => {
+      const userId = "550e8400-e29b-41d4-a716-446655440000";
+      const mockToken = createValidMockJwt(userId);
       setStoredSession(mockToken, {
-        id: "550e8400-e29b-41d4-a716-446655440000",
+        id: userId,
         email: "user@brewlite.vn",
         fullName: "Khách Hàng",
       });
+      persistActiveOrderForUser(createValidOrderResponse(), userId);
+      assert.ok(sessionStorageMock.getItem(ACTIVE_ORDER_STORAGE_KEY));
+
       localStorageMock.setItem(
         "brewlite_cart_v1",
         JSON.stringify(createSampleCartItems())
@@ -487,6 +497,7 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
       let stepAfter401: "cart" | "review" = "review";
       let unauthorizedReason: string | undefined;
       let isSubmitting = false;
+      let activeOrderAfter401 = createValidOrderResponse() as CreateOrderResponseDto | null;
       const submittingRef = { current: false };
       const cartItems = createSampleCartItems();
 
@@ -494,6 +505,7 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
         await executeCheckoutOrderSubmission({
           items: cartItems,
           accessToken: mockToken,
+          userId,
           submittingRef,
           isSubmittingOrder: isSubmitting,
           setIsSubmittingOrder: (val) => {
@@ -503,6 +515,9 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
             stepAfter401 = step;
           },
           setOrderCallOutcome: () => {},
+          setActiveOrder: (order) => {
+            activeOrderAfter401 = order;
+          },
           verifySession: () => true,
           handleUnauthorizedCheckout: (reason) => {
             unauthorizedReason = reason;
@@ -517,6 +532,16 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
             unauthorizedReason.includes("giỏ hàng của bạn được giữ nguyên")
         );
         assert.equal(getStoredToken(), null, "Expired token must be cleared");
+        assert.equal(
+          sessionStorageMock.getItem(ACTIVE_ORDER_STORAGE_KEY),
+          null,
+          "Active PENDING order snapshot in sessionStorage must be cleared on 401"
+        );
+        assert.equal(
+          activeOrderAfter401,
+          null,
+          "Active order state must be reset to null on 401"
+        );
         assert.equal(cartItems.length, 1, "In-memory cart items must remain intact");
         assert.ok(
           localStorageMock
@@ -746,6 +771,118 @@ describe("SCRUM-43 & SCRUM-44 Checkout Flow, Cart Integration & POST /orders Aut
       } finally {
         globalThis.fetch = savedFetch;
       }
+    });
+
+    it("scopes PENDING order snapshot to the authenticated ownerUserId, restores only for the same user, and purges snapshot on logout or when User B logs in on the same tab", () => {
+      const userAId = "550e8400-e29b-41d4-a716-446655440000";
+      const userBId = "660e8400-e29b-41d4-a716-446655440099";
+      const userAToken = createValidMockJwt(userAId);
+      const userBToken = createValidMockJwt(userBId);
+
+      const userAOrder: CreateOrderResponseDto = {
+        ...createValidOrderResponse(),
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        subtotalVnd: 118000,
+        discountVnd: 18000,
+        totalVnd: 100000,
+      };
+
+      setStoredSession(userAToken, {
+        id: userAId,
+        email: "usera@brewlite.vn",
+        fullName: "User A",
+      });
+      localStorageMock.setItem(
+        "brewlite_cart_v1",
+        JSON.stringify(createSampleCartItems())
+      );
+
+      // 1. Persist snapshot for User A -> restores when currentUserId === userAId
+      persistActiveOrderForUser(userAOrder, userAId);
+      const restoredForUserA = restoreActiveOrderForUser(userAId);
+      assert.ok(restoredForUserA);
+      assert.equal(restoredForUserA.id, userAOrder.id);
+
+      const userAHtml = renderCartDrawerMarkup({
+        isAuthenticated: true,
+        userId: userAId,
+        initialCheckoutStep: "cart",
+        activeOrder: restoredForUserA,
+      });
+      assert.ok(userAHtml.includes('id="activePendingOrderBanner"'));
+      assert.ok(userAHtml.includes(userAOrder.id));
+
+      // 2. If User B logs in on the same tab while User A's snapshot is still in sessionStorage:
+      // CartDrawer & restoreActiveOrderForUser(userBId) & setStoredSession must purge User A's snapshot
+      // and NEVER leak User A's order ID or totalVnd (100.000) to User B!
+      const userBHtmlWhileSessionHasUserA = renderCartDrawerMarkup({
+        isAuthenticated: true,
+        userId: userBId,
+        initialCheckoutStep: "cart",
+        activeOrder: userAOrder, // Even if stale activeOrder was passed, cross-check against sessionStorage ownerUserId blocks it
+      });
+      assert.equal(
+        userBHtmlWhileSessionHasUserA.includes('id="activePendingOrderBanner"'),
+        false,
+        "User B must NEVER see User A's activePendingOrderBanner"
+      );
+      assert.equal(
+        userBHtmlWhileSessionHasUserA.includes(userAOrder.id),
+        false,
+        "User B must NEVER see User A's order ID"
+      );
+      assert.equal(
+        sessionStorageMock.getItem(ACTIVE_ORDER_STORAGE_KEY),
+        null,
+        "Mismatched user snapshot must be immediately purged from sessionStorage"
+      );
+
+      // 3. Re-seed User A snapshot, then call setStoredSession for User B -> purges User A snapshot immediately
+      persistActiveOrderForUser(userAOrder, userAId);
+      assert.ok(sessionStorageMock.getItem(ACTIVE_ORDER_STORAGE_KEY));
+      setStoredSession(userBToken, {
+        id: userBId,
+        email: "userb@brewlite.vn",
+        fullName: "User B",
+      });
+      assert.equal(
+        sessionStorageMock.getItem(ACTIVE_ORDER_STORAGE_KEY),
+        null,
+        "setStoredSession for User B must purge User A's active order snapshot"
+      );
+      assert.equal(restoreActiveOrderForUser(userBId), null);
+
+      // 4. Re-seed User A snapshot, then User A logs out (clearStoredSession) -> purges active order snapshot while preserving Cart
+      persistActiveOrderForUser(userAOrder, userAId);
+      assert.ok(sessionStorageMock.getItem(ACTIVE_ORDER_STORAGE_KEY));
+      clearStoredSession();
+      assert.equal(
+        sessionStorageMock.getItem(ACTIVE_ORDER_STORAGE_KEY),
+        null,
+        "Logout (clearStoredSession) must remove active order snapshot from sessionStorage"
+      );
+      assert.ok(
+        localStorageMock
+          .getItem("brewlite_cart_v1")
+          ?.includes("550e8400-e29b-41d4-a716-446655440000"),
+        "Logout must preserve Cart in localStorage"
+      );
+
+      const guestHtmlAfterLogout = renderCartDrawerMarkup({
+        isAuthenticated: false,
+        initialCheckoutStep: "cart",
+        activeOrder: userAOrder,
+      });
+      assert.equal(
+        guestHtmlAfterLogout.includes('id="activePendingOrderBanner"'),
+        false,
+        "Logged-out guest must NEVER see activePendingOrderBanner"
+      );
+      assert.equal(
+        guestHtmlAfterLogout.includes(userAOrder.id),
+        false,
+        "Logged-out guest must NEVER see previous user's order ID"
+      );
     });
 
     it("rejects HTTP 200 OK (requires 201 Created) and rejects missing required fields or ERD arithmetic invariant violations in Order Response with isOutcomeUncertain=true", async () => {

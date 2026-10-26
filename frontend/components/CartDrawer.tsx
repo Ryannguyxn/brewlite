@@ -2,7 +2,15 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { type OpenAuthModalOptions, useAuth } from "@/context/AuthContext";
-import { type CartItem, useCart } from "@/context/CartContext";
+import {
+  ACTIVE_ORDER_STORAGE_KEY,
+  type CartItem,
+  clearStoredActiveOrder,
+  persistActiveOrderForUser,
+  resolveStoredAuthenticatedUserId,
+  restoreActiveOrderForUser,
+  useCart,
+} from "@/context/CartContext";
 import type {
   CreateOrderRequestDto,
   CreateOrderResponseDto,
@@ -58,6 +66,7 @@ export function proceedToCheckoutStep(deps: ProceedToCheckoutFlowDeps): boolean 
 
   const hasValidSession = deps.verifySession();
   if (!hasValidSession || !deps.isAuthenticated) {
+    clearStoredActiveOrder();
     deps.openAuthModal("login", {
       resumeCheckout: true,
       reasonMessage:
@@ -75,12 +84,16 @@ export function proceedToCheckoutStep(deps: ProceedToCheckoutFlowDeps): boolean 
 export interface ExecuteCheckoutSubmissionDeps {
   items: CartItem[];
   accessToken: string | null;
+  userId?: string | null;
   submittingRef: { current: boolean };
   isSubmittingOrder: boolean;
   setIsSubmittingOrder: (submitting: boolean) => void;
   setCheckoutStep: (step: CheckoutDrawerStep) => void;
   setOrderCallOutcome: (outcome: OrderCallOutcome | null) => void;
-  setActiveOrder?: (order: CreateOrderResponseDto | null) => void;
+  setActiveOrder?: (
+    order: CreateOrderResponseDto | null,
+    ownerUserIdOverride?: string | null
+  ) => void;
   setOrderError?: (error: OrderSubmissionErrorState | null) => void;
   verifySession: () => boolean;
   handleUnauthorizedCheckout: (reasonMessage?: string) => void;
@@ -96,8 +109,8 @@ export interface ExecuteCheckoutSubmissionDeps {
  * Điều phối gọi API `POST /orders` tại Bước 2 (Checkout) (SCRUM-43 & SCRUM-44):
  * - Chặn double-click / double-submit đồng thời bằng cả `submittingRef` và `isSubmittingOrder`.
  * - Bật trạng thái loading (`setIsSubmittingOrder(true)`) ngay khi bắt đầu gửi request và tắt trong `finally`.
- * - Xử lý 401 UNAUTHORIZED: quay về bước `"cart"`, xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login Modal.
- * - Xử lý 201 Created (`status: "PENDING"`): lưu `orderCallOutcome = { type: "success", order }`, đồng bộ `activeOrder` vào `CartContext` và giữ nguyên giỏ hàng.
+ * - Xử lý 401 UNAUTHORIZED: xóa snapshot đơn hàng PENDING (`clearStoredActiveOrder`), quay về bước `"cart"`, xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login Modal.
+ * - Xử lý 201 Created (`status: "PENDING"`): lưu `orderCallOutcome = { type: "success", order }`, đồng bộ `activeOrder` gắn với `ownerUserId` vào `CartContext`/`sessionStorage` và giữ nguyên giỏ hàng.
  * - Xử lý lỗi mạng / lỗi đọc response (`isOutcomeUncertain = true`) và lỗi 400/409 (`isOutcomeUncertain = false` kèm `detailLines`).
  */
 export async function executeCheckoutOrderSubmission(
@@ -114,6 +127,10 @@ export async function executeCheckoutOrderSubmission(
 
   const sessionOk = deps.verifySession();
   if (!sessionOk || !deps.accessToken) {
+    clearStoredActiveOrder();
+    deps.setActiveOrder?.(null);
+    deps.setOrderError?.(null);
+    deps.setOrderCallOutcome(null);
     deps.setCheckoutStep("cart");
     deps.handleUnauthorizedCheckout(
       "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục đặt hàng (giỏ hàng của bạn vẫn được giữ nguyên)."
@@ -166,7 +183,17 @@ export async function executeCheckoutOrderSubmission(
   try {
     const createdOrder = await callCreateOrder(payload, deps.accessToken);
     // TUYỆT ĐỐI KHÔNG xóa giỏ hàng khi đơn ở trạng thái PENDING (AC-US-CART-04-02, BR-07, API Contract v3.0)
-    deps.setActiveOrder?.(createdOrder);
+    const ownerUserId = (
+      deps.userId ||
+      resolveStoredAuthenticatedUserId(deps.accessToken) ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    if (ownerUserId) {
+      persistActiveOrderForUser(createdOrder, ownerUserId);
+    }
+    deps.setActiveOrder?.(createdOrder, ownerUserId || null);
     const successOutcome: OrderCallOutcome = {
       type: "success",
       order: createdOrder,
@@ -176,7 +203,11 @@ export async function executeCheckoutOrderSubmission(
   } catch (err: unknown) {
     const orderErr = err as Partial<OrderServiceError>;
     if (orderErr?.statusCode === 401 || orderErr?.code === "UNAUTHORIZED") {
-      // 401 UNAUTHORIZED: Xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login modal
+      // 401 UNAUTHORIZED: Xóa phiên hết hạn & xóa snapshot đơn hàng PENDING, giữ nguyên giỏ hàng và mở Login modal
+      clearStoredActiveOrder();
+      deps.setActiveOrder?.(null);
+      deps.setOrderError?.(null);
+      deps.setOrderCallOutcome(null);
       deps.setCheckoutStep("cart");
       deps.handleUnauthorizedCheckout(
         "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để tiếp tục đặt hàng (giỏ hàng của bạn được giữ nguyên)."
@@ -248,16 +279,39 @@ export default function CartDrawer({
     handleUnauthorizedCheckout,
   } = useAuth();
 
+  const currentAuthUserId: string | null =
+    isAuthenticated && user?.id ? user.id.trim().toLowerCase() : null;
+
   const [checkoutStep, setCheckoutStep] =
     useState<CheckoutDrawerStep>(initialCheckoutStep);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [localIsSubmittingOrder, setLocalIsSubmittingOrder] = useState(
     initialIsSubmittingOrder
   );
-  const [orderCallOutcome, setOrderCallOutcome] =
-    useState<OrderCallOutcome | null>(initialOrderOutcome);
+  const [outcomeRecord, setOutcomeRecord] = useState<{
+    ownerUserId: string | null;
+    outcome: OrderCallOutcome;
+  } | null>(
+    initialOrderOutcome
+      ? { ownerUserId: currentAuthUserId, outcome: initialOrderOutcome }
+      : null
+  );
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
   const submittingRef = useRef(initialIsSubmittingOrder);
+
+  const setOrderCallOutcome = (outcome: OrderCallOutcome | null) => {
+    if (!outcome) {
+      setOutcomeRecord(null);
+      return;
+    }
+    setOutcomeRecord({ ownerUserId: currentAuthUserId, outcome });
+  };
+
+  // Chỉ hiển thị modal kết quả nếu vẫn cùng phiên tài khoản đã tạo kết quả đó
+  const orderCallOutcome: OrderCallOutcome | null =
+    outcomeRecord && outcomeRecord.ownerUserId === currentAuthUserId
+      ? outcomeRecord.outcome
+      : null;
 
   const isSubmittingOrder =
     localIsSubmittingOrder || Boolean(contextIsSubmittingOrder);
@@ -267,11 +321,30 @@ export default function CartDrawer({
     setContextIsSubmittingOrder?.(submitting);
   };
 
-  // Đơn hàng PENDING đang hoạt động (từ kết quả vừa tạo hoặc đã lưu trong CartContext)
-  const displayedActiveOrder: CreateOrderResponseDto | null =
-    orderCallOutcome?.type === "success"
-      ? orderCallOutcome.order
-      : contextActiveOrder ?? null;
+  // Đơn hàng PENDING đang hoạt động: chỉ hiển thị khi đã đăng nhập VÀ thuộc đúng tài khoản hiện tại
+  const displayedActiveOrder = useMemo<CreateOrderResponseDto | null>(() => {
+    if (!currentAuthUserId) {
+      return null;
+    }
+
+    if (orderCallOutcome?.type === "success") {
+      return orderCallOutcome.order;
+    }
+
+    // Kiểm tra chéo với sessionStorage nếu có bản ghi lưu trữ để đảm bảo đúng ownerUserId
+    try {
+      if (
+        typeof sessionStorage !== "undefined" &&
+        sessionStorage.getItem(ACTIVE_ORDER_STORAGE_KEY) !== null
+      ) {
+        return restoreActiveOrderForUser(currentAuthUserId);
+      }
+    } catch {
+      return null;
+    }
+
+    return contextActiveOrder ?? null;
+  }, [contextActiveOrder, currentAuthUserId, orderCallOutcome]);
 
   // Tính toán bước hiển thị thực tế mà không cần gọi setState đồng bộ trong useEffect
   const activeStep: CheckoutDrawerStep = useMemo(
@@ -398,6 +471,7 @@ export default function CartDrawer({
     await executeCheckoutOrderSubmission({
       items,
       accessToken,
+      userId: currentAuthUserId,
       submittingRef,
       isSubmittingOrder,
       setIsSubmittingOrder: setSyncedIsSubmittingOrder,
@@ -592,7 +666,7 @@ export default function CartDrawer({
           className="flex-1 overflow-y-auto px-space-lg py-space-sm space-y-3.5"
           id="cartContentContainer"
         >
-          {/* Thẻ tóm tắt đơn hàng PENDING đã ghi nhận trong phiên (SCRUM-44) */}
+          {/* Thẻ tóm tắt đơn hàng PENDING đã ghi nhận của đúng tài khoản hiện tại (SCRUM-44) */}
           {displayedActiveOrder && (
             <div
               id="activePendingOrderBanner"
@@ -1256,8 +1330,8 @@ export default function CartDrawer({
           </div>
         )}
 
-        {/* Modal hiển thị kết quả tạo đơn THÀNH CÔNG (HTTP 201 Created — SCRUM-44) */}
-        {orderCallOutcome?.type === "success" && (
+        {/* Modal hiển thị kết quả tạo đơn THÀNH CÔNG (HTTP 201 Created — SCRUM-44, chỉ hiển thị khi user đang đăng nhập) */}
+        {orderCallOutcome?.type === "success" && Boolean(currentAuthUserId) && (
           <div
             id="orderSuccessNoticeModal"
             role="status"

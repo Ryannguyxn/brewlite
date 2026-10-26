@@ -7,8 +7,6 @@ import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 import { getDisplayCustomerName } from "@/services/auth.service";
 import {
   createOrderApi,
-  normalizeCouponCode,
-  validateCouponCodeInput,
   type OrderServiceError,
 } from "@/services/order.service";
 
@@ -26,8 +24,6 @@ export default function CartDrawer() {
     incrementQuantity,
     decrementQuantity,
     removeFromCart,
-    couponCode,
-    setCouponCode,
     feedbackMessage,
     feedbackType,
     dismissFeedback,
@@ -48,7 +44,7 @@ export default function CartDrawer() {
   const [checkoutStep, setCheckoutStep] = useState<CheckoutDrawerStep>("cart");
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [scrum44NoticeOpen, setScrum44NoticeOpen] = useState(false);
-  const [couponInputError, setCouponInputError] = useState<string | null>(null);
+  const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
   const submittingRef = useRef(false);
 
   // Tính toán bước hiển thị thực tế mà không cần gọi setState đồng bộ trong useEffect
@@ -60,6 +56,7 @@ export default function CartDrawer() {
   const handleCloseDrawer = () => {
     setConfirmClearOpen(false);
     setScrum44NoticeOpen(false);
+    setVoucherNoticeVisible(false);
     closeCart();
   };
 
@@ -81,6 +78,7 @@ export default function CartDrawer() {
       if (e.key === "Escape" && isCartOpen) {
         setConfirmClearOpen(false);
         setScrum44NoticeOpen(false);
+        setVoucherNoticeVisible(false);
         closeCart();
       }
     };
@@ -98,6 +96,16 @@ export default function CartDrawer() {
     }
   }, [feedbackMessage, dismissFeedback]);
 
+  // Tự động ẩn thông báo Voucher sau 4s
+  useEffect(() => {
+    if (voucherNoticeVisible) {
+      const timer = setTimeout(() => {
+        setVoucherNoticeVisible(false);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [voucherNoticeVisible]);
+
   // Tự động chuyển sang bước Checkout ("review") ngay sau khi khách đăng nhập thành công từ luồng Checkout
   // Tuân thủ AC-US-CART-04-02 & UC-CART-001 AF-06: Giỏ hàng được bảo toàn nguyên vẹn qua bước Login
   useEffect(() => {
@@ -105,7 +113,7 @@ export default function CartDrawer() {
       const timer = setTimeout(() => {
         setPendingCheckout(false);
         if (items.length > 0) {
-          setCouponInputError(null);
+          setVoucherNoticeVisible(false);
           setCheckoutStep("review");
           openCart();
         }
@@ -121,27 +129,19 @@ export default function CartDrawer() {
   ]);
 
   /**
+   * Khi người dùng bấm vào ô nhập Voucher hoặc nút Áp dụng:
+   * Không cho nhận ký tự và hiển thị thông báo chức năng sẽ phát triển sau
+   */
+  const handleVoucherAttempt = () => {
+    setVoucherNoticeVisible(true);
+  };
+
+  /**
    * Bước 1 -> Bước 2: Khách nhấn "Tiến hành đặt hàng" từ Giỏ hàng
-   * Kiểm tra giỏ hàng -> Kiểm tra định dạng coupon -> Kiểm tra trạng thái đăng nhập (JWT)
+   * Kiểm tra giỏ hàng -> Kiểm tra trạng thái đăng nhập (JWT)
    */
   const handleProceedToCheckout = () => {
     if (items.length === 0) return;
-
-    const couponValidation = validateCouponCodeInput(couponCode);
-    if (!couponValidation.isValid) {
-      setCouponInputError(
-        couponValidation.error || "Mã giảm giá không hợp lệ."
-      );
-      return;
-    }
-    setCouponInputError(null);
-
-    const normalizedCoupon = normalizeCouponCode(couponCode);
-    if (normalizedCoupon !== couponCode.trim()) {
-      setCouponCode(normalizedCoupon || "");
-    } else if (couponCode && !normalizedCoupon) {
-      setCouponCode("");
-    }
 
     // Kiểm tra trạng thái xác thực & hạn dùng JWT
     const hasValidSession = verifySession();
@@ -155,6 +155,7 @@ export default function CartDrawer() {
       return;
     }
 
+    setVoucherNoticeVisible(false);
     setCheckoutStep("review");
   };
 
@@ -169,15 +170,6 @@ export default function CartDrawer() {
       return;
     }
 
-    const couponValidation = validateCouponCodeInput(couponCode);
-    if (!couponValidation.isValid) {
-      setCouponInputError(
-        couponValidation.error || "Mã giảm giá không hợp lệ."
-      );
-      return;
-    }
-    setCouponInputError(null);
-
     // Kiểm tra lại phiên đăng nhập trước khi gọi API
     const sessionOk = verifySession();
     if (!sessionOk || !accessToken) {
@@ -188,7 +180,7 @@ export default function CartDrawer() {
       return;
     }
 
-    const payload = mapToCreateOrderPayload(couponCode);
+    const payload = mapToCreateOrderPayload();
     submittingRef.current = true;
 
     try {
@@ -211,18 +203,6 @@ export default function CartDrawer() {
     } finally {
       submittingRef.current = false;
     }
-  };
-
-  const handleCouponChange = (value: string) => {
-    setCouponCode(value);
-    if (couponInputError) {
-      setCouponInputError(null);
-    }
-  };
-
-  const handleCouponBlur = () => {
-    const normalized = normalizeCouponCode(couponCode);
-    setCouponCode(normalized || "");
   };
 
   return (
@@ -253,13 +233,16 @@ export default function CartDrawer() {
         {/* HEADER GIỎ HÀNG / CHECKOUT */}
         {/* ================================================================== */}
         <div className="p-space-lg bg-surface-container-lowest flex-shrink-0 shadow-[0_1px_4px_rgba(0,0,0,0.03)] z-10">
-          <div className="flex items-center justify-between pb-3 mb-2 border-b border-surface-container-high">
+          <div className="flex items-center justify-between pb-3 mb-2.5 border-b border-surface-container-high gap-2">
             {activeStep === "review" ? (
               <button
                 id="btnBackToCartStep"
                 type="button"
-                onClick={() => setCheckoutStep("cart")}
-                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer"
+                onClick={() => {
+                  setVoucherNoticeVisible(false);
+                  setCheckoutStep("cart");
+                }}
+                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer whitespace-nowrap"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   arrow_back
@@ -270,7 +253,7 @@ export default function CartDrawer() {
               <button
                 type="button"
                 onClick={handleCloseDrawer}
-                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer"
+                className="flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-label-md text-label-md cursor-pointer whitespace-nowrap"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   arrow_back
@@ -279,12 +262,12 @@ export default function CartDrawer() {
               </button>
             )}
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               {activeStep === "cart" && items.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setConfirmClearOpen(true)}
-                  className="text-outline hover:text-error transition-colors font-label-md text-label-md px-2 py-1 rounded hover:bg-surface-container-high cursor-pointer"
+                  className="text-outline hover:text-error transition-colors font-label-md text-label-md px-2 py-1 rounded hover:bg-surface-container-high cursor-pointer whitespace-nowrap"
                   title="Xóa toàn bộ giỏ hàng"
                 >
                   Xóa tất cả
@@ -293,7 +276,7 @@ export default function CartDrawer() {
               <button
                 type="button"
                 onClick={handleCloseDrawer}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-surface-container-high hover:bg-surface-container text-on-surface transition-colors cursor-pointer"
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-surface-container-high hover:bg-surface-container text-on-surface transition-colors cursor-pointer flex-shrink-0"
                 aria-label="Đóng giỏ hàng"
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -303,45 +286,45 @@ export default function CartDrawer() {
             </div>
           </div>
 
-          {/* Tiêu đề theo từng bước của Checkout Flow (SCRUM-43) */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary text-[24px]">
+          {/* Tiêu đề theo từng bước của Checkout Flow (SCRUM-43) — không bị xuống dòng */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="material-symbols-outlined text-primary text-[22px] flex-shrink-0">
                 {activeStep === "review" ? "fact_check" : "shopping_cart"}
               </span>
-              <h2 className="font-title-md text-title-md text-on-surface font-bold tracking-tight">
+              <h2 className="font-title-md text-title-md text-on-surface font-bold tracking-tight whitespace-nowrap">
                 {activeStep === "review"
                   ? "Xác nhận Đặt hàng"
                   : "Giỏ hàng của bạn"}
               </h2>
               <span
                 id="cartCountBadge"
-                className="px-2 py-0.5 rounded-full bg-surface-container text-primary font-label-md text-label-md font-semibold"
+                className="px-2 py-0.5 rounded-full bg-surface-container text-primary font-label-md text-[12px] font-semibold whitespace-nowrap flex-shrink-0"
               >
                 ({totalQuantity} món)
               </span>
             </div>
 
-            {/* Step Indicator SCRUM-43 */}
-            <div className="flex items-center gap-1 text-[11px] font-label-md text-on-surface-variant">
+            {/* Step Indicator gọn gàng, không xuống dòng */}
+            <div className="flex items-center gap-1 text-[11px] font-label-md text-on-surface-variant whitespace-nowrap flex-shrink-0">
               <span
-                className={`px-2 py-0.5 rounded-full ${
+                className={`px-2 py-0.5 rounded-full whitespace-nowrap ${
                   activeStep === "cart"
                     ? "bg-primary text-on-primary font-semibold"
                     : "bg-surface-container"
                 }`}
               >
-                1. Giỏ hàng
+                1. Giỏ
               </span>
               <span>→</span>
               <span
-                className={`px-2 py-0.5 rounded-full ${
+                className={`px-2 py-0.5 rounded-full whitespace-nowrap ${
                   activeStep === "review"
                     ? "bg-primary text-on-primary font-semibold"
                     : "bg-surface-container"
                 }`}
               >
-                2. Checkout
+                2. Đặt hàng
               </span>
             </div>
           </div>
@@ -568,11 +551,11 @@ export default function CartDrawer() {
                 id="checkoutCustomerCard"
                 className="p-3.5 rounded-xl bg-surface border border-outline-variant/40 shadow-sm space-y-1.5"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-label-md uppercase tracking-wider text-outline font-semibold">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-label-md uppercase tracking-wider text-outline font-semibold whitespace-nowrap">
                     Tài khoản đặt hàng
                   </span>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-medium">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-medium whitespace-nowrap">
                     <span className="material-symbols-outlined text-[13px]">
                       verified_user
                     </span>
@@ -594,14 +577,17 @@ export default function CartDrawer() {
                 id="checkoutItemsSummary"
                 className="p-3.5 rounded-xl bg-surface border border-outline-variant/40 shadow-sm space-y-3"
               >
-                <div className="flex items-center justify-between pb-2 border-b border-surface-container-high">
-                  <span className="font-title-sm text-title-sm text-on-surface font-bold">
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-surface-container-high">
+                  <span className="font-title-sm text-title-sm text-on-surface font-bold whitespace-nowrap">
                     Chi tiết món ({items.length} dòng • {totalQuantity} ly)
                   </span>
                   <button
                     type="button"
-                    onClick={() => setCheckoutStep("cart")}
-                    className="text-[12px] font-label-md text-primary hover:underline cursor-pointer"
+                    onClick={() => {
+                      setVoucherNoticeVisible(false);
+                      setCheckoutStep("cart");
+                    }}
+                    className="text-[12px] font-label-md text-primary hover:underline cursor-pointer whitespace-nowrap"
                   >
                     Chỉnh sửa giỏ
                   </button>
@@ -645,13 +631,13 @@ export default function CartDrawer() {
                 </div>
               </div>
 
-              {/* Ô nhập / chỉnh sửa Mã giảm giá ở bước Checkout */}
+              {/* Ô Mã ưu đãi / Voucher ở bước Checkout — Không cho nhận và thông báo phát triển sau */}
               <div className="p-3.5 rounded-xl bg-surface border border-outline-variant/40 shadow-sm space-y-2">
                 <label
                   htmlFor="checkoutCouponInput"
                   className="block font-label-md text-[12px] text-on-surface font-semibold"
                 >
-                  Mã ưu đãi / Coupon (Tùy chọn)
+                  Mã ưu đãi / Voucher
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -661,36 +647,40 @@ export default function CartDrawer() {
                     <input
                       id="checkoutCouponInput"
                       type="text"
-                      maxLength={30}
-                      value={couponCode}
-                      onChange={(e) => handleCouponChange(e.target.value)}
-                      onBlur={handleCouponBlur}
-                      placeholder="Nhập mã giảm giá (VD: WELCOME10)"
-                      className="w-full pl-9 pr-8 py-2 bg-surface-container-low rounded-lg font-body-md text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary uppercase text-[13px]"
+                      readOnly
+                      value=""
+                      onClick={handleVoucherAttempt}
+                      onFocus={handleVoucherAttempt}
+                      onKeyDown={(e) => {
+                        e.preventDefault();
+                        handleVoucherAttempt();
+                      }}
+                      placeholder="Nhập mã ưu đãi (Sắp ra mắt)"
+                      className="w-full pl-9 pr-3 py-2 bg-surface-container-low rounded-lg font-body-md text-on-surface-variant placeholder:text-outline focus:outline-none cursor-not-allowed text-[13px]"
                     />
-                    {couponCode && (
-                      <button
-                        type="button"
-                        onClick={() => handleCouponChange("")}
-                        aria-label="Xóa mã giảm giá"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface p-0.5 cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">
-                          close
-                        </span>
-                      </button>
-                    )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleVoucherAttempt}
+                    className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                  >
+                    Áp dụng
+                  </button>
                 </div>
-                {couponInputError && (
-                  <p className="text-[11px] text-error font-medium">
-                    {couponInputError}
-                  </p>
+                {voucherNoticeVisible && (
+                  <div
+                    id="checkoutVoucherDevNotice"
+                    className="p-2 rounded-lg bg-tertiary/10 border border-tertiary/30 text-tertiary text-[11px] font-medium flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[15px] flex-shrink-0">
+                      info
+                    </span>
+                    <span>
+                      Chức năng nhập mã ưu đãi / Voucher hiện chưa hỗ trợ và sẽ
+                      được phát triển ở giai đoạn sau.
+                    </span>
+                  </div>
                 )}
-                <p className="text-[11px] text-on-surface-variant leading-tight">
-                  Mã giảm giá (nếu có) sẽ được máy chủ kiểm tra hiệu lực, lượt
-                  dùng và tính mức giảm trực tiếp khi tạo đơn hàng.
-                </p>
               </div>
 
               {/* Lưu ý quy tắc nghiệp vụ giữ chỗ tồn kho & bảo toàn giỏ hàng */}
@@ -720,7 +710,7 @@ export default function CartDrawer() {
         {/* ================================================================== */}
         {activeStep === "cart" && items.length > 0 && (
           <div className="p-space-lg bg-surface-container-lowest flex-shrink-0 border-t border-surface-container-high shadow-[0_-4px_16px_rgba(44,32,24,0.04)] z-10 space-y-3">
-            {/* Ô nhập Mã giảm giá (Coupon Code Input) chuẩn Stitch Cart Drawer */}
+            {/* Ô Mã ưu đãi / Voucher — Không cho nhận ký tự và thông báo phát triển sau */}
             <div>
               <div className="flex gap-2">
                 <div className="relative flex-1">
@@ -730,34 +720,40 @@ export default function CartDrawer() {
                   <input
                     id="couponCodeInput"
                     type="text"
-                    maxLength={30}
-                    value={couponCode}
-                    onChange={(e) => handleCouponChange(e.target.value)}
-                    onBlur={handleCouponBlur}
-                    placeholder="Nhập mã ưu đãi (VD: WELCOME10)"
-                    className="w-full pl-9 pr-8 py-2 bg-surface-container-low rounded-lg font-body-md text-[13px] text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary uppercase transition-all"
+                    readOnly
+                    value=""
+                    onClick={handleVoucherAttempt}
+                    onFocus={handleVoucherAttempt}
+                    onKeyDown={(e) => {
+                      e.preventDefault();
+                      handleVoucherAttempt();
+                    }}
+                    placeholder="Nhập mã ưu đãi (Sắp ra mắt)"
+                    className="w-full pl-9 pr-3 py-2 bg-surface-container-low rounded-lg font-body-md text-[13px] text-on-surface-variant placeholder:text-outline focus:outline-none cursor-not-allowed transition-all"
                   />
-                  {couponCode && (
-                    <button
-                      type="button"
-                      onClick={() => handleCouponChange("")}
-                      aria-label="Xóa mã ưu đãi"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface p-0.5 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[15px]">
-                        close
-                      </span>
-                    </button>
-                  )}
                 </div>
-              </div>
-              {couponInputError && (
-                <p
-                  id="couponInputErrorMsg"
-                  className="text-[11px] text-error mt-1 font-medium"
+                <button
+                  id="btnApplyVoucher"
+                  type="button"
+                  onClick={handleVoucherAttempt}
+                  className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container text-on-surface-variant font-label-md text-[12px] font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer"
                 >
-                  {couponInputError}
-                </p>
+                  Áp dụng
+                </button>
+              </div>
+              {voucherNoticeVisible && (
+                <div
+                  id="cartVoucherDevNotice"
+                  className="mt-1.5 p-2 rounded-lg bg-tertiary/10 border border-tertiary/30 text-tertiary text-[11px] font-medium flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[15px] flex-shrink-0">
+                    info
+                  </span>
+                  <span>
+                    Chức năng nhập mã ưu đãi / Voucher hiện chưa hỗ trợ và sẽ
+                    được phát triển ở giai đoạn sau.
+                  </span>
+                </div>
               )}
             </div>
 
@@ -830,15 +826,15 @@ export default function CartDrawer() {
               id="btnCheckoutAction"
               type="button"
               onClick={handleProceedToCheckout}
-              className="w-full py-3.5 px-space-md bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-between group active:scale-[0.99] cursor-pointer"
+              className="w-full py-3.5 px-space-md bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-between group active:scale-[0.99] cursor-pointer whitespace-nowrap"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 whitespace-nowrap">
                 <span className="material-symbols-outlined text-[20px]">
                   shopping_bag_speed
                 </span>
                 <span>Tiến hành đặt hàng</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 whitespace-nowrap">
                 <span className="font-bold text-price-lg whitespace-nowrap">
                   {formattedSubtotal}
                 </span>
@@ -854,26 +850,22 @@ export default function CartDrawer() {
         {activeStep === "review" && items.length > 0 && (
           <div className="p-space-lg bg-surface-container-lowest flex-shrink-0 border-t border-surface-container-high shadow-[0_-4px_16px_rgba(44,32,24,0.04)] z-10 space-y-3">
             <div className="flex justify-between items-baseline gap-3">
-              <div>
-                <span className="font-title-sm text-title-sm text-on-surface font-bold">
-                  Tổng tạm tính ({totalQuantity} ly)
-                </span>
-                {normalizeCouponCode(couponCode) && (
-                  <span className="block text-[11px] text-secondary font-semibold">
-                    Mã ưu đãi đính kèm: {normalizeCouponCode(couponCode)}
-                  </span>
-                )}
-              </div>
+              <span className="font-title-sm text-title-sm text-on-surface font-bold whitespace-nowrap">
+                Tổng tạm tính ({totalQuantity} ly)
+              </span>
               <span className="font-headline-md text-headline-md text-primary font-bold whitespace-nowrap">
                 {formattedSubtotal}
               </span>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2.5">
               <button
                 type="button"
-                onClick={() => setCheckoutStep("cart")}
-                className="px-4 py-3 rounded-xl border border-outline-variant text-on-surface font-label-lg text-label-lg font-semibold hover:bg-surface-container transition-colors cursor-pointer"
+                onClick={() => {
+                  setVoucherNoticeVisible(false);
+                  setCheckoutStep("cart");
+                }}
+                className="px-4 py-3 rounded-xl border border-outline-variant text-on-surface font-label-lg text-label-lg font-semibold hover:bg-surface-container transition-colors cursor-pointer whitespace-nowrap flex-shrink-0"
               >
                 Quay lại
               </button>
@@ -882,12 +874,12 @@ export default function CartDrawer() {
                 id="btnConfirmCreateOrder"
                 type="button"
                 onClick={handleConfirmCreateOrder}
-                className="flex-1 py-3 px-space-md bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 py-3 px-4 bg-primary hover:bg-primary-container text-on-primary rounded-xl font-title-sm text-title-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
               >
-                <span className="material-symbols-outlined text-[20px]">
+                <span className="material-symbols-outlined text-[20px] flex-shrink-0">
                   check_circle
                 </span>
-                <span>Xác nhận Đặt hàng</span>
+                <span className="whitespace-nowrap">Xác nhận Đặt hàng</span>
               </button>
             </div>
           </div>
@@ -962,13 +954,7 @@ export default function CartDrawer() {
                 </p>
               </div>
               <div className="bg-surface-container-low p-2.5 rounded-lg text-left text-[11px] font-mono text-on-surface-variant max-h-32 overflow-y-auto">
-                <pre>
-                  {JSON.stringify(
-                    mapToCreateOrderPayload(couponCode),
-                    null,
-                    2
-                  )}
-                </pre>
+                <pre>{JSON.stringify(mapToCreateOrderPayload(), null, 2)}</pre>
               </div>
               <button
                 type="button"

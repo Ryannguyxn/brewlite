@@ -1,41 +1,78 @@
-# SCRUM-54 — phần độc lập theo API Contract v3.0
+# SCRUM-54 — POST /payments, API Contract v3.0
 
-Đây là phần chuẩn bị, **SCRUM-54 chưa Done**. Baseline: dev 8f1e9d0.
+## Luồng đã triển khai
 
-Đã làm: DTO request/response, validation body và Idempotency-Key 8–64 ký tự,
-loại bỏ field do client tự quyết định, mock CARD/WALLET deterministic,
-Controller dùng JWT Guard, HTTP 200 cho cả hai kết quả, replay header và Swagger.
-Không log hoặc lưu số thẻ/số điện thoại; kết quả mock chỉ giữ last4 và outcome.
-Không tự trim/coerce credentials. DTO/pipe không phụ thuộc generated Payment model.
+AppModule import PaymentsModule; endpoint `/payments` đã bật. JWT Guard xác minh
+identity, DTO/pipe validate request và Idempotency-Key 8–64 ký tự. Không tin cậy
+amount, userId, status, points hoặc kết quả mock từ client. CARD đúng 16 chữ số,
+WALLET đúng 10 chữ số; không trim/coerce credential. Mock CARD đuôi 0002 và
+WALLET đuôi 0000 FAILED, còn lại SUCCESS. Cả hai trả HTTP 200.
 
-Module chưa được import vào AppModule; POST /payments chưa được bật trong ứng dụng.
-Controller chỉ được đăng ký khi gọi PaymentsModule.withProcessor(implementation,
-imports). Chưa có PaymentProcessor thật, không có lưu Payment giả trong bộ nhớ.
-Các HTTP test dùng processor stub, kiểm tra HTTP/validation/JWT/Swagger;
-không chứng minh DB transaction, idempotency hoặc Payment lifecycle hoạt động.
+PaymentsService triển khai PaymentProcessor của phần foundation. Nó dùng
+Prisma schema Payment từ dev bad180d, không sửa schema/migration/seed chung.
+Không thêm Order API hay Scheduler; OrdersService hiện có được giữ nguyên.
 
-## Phần cần tích hợp khi nhóm sẵn sàng
+Transaction: ownership trước mọi thông tin key → advisory transaction lock theo
+hash cặp user/key → replay check → Order FOR UPDATE → replay recheck → đọc lại
+state và expiry theo clock DB → xử lý outcome, lưu Payment + response_snapshot
+và cập nhật Order cùng transaction. Key đang bận trả ngay 409 PAYMENT_IN_PROGRESS;
+Order lock chờ tối đa 1500ms; transaction timeout 8s. Deadlock/serialization retry
+tối đa 3 lần, rồi safe 500. SQL được parameterize; không dùng raw SQL từ request.
 
-- Thụy SCRUM-51/52: Payment model/relations, unique (userId,idempotencyKey),
-  partial unique SUCCESS/Order, safe response_snapshot và constraints theo ERD.
-- Chí Khang: Order PENDING và transaction/state/expiry integration, phối hợp
-  khóa Order và Scheduler. Không sửa schema/migrations/Orders thay người khác.
-- Implement PaymentProcessor thật: ownership (404 cho missing/other owner),
-  lock và recheck, amount lấy từ Order, state/expiry validation, persist outcome
-  và immutable response_snapshot trong cùng transaction.
-- SCRUM-55: hash canonical accepted payload; key coordination với timeout hữu hạn,
-  replay/conflict/in-progress, recheck sau lock và real PostgreSQL concurrency tests.
-  Validation header và trả replay header trong Controller chưa phải idempotency.
-- SCRUM-56: consume coupon HELD và cộng floor(totalVnd/10000) điểm một lần trong
-  transaction SUCCESS; FAILED giữ stock/coupon/points; system error rollback toàn bộ.
-- Mock reference/createdAt/paymentId sinh một lần khi lưu, dùng lại từ snapshot.
-  Giá BigInt chuyển JSON number chỉ khi safe integer. 0 VND vẫn thanh toán.
-- Lỗi processor phải trả envelope v3.0, bao gồm 500 INTERNAL_ERROR an toàn.
-- Sau tích hợp mới import module đã cấu hình vào AppModule và nghiệm thu endpoint.
+Amount lấy từ Order.totalVnd, chỉ chuyển number khi safe integer; 0 VND hợp lệ.
+PENDING/PAYMENT_FAILED chưa hết hạn mới được tạo attempt. Retry FAILED đi qua
+PENDING trong cùng transaction, không commit riêng, không giữ thêm stock/coupon.
+SUCCESS → PAID + paidAt + consume HELD coupon + floor(totalVnd/10000) điểm,
+FAILED → PAYMENT_FAILED, giữ stock/coupon, không cộng điểm. Points/coupon phải
+nguyên tử để response v3.0 đúng; đây là phần giao với SCRUM-56, chưa tuyên bố
+hoàn tất toàn bộ Promotion/quota logic SCRUM-56. Không trừ stock lần nữa.
 
-## Chạy kiểm tra
+Idempotency được thực hiện ngay vì contract /payments yêu cầu: cùng key + cùng
+canonical payload replay snapshot với Idempotency-Replayed:true, kể cả khi Order
+đã chuyển trạng thái/hết hạn. Payload khác 409 IDEMPOTENCY_KEY_CONFLICT. Các field
+bị ignore không vào hash. Chỉ hash full accepted payload; không lưu/log plaintext
+card/phone. methodLast4 là dữ liệu hiển thị, mockReference = MOCK-<payment UUID>
+sinh một lần và lưu snapshot. Đọc replay chỉ whitelist public fields; không trả
+raw model/snapshot/hash. Không ghi FAILED giả khi có lỗi kỹ thuật.
 
-Trong backend: npm ci, npm run db:generate, npx tsc --noEmit,
-npm run lint, npm run build, npm test, npm run test:e2e.
-Các test mới không cần database đang chạy; không thay thế integration tests.
-Không thay đổi package dependencies, Prisma layout, migrations hoặc API Contract.
+## Phối hợp Chí Khang / Thụy
+
+- Payment dùng đúng model, FK, unique key và partial unique SUCCESS của Thụy.
+- Thứ tự khóa: key advisory → Order → CouponRedemption → User. Scheduler/lifecycle
+  phải khóa Order trước thay đổi, đọc lại state/expiry sau lock. Không tự sửa
+  Payment SUCCESS hoặc cộng điểm lần nữa trong SCRUM-59.
+- Payment chỉ chuyển PENDING/PAYMENT_FAILED → PAID/PAYMENT_FAILED.
+  PREPARING/READY/COMPLETED và auto-expiration do Chí Khang triển khai.
+- Scheduler cần hoàn stock/coupon khi CANCELLED; FAILED giữ nguyên tài nguyên.
+  Payment trả 409 INVALID_TRANSITION khi hết hạn, không tự hủy/release Order.
+- Chưa nghiệm thu SCRUM-55/56 chỉ dựa vào bản này; cần review quota/concurrency
+  toàn lifecycle và kiểm tra PostgreSQL riêng theo các task tương ứng.
+
+## Kiểm tra trên máy nhóm
+
+Trong backend: db:generate → npx tsc --noEmit → npm run lint → npm run build →
+npm test → npm run test:e2e. Không cần dependency mới.
+
+Test HTTP mới (`test/payments-foundation.e2e-spec.ts`) dùng processor double, chỉ xác minh
+route/Auth/validation/Swagger. File HTTP foundation cũ được thay bằng bản này để tránh chạy test trùng.
+PaymentsModule.withProcessor vẫn được hỗ trợ để tương thích.
+
+Integration dùng AppModule/Prisma thật, không mock DB:
+`test/payments-postgres.integration-spec.ts`. Dùng database test đã migrate,
+không dùng DB nhóm đang demo. Trong PowerShell đặt AUTH_TEST_DATABASE_URL bằng
+URL database test của bạn (không commit URL/mật khẩu), rồi:
+
+```powershell
+$env:DATABASE_URL = $env:AUTH_TEST_DATABASE_URL
+npm.cmd run db:migrate
+$env:PAYMENT_CONCURRENCY_TESTS = "1"
+npx.cmd vitest run --config ./vitest.config.integration.ts test/payments-postgres.integration-spec.ts
+```
+
+Nếu chạy `npm run test:integration` toàn bộ thì Orders test của nhóm còn yêu cầu
+ORDERS_TEST_DATABASE_URL. Script tự tạo UUID/email riêng mỗi lần và chỉ cleanup
+fixtures của mình. Không reset/drop dữ liệu hoặc sửa schema trong test.
+
+Concurrency suite cần PostgreSQL với nhiều connection thật: same-key parallel,
+different keys/same Order, key busy/rollback/retry, Payment chờ Order cancellation.
+Kiểm tra cùng Scheduler thực và toàn luồng FE vẫn cần phối hợp sau SCRUM-57/59.

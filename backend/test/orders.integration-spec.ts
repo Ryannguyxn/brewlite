@@ -17,6 +17,7 @@ describe('Orders PostgreSQL transaction integration', () => {
   let prisma: PrismaService;
   let service: OrdersService;
   const userId = randomUUID();
+  const otherUserId = randomUUID();
   const productId = randomUUID();
   const categoryId = randomUUID();
   const toppingId = randomUUID();
@@ -29,12 +30,101 @@ describe('Orders PostgreSQL transaction integration', () => {
   };
 
   async function clearOrders() {
-    await prisma.couponRedemption.deleteMany({ where: { userId } });
-    await prisma.orderItemTopping.deleteMany({
-      where: { orderItem: { order: { userId } } },
+    const userIds = [userId, otherUserId];
+    await prisma.payment.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.couponRedemption.deleteMany({
+      where: { userId: { in: userIds } },
     });
-    await prisma.orderItem.deleteMany({ where: { order: { userId } } });
-    await prisma.order.deleteMany({ where: { userId } });
+    await prisma.orderItemTopping.deleteMany({
+      where: { orderItem: { order: { userId: { in: userIds } } } },
+    });
+    await prisma.orderItem.deleteMany({
+      where: { order: { userId: { in: userIds } } },
+    });
+    await prisma.order.deleteMany({ where: { userId: { in: userIds } } });
+  }
+  async function createHistoryOrder({
+    id = randomUUID(),
+    ownerId = userId,
+    createdAt = new Date(),
+    status = 'PAID',
+  }: {
+    id?: string;
+    ownerId?: string;
+    createdAt?: Date;
+    status?: 'PAID' | 'PAYMENT_FAILED';
+  } = {}) {
+    return prisma.order.create({
+      data: {
+        id,
+        userId: ownerId,
+        status,
+        subtotalVnd: 118000n,
+        discountVnd: 20000n,
+        totalVnd: 98000n,
+        pointsEarned: 9,
+        couponCodeSnapshot: 'HISTORY20',
+        createdAt,
+        expiresAt: new Date(createdAt.getTime() + 15 * 60_000),
+        items: {
+          create: {
+            productId,
+            productNameSnapshot: 'Order test',
+            size: 'M',
+            sizePercentSnapshot: 120,
+            basePriceSnapshotVnd: 45000n,
+            quantity: 2,
+            unitPriceVnd: 59000n,
+            lineTotalVnd: 118000n,
+            toppings: {
+              create: {
+                toppingId,
+                toppingCodeSnapshot: code,
+                toppingNameSnapshot: 'Order test topping',
+                toppingPriceSnapshotVnd: 5000n,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+  async function createHistoryPayment(
+    orderId: string,
+    ownerId: string,
+    status: 'SUCCESS' | 'FAILED',
+    createdAt: Date,
+  ) {
+    const id = randomUUID();
+    const success = status === 'SUCCESS';
+    return prisma.payment.create({
+      data: {
+        id,
+        orderId,
+        userId: ownerId,
+        idempotencyKey: randomUUID(),
+        requestHash: 'a'.repeat(64),
+        amountVnd: 98000n,
+        method: 'CARD',
+        status,
+        methodLast4: '1234',
+        mockReference: `MOCK-${id}`,
+        responseSnapshot: {
+          paymentId: id,
+          orderId,
+          paymentStatus: status,
+          orderStatus: success ? 'PAID' : 'PAYMENT_FAILED',
+          amountVnd: 98000,
+          method: 'CARD',
+          methodLast4: '1234',
+          mockReference: `MOCK-${id}`,
+          pointsEarned: success ? 9 : 0,
+          failureReason: success ? null : 'PAYMENT_DECLINED',
+          createdAt: createdAt.toISOString(),
+        },
+        createdAt,
+      },
+    });
   }
   beforeAll(async () => {
     const url = process.env.ORDERS_TEST_DATABASE_URL;
@@ -50,6 +140,13 @@ describe('Orders PostgreSQL transaction integration', () => {
       data: {
         id: userId,
         email: `${userId}@orders.test`,
+        passwordHash: 'test-only-unused',
+      },
+    });
+    await prisma.user.create({
+      data: {
+        id: otherUserId,
+        email: `${otherUserId}@orders.test`,
         passwordHash: 'test-only-unused',
       },
     });
@@ -116,6 +213,7 @@ describe('Orders PostgreSQL transaction integration', () => {
         });
         await prisma.topping.deleteMany({ where: { id: toppingId } });
         await prisma.user.deleteMany({ where: { id: userId } });
+        await prisma.user.deleteMany({ where: { id: otherUserId } });
         await prisma.category.deleteMany({ where: { id: categoryId } });
       }
     } finally {
@@ -295,5 +393,124 @@ describe('Orders PostgreSQL transaction integration', () => {
       (await prisma.product.findUniqueOrThrow({ where: { id: productId } }))
         .stock,
     ).toBe(3);
+  });
+  it('returns an empty history for a user with no orders', async () => {
+    await expect(service.getMine(userId, {})).resolves.toEqual({
+      items: [],
+      meta: { page: null, limit: null, total: 0, totalPages: null },
+    });
+  });
+  it('scopes history and totals to its owner and maps snapshots to JSON-safe values', async () => {
+    const own = await createHistoryOrder({
+      createdAt: new Date('2026-10-25T01:50:00.000Z'),
+    });
+    await createHistoryOrder({
+      ownerId: otherUserId,
+      createdAt: new Date('2026-10-25T02:00:00.000Z'),
+    });
+
+    const result = await service.getMine(userId, {});
+
+    expect(result.meta).toEqual({
+      page: null,
+      limit: null,
+      total: 1,
+      totalPages: null,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: own.id,
+      subtotalVnd: 118000,
+      discountVnd: 20000,
+      totalVnd: 98000,
+      couponCode: 'HISTORY20',
+      items: [
+        {
+          productName: 'Order test',
+          basePriceVnd: 45000,
+          toppings: [{ name: 'Order test topping', priceVnd: 5000 }],
+        },
+      ],
+      payment: null,
+    });
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+  it('sorts by createdAt then id and paginates the owner history', async () => {
+    const oldest = await createHistoryOrder({
+      id: '00000000-0000-4000-8000-000000000001',
+      createdAt: new Date('2026-10-25T01:00:00.000Z'),
+    });
+    const tieLow = await createHistoryOrder({
+      id: '00000000-0000-4000-8000-000000000002',
+      createdAt: new Date('2026-10-25T02:00:00.000Z'),
+    });
+    const tieHigh = await createHistoryOrder({
+      id: '00000000-0000-4000-8000-000000000003',
+      createdAt: new Date('2026-10-25T02:00:00.000Z'),
+    });
+
+    const all = await service.getMine(userId, {});
+    expect(all.items.map((item) => item.id)).toEqual([
+      tieHigh.id,
+      tieLow.id,
+      oldest.id,
+    ]);
+
+    const page = await service.getMine(userId, { page: 2, limit: 1 });
+    expect(page.items.map((item) => item.id)).toEqual([tieLow.id]);
+    expect(page.meta).toEqual({ page: 2, limit: 1, total: 3, totalPages: 3 });
+  });
+  it('prefers SUCCESS payment, otherwise returns the newest FAILED payment', async () => {
+    const successOrder = await createHistoryOrder({
+      createdAt: new Date('2026-10-25T03:00:00.000Z'),
+    });
+    const failedOrder = await createHistoryOrder({
+      createdAt: new Date('2026-10-25T02:00:00.000Z'),
+      status: 'PAYMENT_FAILED',
+    });
+    const failedBeforeSuccess = await createHistoryPayment(
+      successOrder.id,
+      userId,
+      'FAILED',
+      new Date('2026-10-25T03:01:00.000Z'),
+    );
+    const success = await createHistoryPayment(
+      successOrder.id,
+      userId,
+      'SUCCESS',
+      new Date('2026-10-25T03:00:00.000Z'),
+    );
+    await createHistoryPayment(
+      failedOrder.id,
+      userId,
+      'FAILED',
+      new Date('2026-10-25T02:01:00.000Z'),
+    );
+    const newestFailure = await createHistoryPayment(
+      failedOrder.id,
+      userId,
+      'FAILED',
+      new Date('2026-10-25T02:02:00.000Z'),
+    );
+
+    const result = await service.getMine(userId, {});
+    const successSummary = result.items.find(
+      (item) => item.id === successOrder.id,
+    )!.payment;
+    const failedSummary = result.items.find(
+      (item) => item.id === failedOrder.id,
+    )!.payment;
+
+    expect(successSummary).toMatchObject({
+      id: success.id,
+      status: 'SUCCESS',
+      failureReason: null,
+    });
+    expect(failedSummary).toMatchObject({
+      id: newestFailure.id,
+      status: 'FAILED',
+      failureReason: 'PAYMENT_DECLINED',
+    });
+    expect(successSummary?.id).not.toBe(failedBeforeSuccess.id);
   });
 });

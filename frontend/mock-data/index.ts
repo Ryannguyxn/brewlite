@@ -5,4 +5,4 @@
 export * from "./types";
 export * from "./site.mock";
 export * from "./products.mock";
-export * from "./auth.mock";
+export * from "./users.mock";

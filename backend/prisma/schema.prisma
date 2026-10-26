@@ -115,6 +115,20 @@ enum RedemptionStatus {
   @@map("redemption_status")
 }
 
+enum PaymentMethod {
+  CARD
+  WALLET
+
+  @@map("payment_method")
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+
+  @@map("payment_status")
+}
+
 model User {
   id                String             @id @default(uuid()) @db.Uuid
   email             String             @unique @db.VarChar(255)
@@ -125,6 +139,7 @@ model User {
   updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   couponRedemptions CouponRedemption[]
   orders            Order[]
+  payments Payment[]
 
   @@map("users")
 }
@@ -168,6 +183,7 @@ model Order {
   user   User        @relation(fields: [userId], references: [id], onDelete: Restrict)
   coupon Coupon?     @relation(fields: [couponId], references: [id], onDelete: Restrict)
   items  OrderItem[]
+  payments Payment[]
 
   @@index([userId], map: "ix_orders_user_id")
   @@index([userId, createdAt], map: "ix_orders_user_created")
@@ -231,4 +247,26 @@ model CouponRedemption {
   @@index([couponId, status], map: "ix_coupon_redemptions_coupon_status")
   @@index([userId, couponId, status], map: "ix_coupon_redemptions_user_coupon_status")
   @@map("coupon_redemptions")
+}
+
+model Payment {
+  id               String        @id @default(uuid()) @db.Uuid
+  orderId          String        @map("order_id") @db.Uuid
+  userId           String        @map("user_id") @db.Uuid
+  idempotencyKey   String        @map("idempotency_key") @db.VarChar(64)
+  requestHash      String        @map("request_hash") @db.VarChar(128)
+  amountVnd        BigInt        @map("amount_vnd")
+  method           PaymentMethod
+  status           PaymentStatus
+  mockReference    String?       @map("mock_reference") @db.VarChar(255)
+  methodLast4      String?       @map("method_last4") @db.VarChar(4)
+  responseSnapshot Json          @map("response_snapshot") @db.JsonB
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order            Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  user             User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, idempotencyKey], map: "uq_payments_user_idempotency")
+  @@index([orderId], map: "ix_payments_order_id")
+  @@map("payments")
 }

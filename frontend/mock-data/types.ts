@@ -218,119 +218,27 @@ export interface AuthErrorResponse extends ApiErrorResponse {
 }
 
 // ============================================================================
-// KIỂU DỮ LIỆU AUTHENTICATION (LOGIN & REGISTER) — API CONTRACT v2.1 (MỤC 5, 6, 7)
+// ĐỊNH NGHĨA KIỂU DỮ LIỆU ORDER & CHECKOUT (SPRINT 2 & 3 — SCRUM-43)
+// Khớp 100% với:
+// - docs/api/BrewLite_API_Contract_v3.0.md & Appendix A (v2.1 Mục 5.3, 8, 9)
+// - database/schema.dbml & backend/prisma/schema.prisma
+// - backend/src/orders/dto/create-order.dto.ts & create-order-response.dto.ts
 // ============================================================================
 
-export type AuthMode = "login" | "register";
+export type OrderStatus =
+  | "PENDING"
+  | "PAYMENT_FAILED"
+  | "PAID"
+  | "PREPARING"
+  | "READY"
+  | "COMPLETED"
+  | "CANCELLED";
 
 /**
- * Mã lỗi nghiệp vụ Sprint 2 cho Authentication (API Contract v2.1 Mục 5.3)
+ * Từng dòng món trong payload gửi lên `POST /orders` (API Contract v2.1 Mục 8.2 & 9.3)
+ * TUYỆT ĐỐI KHÔNG chứa userId, status, price, unitPriceVnd, lineTotalVnd, subtotalVnd, discountVnd, totalVnd
  */
-export type AuthErrorCode =
-  | "VALIDATION_ERROR"
-  | "EMAIL_ALREADY_EXISTS"
-  | "INVALID_CREDENTIALS"
-  | "UNAUTHORIZED";
-
-/**
- * Cấu trúc lỗi mở rộng Sprint 2 có trường `code` (API Contract v2.1 Mục 5.2)
- */
-export interface AuthApiErrorResponse {
-  statusCode: 400 | 401 | 409 | 500;
-  message: string | string[];
-  error: "Bad Request" | "Unauthorized" | "Conflict" | "Internal Server Error";
-  code?: AuthErrorCode;
-}
-
-/**
- * Request body của `POST /auth/register` (API Contract v2.1 Mục 6.2):
- * - `email`: bắt buộc, định dạng email hợp lệ, trim/lowercase, tối đa 255 ký tự
- * - `password`: bắt buộc, tối thiểu 8 ký tự (KHÔNG trim/normalize trước khi hash)
- * - `fullName`: không bắt buộc, tối đa 255 ký tự
- * - Tuyệt đối không gửi `role`, `loyaltyPoints`, `passwordHash`
- */
-export interface RegisterRequestDto {
-  email: string;
-  password: string;
-  fullName?: string;
-}
-
-/**
- * Response 201 Created của `POST /auth/register` (API Contract v2.1 Mục 6.3):
- * - Chỉ trả `id`, `email`, `fullName`
- * - Không tự động login hoặc trả `accessToken`, `password`, `passwordHash`, `role`, `loyaltyPoints`
- */
-export interface RegisterResponseDto {
-  id: string;
-  email: string;
-  fullName: string | null;
-}
-
-/**
- * Request body của `POST /auth/login` (API Contract v2.1 Mục 7.2):
- * - `email`: bắt buộc, chuẩn hóa trim/lowercase
- * - `password`: bắt buộc, non-empty (KHÔNG trim/normalize trước khi verify)
- */
-export interface LoginRequestDto {
-  email: string;
-  password: string;
-}
-
-/**
- * Response 200 OK của `POST /auth/login` (API Contract v2.1 Mục 7.3):
- * - `accessToken`: JWT chứa `sub = User UUID`
- * - `tokenType`: `"Bearer"`
- * - `expiresIn`: `3600` (60 phút)
- */
-export interface LoginResponseDto {
-  accessToken: string;
-  tokenType: "Bearer";
-  expiresIn: 3600;
-}
-
-/**
- * Bản ghi tài khoản mẫu trong Mock Data phục vụ kiểm thử UI Login / Register (SCRUM-41)
- */
-export interface MockRegisteredUser {
-  id: string;
-  email: string;
-  password: string;
-  fullName: string | null;
-  note?: string;
-}
-
-/**
- * Cấu hình nội dung giao diện trang Đăng nhập & Đăng ký theo thiết kế Stitch
- */
-export interface AuthUiConfig {
-  brandTitle: string;
-  brandHighlight: string;
-  backToMenuLabel: string;
-  roastBadge: string;
-  loginHeading: string;
-  loginSubheading: string;
-  registerHeading: string;
-  registerSubheading: string;
-  emailMaxLength: number;
-  fullNameMaxLength: number;
-  passwordMinLength: number;
-  jwtExpiresInSeconds: 3600;
-  trustNote: string;
-  footerCopyright: string;
-}
-
-// ============================================================================
-// KIỂU DỮ LIỆU CREATE ORDER (`POST /orders`) — API CONTRACT v2.1 (MỤC 8 & MỤC 9)
-// ============================================================================
-
-/**
- * Từng dòng món trong Request Body của `POST /orders` (API Contract v2.1 Mục 8.2):
- * - `productId`: UUID string (bắt buộc)
- * - `size`: S | M | L | ONE_SIZE theo sizePolicy (bắt buộc)
- * - `toppingIds`: UUID string[] (bắt buộc, 0–3 ID khác nhau)
- * - `quantity`: integer 1–10 (bắt buộc)
- */
-export interface CreateOrderItemRequestDto {
+export interface CreateOrderItemDto {
   productId: string;
   size: DrinkSize;
   toppingIds: string[];
@@ -338,27 +246,24 @@ export interface CreateOrderItemRequestDto {
 }
 
 /**
- * Request Body của `POST /orders` (API Contract v2.1 Mục 8.2 & 9.3):
- * - `items`: 1–20 dòng
- * - `couponCode`: tùy chọn, tối đa 1 mã, trim, normalize
- * - Client tuyệt đối KHÔNG gửi `userId`, `status`, `price`, `unitPriceVnd`, `lineTotalVnd`, `subtotalVnd`, `discountVnd`, `totalVnd`
+ * Payload gửi lên `POST /orders` (API Contract v2.1 Mục 8.2 & 9.3)
  */
 export interface CreateOrderRequestDto {
-  items: CreateOrderItemRequestDto[];
+  items: CreateOrderItemDto[];
   couponCode?: string;
 }
 
 /**
- * Snapshot Topping trong Response 201 Created của `POST /orders` (API Contract v2.1 Mục 8.6)
+ * Snapshot Topping trong OrderItem trả về từ `POST /orders` (API Contract v2.1 Mục 8.6)
  */
-export interface OrderItemToppingSnapshotDto {
+export interface OrderToppingSnapshotDto {
   id: string;
   name: string;
   priceVnd: number;
 }
 
 /**
- * Snapshot từng dòng món trong Response 201 Created của `POST /orders` (API Contract v2.1 Mục 8.6)
+ * Snapshot từng dòng OrderItem trả về từ `POST /orders` (API Contract v2.1 Mục 8.6)
  */
 export interface OrderItemSnapshotDto {
   id: string;
@@ -370,19 +275,15 @@ export interface OrderItemSnapshotDto {
   quantity: number;
   unitPriceVnd: number;
   lineTotalVnd: number;
-  toppings: OrderItemToppingSnapshotDto[];
+  toppings: OrderToppingSnapshotDto[];
 }
 
 /**
- * Response 201 Created của `POST /orders` (API Contract v2.1 Mục 8.6):
- * - `status`: luôn là `"PENDING"` (chưa tạo Payment ở Sprint 2)
- * - `couponCode`: string hoặc null
- * - `subtotalVnd`, `discountVnd`, `totalVnd`: giá do server tính toán
- * - `createdAt`: ISO 8601 UTC
+ * Response 201 Created của `POST /orders` (API Contract v2.1 Mục 8.6 & v3.0)
  */
-export interface OrderResponseDto {
+export interface CreateOrderResponseDto {
   id: string;
-  status: "PENDING";
+  status: OrderStatus;
   items: OrderItemSnapshotDto[];
   couponCode: string | null;
   subtotalVnd: number;
@@ -392,18 +293,7 @@ export interface OrderResponseDto {
 }
 
 /**
- * Mã lỗi nghiệp vụ của `POST /orders` theo API Contract v2.1 Mục 5.3 & 8.7
- */
-export type OrderErrorCode =
-  | "VALIDATION_ERROR"
-  | "INVALID_CART"
-  | "INVALID_COUPON"
-  | "UNAUTHORIZED"
-  | "INSUFFICIENT_STOCK"
-  | "PENDING_ORDER_EXISTS";
-
-/**
- * Lý do chi tiết khi `code === "INVALID_CART"` (API Contract v2.1 Mục 8.3.1 & 8.7)
+ * Các lý do chi tiết của lỗi `INVALID_CART` (API Contract v2.1 Mục 8.3.1 & 8.7)
  */
 export type InvalidCartReason =
   | "DUPLICATE_CONFIGURATION"
@@ -417,29 +307,33 @@ export type InvalidCartReason =
   | "TOO_MANY_TOPPINGS"
   | "INVALID_PRICE_DATA";
 
+export interface InvalidCartDetail {
+  productId?: string;
+  itemIndex?: number;
+  reason: InvalidCartReason | string;
+}
+
 export interface InsufficientStockDetail {
   productId: string;
   requestedQuantity: number;
   availableQuantity: number;
 }
 
-export interface InvalidCartDetail {
-  itemIndex: number;
-  reason: InvalidCartReason | string;
-}
+export type OrderErrorCode =
+  | "VALIDATION_ERROR"
+  | "INVALID_CART"
+  | "INVALID_COUPON"
+  | "COUPON_UNAVAILABLE"
+  | "UNAUTHORIZED"
+  | "INSUFFICIENT_STOCK"
+  | "PENDING_ORDER_EXISTS"
+  | "SERVER_ERROR"
+  | "INTERNAL_ERROR"
+  | "NETWORK_ERROR";
 
-/**
- * Cấu trúc lỗi trả về từ `POST /orders` (API Contract v2.1 Mục 8.7):
- * Frontend không parse text `message` để suy luận loại lỗi; dùng `code` và `details`.
- */
-export interface OrderApiErrorResponse {
-  statusCode: 400 | 401 | 409 | 500;
-  message: string | string[];
-  error: string;
-  code?: OrderErrorCode;
-  details?: Array<
-    InsufficientStockDetail | InvalidCartDetail | Record<string, unknown>
-  >;
+export interface OrderApiErrorResponse extends ApiErrorResponse {
+  code: OrderErrorCode | string;
+  details?: InvalidCartDetail[] | InsufficientStockDetail[] | unknown;
 }
 
 export interface UserProfile {

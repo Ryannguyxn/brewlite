@@ -1,17 +1,31 @@
 "use client";
 
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AuthCard from "@/components/AuthCard";
+import { useAuth } from "@/context/AuthContext";
 
 function LoginContent() {
   const searchParams = useSearchParams();
+  const { pendingCheckout, setPendingCheckout, authModalMessage } = useAuth();
   const modeParam = searchParams.get("mode");
+  const checkoutParam = searchParams.get("checkout");
   const redirectParam = searchParams.get("redirect") || "/";
 
-  const initialMode =
-    modeParam === "register" ? "register" : "login";
+  const initialMode = modeParam === "register" ? "register" : "login";
+
+  useEffect(() => {
+    if (checkoutParam === "1" && !pendingCheckout) {
+      setPendingCheckout(true);
+    }
+  }, [checkoutParam, pendingCheckout, setPendingCheckout]);
+
+  const contextMessage =
+    authModalMessage ||
+    (pendingCheckout || checkoutParam === "1"
+      ? "Vui lòng đăng nhập tài khoản khách hàng để tiến hành đặt hàng. Giỏ hàng của bạn được giữ nguyên."
+      : null);
 
   return (
     <div className="min-h-screen bg-background font-body-md text-on-surface flex flex-col justify-between selection:bg-primary-fixed selection:text-on-primary-fixed">
@@ -58,6 +72,7 @@ function LoginContent() {
           <AuthCard
             initialMode={initialMode}
             redirectUrl={redirectParam}
+            contextBannerMessage={contextMessage}
           />
 
           {/* Trust and Artisanal Micro-note */}

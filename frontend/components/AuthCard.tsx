@@ -13,6 +13,7 @@ interface AuthCardProps {
   initialMode?: "login" | "register";
   onSuccess?: () => void;
   redirectUrl?: string;
+  contextBannerMessage?: string | null;
   isModal?: boolean;
 }
 
@@ -20,7 +21,7 @@ export default function AuthCard({
   initialMode = "login",
   onSuccess,
   redirectUrl = "/",
-  isModal = false,
+  contextBannerMessage = null,
 }: AuthCardProps) {
   const router = useRouter();
   const { login, register } = useAuth();
@@ -119,7 +120,7 @@ export default function AuthCard({
           } else {
             router.push(redirectUrl);
           }
-        }, 600);
+        }, 450);
       } else {
         const result = await register({
           email,
@@ -217,6 +218,21 @@ export default function AuthCard({
             : "Gia nhập cộng đồng người yêu thích gu cà phê mộc"}
         </p>
       </div>
+
+      {/* Thông báo ngữ cảnh Checkout nếu mở từ bước Đặt hàng */}
+      {contextBannerMessage && (
+        <div
+          id="authCheckoutNoticeBanner"
+          className="relative z-10 mb-space-md p-3 rounded-lg bg-surface-container-high border border-primary/30 text-on-surface flex items-start gap-2 text-left"
+        >
+          <span className="material-symbols-outlined text-[18px] text-primary shrink-0 mt-0.5">
+            shopping_bag_speed
+          </span>
+          <p className="font-body-sm text-body-sm text-on-surface-variant leading-snug">
+            {contextBannerMessage}
+          </p>
+        </div>
+      )}
 
       {/* View Switcher Tab (Level 1 Elevation Pills) */}
       <div className="relative z-10 grid grid-cols-2 p-1 bg-surface-container rounded-lg mb-space-lg">

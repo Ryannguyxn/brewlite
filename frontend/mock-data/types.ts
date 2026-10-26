@@ -217,6 +217,125 @@ export interface AuthErrorResponse extends ApiErrorResponse {
   code: AuthErrorCode | string;
 }
 
+// ============================================================================
+// ĐỊNH NGHĨA KIỂU DỮ LIỆU ORDER & CHECKOUT (SPRINT 2 & 3 — SCRUM-43)
+// Khớp 100% với:
+// - docs/api/BrewLite_API_Contract_v3.0.md & Appendix A (v2.1 Mục 5.3, 8, 9)
+// - database/schema.dbml & backend/prisma/schema.prisma
+// - backend/src/orders/dto/create-order.dto.ts & create-order-response.dto.ts
+// ============================================================================
+
+export type OrderStatus =
+  | "PENDING"
+  | "PAYMENT_FAILED"
+  | "PAID"
+  | "PREPARING"
+  | "READY"
+  | "COMPLETED"
+  | "CANCELLED";
+
+/**
+ * Từng dòng món trong payload gửi lên `POST /orders` (API Contract v2.1 Mục 8.2 & 9.3)
+ * TUYỆT ĐỐI KHÔNG chứa userId, status, price, unitPriceVnd, lineTotalVnd, subtotalVnd, discountVnd, totalVnd
+ */
+export interface CreateOrderItemDto {
+  productId: string;
+  size: DrinkSize;
+  toppingIds: string[];
+  quantity: number;
+}
+
+/**
+ * Payload gửi lên `POST /orders` (API Contract v2.1 Mục 8.2 & 9.3)
+ */
+export interface CreateOrderRequestDto {
+  items: CreateOrderItemDto[];
+  couponCode?: string;
+}
+
+/**
+ * Snapshot Topping trong OrderItem trả về từ `POST /orders` (API Contract v2.1 Mục 8.6)
+ */
+export interface OrderToppingSnapshotDto {
+  id: string;
+  name: string;
+  priceVnd: number;
+}
+
+/**
+ * Snapshot từng dòng OrderItem trả về từ `POST /orders` (API Contract v2.1 Mục 8.6)
+ */
+export interface OrderItemSnapshotDto {
+  id: string;
+  productId: string;
+  productName: string;
+  size: DrinkSize;
+  sizeMultiplierPercent: number;
+  basePriceVnd: number;
+  quantity: number;
+  unitPriceVnd: number;
+  lineTotalVnd: number;
+  toppings: OrderToppingSnapshotDto[];
+}
+
+/**
+ * Response 201 Created của `POST /orders` (API Contract v2.1 Mục 8.6 & v3.0)
+ */
+export interface CreateOrderResponseDto {
+  id: string;
+  status: OrderStatus;
+  items: OrderItemSnapshotDto[];
+  couponCode: string | null;
+  subtotalVnd: number;
+  discountVnd: number;
+  totalVnd: number;
+  createdAt: string;
+}
+
+/**
+ * Các lý do chi tiết của lỗi `INVALID_CART` (API Contract v2.1 Mục 8.3.1 & 8.7)
+ */
+export type InvalidCartReason =
+  | "DUPLICATE_CONFIGURATION"
+  | "DUPLICATE_TOPPING"
+  | "PRODUCT_NOT_FOUND"
+  | "TOPPING_NOT_FOUND"
+  | "PRODUCT_UNAVAILABLE"
+  | "INVALID_SIZE"
+  | "TOPPING_NOT_ALLOWED"
+  | "TOPPING_UNAVAILABLE"
+  | "TOO_MANY_TOPPINGS"
+  | "INVALID_PRICE_DATA";
+
+export interface InvalidCartDetail {
+  productId?: string;
+  itemIndex?: number;
+  reason: InvalidCartReason | string;
+}
+
+export interface InsufficientStockDetail {
+  productId: string;
+  requestedQuantity: number;
+  availableQuantity: number;
+}
+
+export type OrderErrorCode =
+  | "VALIDATION_ERROR"
+  | "INVALID_CART"
+  | "INVALID_COUPON"
+  | "COUPON_UNAVAILABLE"
+  | "UNAUTHORIZED"
+  | "INSUFFICIENT_STOCK"
+  | "PENDING_ORDER_EXISTS"
+  | "SERVER_ERROR"
+  | "INTERNAL_ERROR"
+  | "NETWORK_ERROR";
+
+export interface OrderApiErrorResponse extends ApiErrorResponse {
+  code: OrderErrorCode | string;
+  details?: InvalidCartDetail[] | InsufficientStockDetail[] | unknown;
+}
+
 export interface UserProfile {
   id: string;
   fullName: string;

@@ -141,6 +141,7 @@ function renderCartDrawerMarkup(options: {
   initialCheckoutStep?: "cart" | "review";
   initialIsSubmittingOrder?: boolean;
   initialOrderOutcome?: OrderCallOutcome | null;
+  onClearCart?: () => void;
 }): string {
   const items = options.items ?? createSampleCartItems();
   const isAuthenticated = options.isAuthenticated ?? true;
@@ -162,7 +163,7 @@ function renderCartDrawerMarkup(options: {
     incrementQuantity: () => {},
     decrementQuantity: () => {},
     removeFromCart: () => {},
-    clearCart: () => {},
+    clearCart: options.onClearCart ?? (() => {}),
     openCart: () => {},
     closeCart: () => {},
     toggleCart: () => {},
@@ -608,7 +609,13 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
       };
 
       let capturedOutcome: OrderCallOutcome | null = null;
-      const clearCartCalled = false;
+      let clearCartCalled = false;
+      localStorageMock.setItem("brewlite_cart_v1", JSON.stringify(cartItems));
+      const clearCartSpy = () => {
+        clearCartCalled = true;
+        cartItems.length = 0;
+        localStorageMock.removeItem("brewlite_cart_v1");
+      };
 
       try {
         const res = await executeCheckoutOrderSubmission({
@@ -625,6 +632,7 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
           handleUnauthorizedCheckout: () => {},
           mapToCreateOrderPayload: () =>
             buildCreateOrderPayloadFromCart(cartItems),
+          clearCart: clearCartSpy,
         });
 
         assert.equal(capturedAuthHeader, `Bearer ${mockToken}`);
@@ -643,17 +651,30 @@ describe("SCRUM-43 Checkout Flow & POST /orders Automated Tests", () => {
         assert.ok(outcome && outcome.type === "success");
         assert.equal(outcome.order.id, validOrder.id);
         assert.equal(outcome.order.status, "PENDING");
-        assert.equal(
-          clearCartCalled,
-          false,
-          "Cart must NOT be cleared while order is PENDING"
-        );
 
         const successHtml = renderCartDrawerMarkup({
           items: cartItems,
           initialCheckoutStep: "review",
           initialOrderOutcome: outcome,
+          onClearCart: clearCartSpy,
         });
+
+        assert.equal(
+          clearCartCalled,
+          false,
+          "Cart must NOT be cleared while order is PENDING"
+        );
+        assert.equal(
+          cartItems.length,
+          1,
+          "Cart items in memory must remain intact after 201 PENDING order creation"
+        );
+        assert.ok(
+          localStorageMock
+            .getItem("brewlite_cart_v1")
+            ?.includes("550e8400-e29b-41d4-a716-446655440000"),
+          "Cart items in localStorage must remain intact after 201 PENDING order creation"
+        );
         assert.ok(successHtml.includes('id="orderSuccessNoticeModal"'));
         assert.ok(successHtml.includes(validOrder.id));
         assert.ok(successHtml.includes("PENDING"));

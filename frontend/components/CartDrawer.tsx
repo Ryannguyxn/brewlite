@@ -81,6 +81,7 @@ export interface ExecuteCheckoutSubmissionDeps {
   verifySession: () => boolean;
   handleUnauthorizedCheckout: (reasonMessage?: string) => void;
   mapToCreateOrderPayload: () => CreateOrderRequestDto;
+  clearCart?: () => void;
   createOrderFn?: (
     payload: CreateOrderRequestDto,
     tokenOverride?: string | null
@@ -389,6 +390,7 @@ export default function CartDrawer({
       verifySession,
       handleUnauthorizedCheckout,
       mapToCreateOrderPayload,
+      clearCart,
     });
   };
 

@@ -126,13 +126,17 @@ export default function Header({
           >
             Khuyến mãi
           </button>
-          <button
-            type="button"
-            onClick={() => handleNotice("Lịch sử đơn hàng")}
-            className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors cursor-pointer"
+          <Link
+            href="/orders"
+            id="header-order-history-nav"
+            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors ${
+              activeNav === "lich-su-don-hang"
+                ? "bg-primary text-on-primary shadow-sm font-semibold"
+                : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+            }`}
           >
             Lịch sử đơn hàng
-          </button>
+          </Link>
           <a
             className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors"
             href="#footer"
@@ -199,19 +203,16 @@ export default function Header({
                     </p>
                   </div>
                   <div className="py-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsUserMenuOpen(false);
-                        handleNotice("Lịch sử đơn hàng");
-                      }}
+                    <Link
+                      href="/orders"
+                      onClick={() => setIsUserMenuOpen(false)}
                       className="w-full px-4 py-2 text-left font-body-sm text-body-sm text-on-surface hover:bg-surface-container flex items-center gap-2 cursor-pointer transition-colors"
                     >
                       <span className="material-symbols-outlined text-[18px] text-outline">
                         receipt_long
                       </span>
                       <span>Lịch sử đơn hàng</span>
-                    </button>
+                    </Link>
                     <button
                       type="button"
                       onClick={() => {

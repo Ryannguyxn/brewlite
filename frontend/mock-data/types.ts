@@ -348,6 +348,88 @@ export interface OrderSubmissionErrorState {
   details?: InvalidCartDetail[] | InsufficientStockDetail[] | unknown;
 }
 
+// ============================================================================
+// ĐỊNH NGHĨA KIỂU DỮ LIỆU ORDER HISTORY (`GET /orders/me` — SPRINT 3 SCRUM-64)
+// Khớp 100% với:
+// - docs/api/BrewLite_API_Contract_v3.0.md §4 (`GET /orders/me`) & §9
+// - backend/src/orders/dto/get-my-orders-query.dto.ts
+// - backend/src/orders/dto/get-my-orders-response.dto.ts
+// - database/schema.dbml (`orders`, `order_items`, `order_item_toppings`, `payments`)
+// ============================================================================
+
+export type PaymentMethod = "CARD" | "WALLET";
+
+export type PaymentStatus = "SUCCESS" | "FAILED";
+
+/**
+ * Thông tin tóm tắt giao dịch thanh toán gắn với Order trong `GET /orders/me`
+ * (API Contract v3.0 §4.2 — `OrderPaymentSummaryDto`)
+ * TUYỆT ĐỐI KHÔNG chứa dữ liệu nhạy cảm (số thẻ đầy đủ, CVV, PIN); chỉ hiển thị `methodLast4` và `mockReference`.
+ */
+export interface OrderPaymentSummaryDto {
+  id: string;
+  status: PaymentStatus;
+  method: PaymentMethod;
+  methodLast4: string | null;
+  amountVnd: number;
+  mockReference: string | null;
+  failureReason: string | null;
+  createdAt: string;
+}
+
+/**
+ * Từng phần tử đơn hàng trong danh sách `GET /orders/me`
+ * (API Contract v3.0 §4.2 — `MyOrderItemDto`)
+ */
+export interface OrderHistoryItemDto {
+  id: string;
+  status: OrderStatus;
+  createdAt: string;
+  /** Thời điểm hết hạn giữ chỗ 15 phút (ISO 8601 string, NOT NULL theo ERD & API Contract v3.0 §4.2) */
+  expiresAt: string;
+  subtotalVnd: number;
+  discountVnd: number;
+  totalVnd: number;
+  couponCode: string | null;
+  /** Điểm tích lũy đã ghi nhận trên Order (số nguyên >= 0; = 0 với đơn chưa thanh toán) */
+  pointsEarned: number;
+  items: OrderItemSnapshotDto[];
+  payment: OrderPaymentSummaryDto | null;
+}
+
+export type MyOrderItemDto = OrderHistoryItemDto;
+
+/**
+ * Siêu dữ liệu phân trang của `GET /orders/me` (API Contract v3.0 §4.1 & §4.2)
+ * - Khi không truyền `page` & `limit`: `{ page: null, limit: null, total: N, totalPages: null }`
+ * - Khi truyền đủ cả `page` & `limit`: `{ page, limit, total, totalPages: ceil(total/limit) }` (`0` nếu `total === 0`)
+ */
+export interface OrderHistoryMetaDto {
+  page: number | null;
+  limit: number | null;
+  total: number;
+  totalPages: number | null;
+}
+
+export type MyOrdersMetaDto = OrderHistoryMetaDto;
+
+/**
+ * Tham số truy vấn `GET /orders/me` (API Contract v3.0 §4.1)
+ * Quy tắc: Hoặc truyền CẢ HAI `page` (>= 1) và `limit` (1..100), hoặc KHÔNG truyền tham số nào.
+ */
+export interface GetMyOrdersQueryParams {
+  page?: number;
+  limit?: number;
+}
+
+/**
+ * Response 200 OK của `GET /orders/me` (API Contract v3.0 §4.2)
+ */
+export interface GetMyOrdersResponseDto {
+  items: OrderHistoryItemDto[];
+  meta: OrderHistoryMetaDto;
+}
+
 export interface UserProfile {
   id: string;
   fullName: string;

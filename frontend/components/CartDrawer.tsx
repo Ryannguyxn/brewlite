@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { useAuth } from "@/context/AuthContext";
-import { useCart } from "@/context/CartContext";
-import type { CreateOrderResponseDto } from "@/mock-data";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { type OpenAuthModalOptions, useAuth } from "@/context/AuthContext";
+import { type CartItem, useCart } from "@/context/CartContext";
+import type {
+  CreateOrderRequestDto,
+  CreateOrderResponseDto,
+} from "@/mock-data";
 import { FALLBACK_DRINK_IMAGE, formatVnd } from "@/services/api.service";
 import { getDisplayCustomerName } from "@/services/auth.service";
 import {
@@ -12,9 +15,9 @@ import {
   type OrderServiceError,
 } from "@/services/order.service";
 
-type CheckoutDrawerStep = "cart" | "review";
+export type CheckoutDrawerStep = "cart" | "review";
 
-type OrderCallOutcome =
+export type OrderCallOutcome =
   | {
       type: "success";
       order: CreateOrderResponseDto;
@@ -28,7 +31,192 @@ type OrderCallOutcome =
       detailLines: string[];
     };
 
-export default function CartDrawer() {
+export interface ProceedToCheckoutFlowDeps {
+  itemsCount: number;
+  isSubmittingOrder: boolean;
+  isAuthenticated: boolean;
+  verifySession: () => boolean;
+  openAuthModal: (
+    mode?: "login" | "register",
+    options?: OpenAuthModalOptions
+  ) => void;
+  setVoucherNoticeVisible: (visible: boolean) => void;
+  setOrderCallOutcome: (outcome: OrderCallOutcome | null) => void;
+  setCheckoutStep: (step: CheckoutDrawerStep) => void;
+}
+
+/**
+ * Điều phối chuyển từ Bước 1 (Giỏ hàng) -> Bước 2 (Xác nhận Đặt hàng / Checkout):
+ * - Nếu giỏ hàng trống hoặc đang gửi request tạo đơn: bỏ qua.
+ * - Nếu chưa đăng nhập hoặc JWT hết hạn: mở Login Modal (`resumeCheckout: true`) và giữ nguyên giỏ hàng.
+ * - Nếu đã xác thực hợp lệ: chuyển sang bước `"review"`.
+ */
+export function proceedToCheckoutStep(deps: ProceedToCheckoutFlowDeps): boolean {
+  if (deps.itemsCount === 0 || deps.isSubmittingOrder) return false;
+
+  const hasValidSession = deps.verifySession();
+  if (!hasValidSession || !deps.isAuthenticated) {
+    deps.openAuthModal("login", {
+      resumeCheckout: true,
+      reasonMessage:
+        "Vui lòng đăng nhập tài khoản khách hàng để tiến hành đặt hàng. Giỏ hàng của bạn được giữ nguyên.",
+    });
+    return false;
+  }
+
+  deps.setVoucherNoticeVisible(false);
+  deps.setOrderCallOutcome(null);
+  deps.setCheckoutStep("review");
+  return true;
+}
+
+export interface ExecuteCheckoutSubmissionDeps {
+  items: CartItem[];
+  accessToken: string | null;
+  submittingRef: { current: boolean };
+  isSubmittingOrder: boolean;
+  setIsSubmittingOrder: (submitting: boolean) => void;
+  setCheckoutStep: (step: CheckoutDrawerStep) => void;
+  setOrderCallOutcome: (outcome: OrderCallOutcome | null) => void;
+  verifySession: () => boolean;
+  handleUnauthorizedCheckout: (reasonMessage?: string) => void;
+  mapToCreateOrderPayload: () => CreateOrderRequestDto;
+  createOrderFn?: (
+    payload: CreateOrderRequestDto,
+    tokenOverride?: string | null
+  ) => Promise<CreateOrderResponseDto>;
+}
+
+/**
+ * Điều phối gọi API `POST /orders` tại Bước 2 (Checkout) (SCRUM-43):
+ * - Chặn double-click / double-submit đồng thời bằng cả `submittingRef` và `isSubmittingOrder`.
+ * - Bật trạng thái loading (`setIsSubmittingOrder(true)`) ngay khi bắt đầu gửi request và tắt trong `finally`.
+ * - Xử lý 401 UNAUTHORIZED: quay về bước `"cart"`, xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login Modal.
+ * - Xử lý 201 Created (`status: "PENDING"`): lưu `orderCallOutcome = { type: "success", order }` và giữ nguyên giỏ hàng.
+ * - Xử lý lỗi mạng / lỗi đọc response (`isOutcomeUncertain = true`) và lỗi 400/409 (`isOutcomeUncertain = false` kèm `detailLines`).
+ */
+export async function executeCheckoutOrderSubmission(
+  deps: ExecuteCheckoutSubmissionDeps
+): Promise<{ skipped: boolean; outcome: OrderCallOutcome | null }> {
+  if (deps.submittingRef.current || deps.isSubmittingOrder) {
+    return { skipped: true, outcome: null };
+  }
+
+  if (deps.items.length === 0) {
+    deps.setCheckoutStep("cart");
+    return { skipped: true, outcome: null };
+  }
+
+  const sessionOk = deps.verifySession();
+  if (!sessionOk || !deps.accessToken) {
+    deps.setCheckoutStep("cart");
+    deps.handleUnauthorizedCheckout(
+      "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục đặt hàng (giỏ hàng của bạn vẫn được giữ nguyên)."
+    );
+    return { skipped: true, outcome: null };
+  }
+
+  let payload: CreateOrderRequestDto;
+  try {
+    payload = deps.mapToCreateOrderPayload();
+  } catch (err: unknown) {
+    const preSendOutcome: OrderCallOutcome = {
+      type: "error",
+      statusCode: 400,
+      code: "INVALID_CART",
+      message:
+        err instanceof Error && err.message
+          ? err.message
+          : "Dữ liệu giỏ hàng không hợp lệ.",
+      isOutcomeUncertain: false,
+      detailLines: [],
+    };
+    deps.setOrderCallOutcome(preSendOutcome);
+    return { skipped: false, outcome: preSendOutcome };
+  }
+
+  const productNamesById: Record<string, string> = {};
+  for (const item of deps.items) {
+    if (item.productId && item.productName) {
+      productNamesById[item.productId.trim()] = item.productName.trim();
+      productNamesById[item.productId.trim().toLowerCase()] =
+        item.productName.trim();
+    }
+  }
+
+  const callCreateOrder = deps.createOrderFn || createOrderApi;
+
+  deps.submittingRef.current = true;
+  deps.setIsSubmittingOrder(true);
+  deps.setOrderCallOutcome(null);
+
+  try {
+    const createdOrder = await callCreateOrder(payload, deps.accessToken);
+    // TUYỆT ĐỐI KHÔNG xóa giỏ hàng khi đơn ở trạng thái PENDING (AC-US-CART-04-02, BR-07, API Contract v3.0)
+    const successOutcome: OrderCallOutcome = {
+      type: "success",
+      order: createdOrder,
+    };
+    deps.setOrderCallOutcome(successOutcome);
+    return { skipped: false, outcome: successOutcome };
+  } catch (err: unknown) {
+    const orderErr = err as Partial<OrderServiceError>;
+    if (orderErr?.statusCode === 401 || orderErr?.code === "UNAUTHORIZED") {
+      // 401 UNAUTHORIZED: Xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login modal
+      deps.setCheckoutStep("cart");
+      deps.handleUnauthorizedCheckout(
+        "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để tiếp tục đặt hàng (giỏ hàng của bạn được giữ nguyên)."
+      );
+      return { skipped: false, outcome: null };
+    }
+
+    const resolvedStatus =
+      typeof orderErr?.statusCode === "number" ? orderErr.statusCode : 500;
+    const resolvedCode =
+      typeof orderErr?.code === "string" && orderErr.code.trim()
+        ? orderErr.code.trim()
+        : "SERVER_ERROR";
+    const isUncertain =
+      typeof orderErr?.isOutcomeUncertain === "boolean"
+        ? orderErr.isOutcomeUncertain
+        : resolvedStatus >= 500 || resolvedCode === "NETWORK_ERROR";
+
+    const errorOutcome: OrderCallOutcome = {
+      type: "error",
+      statusCode: resolvedStatus,
+      code: resolvedCode,
+      message:
+        typeof orderErr?.message === "string" && orderErr.message.trim()
+          ? orderErr.message.trim()
+          : isUncertain
+          ? "Không thể xác nhận phản hồi từ máy chủ sau khi gửi yêu cầu đặt hàng. Đơn hàng có thể đã được ghi nhận trên hệ thống."
+          : "Không thể tạo đơn hàng. Vui lòng kiểm tra lại thông tin giỏ hàng.",
+      isOutcomeUncertain: isUncertain,
+      detailLines: describeOrderErrorDetails(
+        orderErr?.details,
+        productNamesById
+      ),
+    };
+
+    deps.setOrderCallOutcome(errorOutcome);
+    return { skipped: false, outcome: errorOutcome };
+  } finally {
+    deps.submittingRef.current = false;
+    deps.setIsSubmittingOrder(false);
+  }
+}
+
+export interface CartDrawerProps {
+  initialCheckoutStep?: CheckoutDrawerStep;
+  initialIsSubmittingOrder?: boolean;
+  initialOrderOutcome?: OrderCallOutcome | null;
+}
+
+export default function CartDrawer({
+  initialCheckoutStep = "cart",
+  initialIsSubmittingOrder = false,
+  initialOrderOutcome = null,
+}: CartDrawerProps) {
   const {
     items,
     totalQuantity,
@@ -57,19 +245,25 @@ export default function CartDrawer() {
     handleUnauthorizedCheckout,
   } = useAuth();
 
-  const [checkoutStep, setCheckoutStep] = useState<CheckoutDrawerStep>("cart");
+  const [checkoutStep, setCheckoutStep] =
+    useState<CheckoutDrawerStep>(initialCheckoutStep);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
-  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(
+    initialIsSubmittingOrder
+  );
   const [orderCallOutcome, setOrderCallOutcome] =
-    useState<OrderCallOutcome | null>(null);
+    useState<OrderCallOutcome | null>(initialOrderOutcome);
   const [voucherNoticeVisible, setVoucherNoticeVisible] = useState(false);
-  const submittingRef = useRef(false);
+  const submittingRef = useRef(initialIsSubmittingOrder);
 
   // Tính toán bước hiển thị thực tế mà không cần gọi setState đồng bộ trong useEffect
-  const activeStep: CheckoutDrawerStep =
-    checkoutStep === "review" && (items.length === 0 || !isAuthenticated)
-      ? "cart"
-      : checkoutStep;
+  const activeStep: CheckoutDrawerStep = useMemo(
+    () =>
+      checkoutStep === "review" && (items.length === 0 || !isAuthenticated)
+        ? "cart"
+        : checkoutStep,
+    [checkoutStep, items.length, isAuthenticated]
+  );
 
   const handleCloseDrawer = () => {
     if (submittingRef.current || isSubmittingOrder) return;
@@ -167,23 +361,16 @@ export default function CartDrawer() {
    * Kiểm tra giỏ hàng -> Kiểm tra trạng thái đăng nhập (JWT)
    */
   const handleProceedToCheckout = () => {
-    if (items.length === 0 || isSubmittingOrder) return;
-
-    // Kiểm tra trạng thái xác thực & hạn dùng JWT
-    const hasValidSession = verifySession();
-    if (!hasValidSession || !isAuthenticated) {
-      // AC-US-CART-04-02 & UC-CART-001 AF-06: Yêu cầu đăng nhập, giữ nguyên giỏ hàng
-      openAuthModal("login", {
-        resumeCheckout: true,
-        reasonMessage:
-          "Vui lòng đăng nhập tài khoản khách hàng để tiến hành đặt hàng. Giỏ hàng của bạn được giữ nguyên.",
-      });
-      return;
-    }
-
-    setVoucherNoticeVisible(false);
-    setOrderCallOutcome(null);
-    setCheckoutStep("review");
+    proceedToCheckoutStep({
+      itemsCount: items.length,
+      isSubmittingOrder,
+      isAuthenticated,
+      verifySession,
+      openAuthModal,
+      setVoucherNoticeVisible,
+      setOrderCallOutcome,
+      setCheckoutStep,
+    });
   };
 
   /**
@@ -191,91 +378,18 @@ export default function CartDrawer() {
    * Quản lý đầy đủ trạng thái Loading / Success (201 Created) / Error (phân biệt rõ lỗi từ chối xác định và lỗi trạng thái không chắc chắn).
    */
   const handleConfirmCreateOrder = async () => {
-    if (submittingRef.current || isSubmittingOrder) return;
-    if (items.length === 0) {
-      setCheckoutStep("cart");
-      return;
-    }
-
-    // Kiểm tra lại phiên đăng nhập trước khi gọi API
-    const sessionOk = verifySession();
-    if (!sessionOk || !accessToken) {
-      setCheckoutStep("cart");
-      handleUnauthorizedCheckout(
-        "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục đặt hàng (giỏ hàng của bạn vẫn được giữ nguyên)."
-      );
-      return;
-    }
-
-    let payload;
-    try {
-      payload = mapToCreateOrderPayload();
-    } catch (err: unknown) {
-      // Lỗi kiểm tra giỏ hàng tại Client trước khi gửi request -> chắc chắn chưa gửi lên Server (isOutcomeUncertain = false)
-      setOrderCallOutcome({
-        type: "error",
-        statusCode: 400,
-        code: "INVALID_CART",
-        message:
-          err instanceof Error && err.message
-            ? err.message
-            : "Dữ liệu giỏ hàng không hợp lệ.",
-        isOutcomeUncertain: false,
-        detailLines: [],
-      });
-      return;
-    }
-
-    submittingRef.current = true;
-    setIsSubmittingOrder(true);
-    setOrderCallOutcome(null);
-
-    try {
-      const createdOrder = await createOrderApi(payload, accessToken);
-      // TUYỆT ĐỐI KHÔNG xóa giỏ hàng khi đơn ở trạng thái PENDING (AC-US-CART-04-02, BR-07, API Contract v3.0)
-      setOrderCallOutcome({
-        type: "success",
-        order: createdOrder,
-      });
-    } catch (err: unknown) {
-      const orderErr = err as Partial<OrderServiceError>;
-      if (orderErr?.statusCode === 401 || orderErr?.code === "UNAUTHORIZED") {
-        // 401 UNAUTHORIZED: Xóa phiên hết hạn, giữ nguyên giỏ hàng và mở Login modal
-        setCheckoutStep("cart");
-        handleUnauthorizedCheckout(
-          "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để tiếp tục đặt hàng (giỏ hàng của bạn được giữ nguyên)."
-        );
-        return;
-      }
-
-      const resolvedStatus =
-        typeof orderErr?.statusCode === "number" ? orderErr.statusCode : 500;
-      const resolvedCode =
-        typeof orderErr?.code === "string" && orderErr.code.trim()
-          ? orderErr.code.trim()
-          : "SERVER_ERROR";
-      const isUncertain =
-        typeof orderErr?.isOutcomeUncertain === "boolean"
-          ? orderErr.isOutcomeUncertain
-          : resolvedStatus >= 500 || resolvedCode === "NETWORK_ERROR";
-
-      setOrderCallOutcome({
-        type: "error",
-        statusCode: resolvedStatus,
-        code: resolvedCode,
-        message:
-          typeof orderErr?.message === "string" && orderErr.message.trim()
-            ? orderErr.message.trim()
-            : isUncertain
-            ? "Không thể xác nhận phản hồi từ máy chủ sau khi gửi yêu cầu đặt hàng. Đơn hàng có thể đã được ghi nhận trên hệ thống."
-            : "Không thể tạo đơn hàng. Vui lòng kiểm tra lại thông tin giỏ hàng.",
-        isOutcomeUncertain: isUncertain,
-        detailLines: describeOrderErrorDetails(orderErr?.details),
-      });
-    } finally {
-      submittingRef.current = false;
-      setIsSubmittingOrder(false);
-    }
+    await executeCheckoutOrderSubmission({
+      items,
+      accessToken,
+      submittingRef,
+      isSubmittingOrder,
+      setIsSubmittingOrder,
+      setCheckoutStep,
+      setOrderCallOutcome,
+      verifySession,
+      handleUnauthorizedCheckout,
+      mapToCreateOrderPayload,
+    });
   };
 
   return (
@@ -1291,7 +1405,10 @@ export default function CartDrawer() {
                   <div className="bg-error/5 p-3 rounded-lg text-[12px] text-error border border-error/20 leading-relaxed space-y-1.5">
                     <div>{orderCallOutcome.message}</div>
                     {orderCallOutcome.detailLines.length > 0 && (
-                      <ul className="list-disc pl-4 space-y-1 text-[11px] text-on-surface">
+                      <ul
+                        id="orderErrorDetailList"
+                        className="list-disc pl-4 space-y-1 text-[11px] text-on-surface"
+                      >
                         {orderCallOutcome.detailLines.map((line, idx) => (
                           <li key={idx}>{line}</li>
                         ))}

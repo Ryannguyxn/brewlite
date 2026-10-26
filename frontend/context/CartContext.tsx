@@ -133,7 +133,7 @@ export interface CartContextValue {
   mapToCreateOrderPayload: (couponCodeOverride?: string) => CreateOrderDto;
 }
 
-const CartContext = createContext<CartContextValue | null>(null);
+export const CartContext = createContext<CartContextValue | null>(null);
 
 const VALID_SIZES: readonly DrinkSize[] = ["S", "M", "L", "ONE_SIZE"] as const;
 
@@ -189,6 +189,31 @@ export function mergeDuplicateCartItems(items: CartItem[]): CartItem[] {
   }
 
   return Array.from(mergedMap.values());
+}
+
+/**
+ * Chuyển đổi danh sách CartItem sang `CreateOrderDto` chuẩn bị gửi lên `POST /orders`
+ * theo API Contract v2.1 Mục 8.2 & 9.3:
+ * - Gộp các dòng trùng cấu hình (từ chối nếu vượt quá 10 ly/dòng).
+ * - Chỉ giữ lại `{ items: [{ productId, size, toppingIds, quantity }], couponCode? }`.
+ * - Loại bỏ toàn bộ các trường phía Client (`productName`, `basePriceVnd`, `unitPriceVnd`, `lineTotalVnd`, `note`, v.v.).
+ */
+export function buildCreateOrderPayloadFromCart(
+  cartItems: CartItem[],
+  couponCode?: string
+): CreateOrderDto {
+  const mergedItems = mergeDuplicateCartItems(cartItems);
+  const rawItems: CreateOrderItemDto[] = mergedItems.map((item) => ({
+    productId: item.productId,
+    size: item.size,
+    toppingIds: item.toppingIds,
+    quantity: item.quantity,
+  }));
+
+  return sanitizeCreateOrderPayload({
+    items: rawItems,
+    ...(couponCode ? { couponCode } : {}),
+  });
 }
 
 /**
@@ -754,21 +779,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Tuyệt đối chỉ gửi { items: [{ productId, size, toppingIds, quantity }], couponCode? }
   const mapToCreateOrderPayload = useCallback(
     (couponCodeOverride?: string): CreateOrderDto => {
-      const mergedItems = mergeDuplicateCartItems(items);
-      const rawItems: CreateOrderItemDto[] = mergedItems.map((item) => ({
-        productId: item.productId,
-        size: item.size,
-        toppingIds: item.toppingIds,
-        quantity: item.quantity,
-      }));
-
       const rawCoupon =
         couponCodeOverride !== undefined ? couponCodeOverride : couponCode;
-
-      return sanitizeCreateOrderPayload({
-        items: rawItems,
-        ...(rawCoupon ? { couponCode: rawCoupon } : {}),
-      });
+      return buildCreateOrderPayloadFromCart(items, rawCoupon);
     },
     [items, couponCode]
   );

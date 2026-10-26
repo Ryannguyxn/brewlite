@@ -42,7 +42,7 @@ export interface OpenAuthModalOptions {
   reasonMessage?: string;
 }
 
-interface AuthContextType {
+export interface AuthContextType {
   user: AuthUser | null;
   accessToken: string | null;
   isAuthenticated: boolean;
@@ -70,7 +70,9 @@ interface AuthContextType {
   closeAuthModal: () => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(
+  undefined
+);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);

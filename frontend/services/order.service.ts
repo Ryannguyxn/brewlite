@@ -84,71 +84,128 @@ function createOrderError(
 /**
  * Chuyển đổi mảng `details` từ phản hồi lỗi Backend (400 INVALID_CART, 409 INSUFFICIENT_STOCK, v.v.)
  * sang danh sách thông điệp tiếng Việt dễ hiểu cho người dùng ở màn hình Checkout.
+ * Tuân thủ đầy đủ cấu trúc API Contract v2.1 §8.7 / v3.0:
+ * - INSUFFICIENT_STOCK: `{ productId, requestedQuantity, availableQuantity }` (hỗ trợ cả alias `requestedQty`, `availableQty`, `name`, `itemId`)
+ * - INVALID_CART: `{ itemIndex?, productId?, reason }` với đầy đủ mã `reason` trong Contract:
+ *   `DUPLICATE_CONFIGURATION`, `DUPLICATE_TOPPING`, `PRODUCT_NOT_FOUND`, `TOPPING_NOT_FOUND`,
+ *   `PRODUCT_UNAVAILABLE`, `INVALID_SIZE`, `TOPPING_NOT_ALLOWED`, `TOPPING_UNAVAILABLE`,
+ *   `TOO_MANY_TOPPINGS`, `INVALID_PRICE_DATA`.
  */
-export function describeOrderErrorDetails(details: unknown): string[] {
+export function describeOrderErrorDetails(
+  details: unknown,
+  productNamesById?: Record<string, string>
+): string[] {
   if (!Array.isArray(details) || details.length === 0) {
     return [];
   }
 
   const messages: string[] = [];
 
+  const lookupProductName = (rawId?: unknown): string | undefined => {
+    if (typeof rawId !== "string" || !rawId.trim() || !productNamesById) {
+      return undefined;
+    }
+    const trimmed = rawId.trim();
+    return (
+      productNamesById[trimmed] ||
+      productNamesById[trimmed.toLowerCase()] ||
+      productNamesById[trimmed.toUpperCase()]
+    );
+  };
+
   for (const rawItem of details) {
     if (!rawItem || typeof rawItem !== "object") continue;
     const item = rawItem as Record<string, unknown>;
 
-    // Trường hợp 409 INSUFFICIENT_STOCK
+    // 1. Trường hợp 409 INSUFFICIENT_STOCK theo API Contract: { productId, requestedQuantity, availableQuantity }
+    const requestedQuantity =
+      typeof item.requestedQuantity === "number"
+        ? item.requestedQuantity
+        : typeof item.requestedQty === "number"
+        ? item.requestedQty
+        : undefined;
+    const availableQuantity =
+      typeof item.availableQuantity === "number"
+        ? item.availableQuantity
+        : typeof item.availableQty === "number"
+        ? item.availableQty
+        : undefined;
+
     if (
-      typeof item.requestedQty === "number" &&
-      typeof item.availableQty === "number"
+      requestedQuantity !== undefined &&
+      availableQuantity !== undefined
     ) {
-      const name =
+      const rawId =
+        typeof item.productId === "string" && item.productId.trim()
+          ? item.productId.trim()
+          : typeof item.itemId === "string" && item.itemId.trim()
+          ? item.itemId.trim()
+          : "";
+      const mappedName = lookupProductName(rawId);
+      const displayName =
         typeof item.name === "string" && item.name.trim()
           ? item.name.trim()
-          : typeof item.itemId === "string"
-          ? item.itemId
-          : "Sản phẩm/Topping";
-      const itemTypeLabel = item.itemType === "TOPPING" ? "Topping" : "Món";
+          : mappedName
+          ? mappedName
+          : rawId || "Sản phẩm";
+      const itemTypeLabel =
+        item.itemType === "TOPPING" ? "Topping" : "Sản phẩm";
       messages.push(
-        `${itemTypeLabel} "${name}" không đủ tồn kho (yêu cầu: ${item.requestedQty}, còn lại: ${item.availableQty}).`
+        `${itemTypeLabel} "${displayName}" không đủ tồn kho (yêu cầu: ${requestedQuantity}, khả dụng: ${availableQuantity}).`
       );
       continue;
     }
 
-    // Trường hợp 400 INVALID_CART
+    // 2. Trường hợp 400 INVALID_CART theo API Contract: { itemIndex?, productId?, reason }
     if (typeof item.reason === "string") {
+      const mappedName = lookupProductName(item.productId);
       const linePrefix =
         typeof item.itemIndex === "number"
-          ? `Dòng món #${item.itemIndex + 1}`
+          ? mappedName
+            ? `Dòng món #${item.itemIndex + 1} (${mappedName})`
+            : `Dòng món #${item.itemIndex + 1}`
+          : mappedName
+          ? `Món "${mappedName}"`
+          : typeof item.productId === "string" && item.productId.trim()
+          ? `Món (${item.productId.trim()})`
           : "Món trong giỏ";
+
       switch (item.reason) {
         case "PRODUCT_NOT_FOUND":
           messages.push(
             `${linePrefix}: Sản phẩm không tồn tại trên hệ thống.`
           );
           break;
+        case "PRODUCT_UNAVAILABLE":
         case "PRODUCT_INACTIVE":
-          messages.push(`${linePrefix}: Sản phẩm hiện đã ngừng kinh doanh.`);
-          break;
         case "PRODUCT_OUT_OF_STOCK":
-          messages.push(`${linePrefix}: Sản phẩm hiện đã tạm hết hàng.`);
-          break;
-        case "INVALID_SIZE_FOR_CATEGORY":
           messages.push(
-            `${linePrefix}: Kích cỡ đã chọn không áp dụng cho danh mục sản phẩm này.`
+            `${linePrefix}: Sản phẩm hiện không khả dụng hoặc đã tạm hết hàng.`
           );
           break;
+        case "INVALID_SIZE":
+        case "INVALID_SIZE_FOR_CATEGORY":
+          messages.push(
+            `${linePrefix}: Kích cỡ đã chọn không hợp lệ hoặc không áp dụng cho sản phẩm này.`
+          );
+          break;
+        case "TOPPING_NOT_ALLOWED":
         case "TOPPING_NOT_ALLOWED_FOR_PRODUCT":
           messages.push(
             `${linePrefix}: Sản phẩm này không hỗ trợ thêm topping.`
           );
           break;
+        case "TOPPING_NOT_FOUND":
         case "TOPPING_NOT_FOUND_OR_INACTIVE":
           messages.push(
-            `${linePrefix}: Có topping không tồn tại hoặc đã ngừng phục vụ.`
+            `${linePrefix}: Topping đã chọn không tồn tại trên hệ thống.`
           );
           break;
+        case "TOPPING_UNAVAILABLE":
         case "TOPPING_OUT_OF_STOCK":
-          messages.push(`${linePrefix}: Có topping hiện đã hết hàng.`);
+          messages.push(
+            `${linePrefix}: Topping đã chọn hiện không khả dụng hoặc đã hết hàng.`
+          );
           break;
         case "DUPLICATE_TOPPING":
           messages.push(
@@ -163,6 +220,11 @@ export function describeOrderErrorDetails(details: unknown): string[] {
         case "DUPLICATE_CONFIGURATION":
           messages.push(
             `${linePrefix}: Trùng cấu hình sản phẩm, kích cỡ và topping với một dòng khác.`
+          );
+          break;
+        case "INVALID_PRICE_DATA":
+          messages.push(
+            `${linePrefix}: Dữ liệu bảng giá của sản phẩm trên hệ thống không hợp lệ.`
           );
           break;
         default:

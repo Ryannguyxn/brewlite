@@ -543,14 +543,14 @@ export default function CartDrawer({
           )}
 
           {/* Toast phản hồi nhanh trong drawer */}
-          {feedbackMessage && checkoutStep === "closed" && (
+          {feedbackMessage && (
             <div
               className={`mt-2 p-2 rounded-lg text-[12px] font-medium flex items-center justify-between transition-all ${
                 feedbackType === "error"
                   ? "bg-error/10 text-error"
                   : feedbackType === "warning"
-                    ? "bg-tertiary/10 text-tertiary font-semibold"
-                    : "bg-secondary-container text-on-secondary-container"
+                  ? "bg-tertiary/10 text-tertiary font-semibold"
+                  : "bg-secondary-container text-on-secondary-container"
               }`}
             >
               <span>{feedbackMessage}</span>
@@ -1058,11 +1058,7 @@ export default function CartDrawer({
                 <span className="material-symbols-outlined text-[20px]">
                   shopping_bag_speed
                 </span>
-                <span>
-                  {authUser
-                    ? "Tiến hành đặt hàng"
-                    : "Đăng nhập để đặt hàng"}
-                </span>
+                <span>Tiến hành đặt hàng</span>
               </div>
               <div className="flex items-center gap-1 whitespace-nowrap">
                 <span className="font-bold text-price-lg whitespace-nowrap">

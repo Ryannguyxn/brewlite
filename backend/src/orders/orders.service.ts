@@ -7,6 +7,10 @@ import {
   InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
+import {
+  assertCouponValid,
+  reserveCoupon,
+} from '../promotions/promotion-policy.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { readPaymentSnapshot } from '../payments/payment-snapshot.js';
@@ -14,13 +18,6 @@ import type { CreateOrderDto } from './dto/create-order.dto.js';
 import type { GetMyOrdersQueryDto } from './dto/get-my-orders-query.dto.js';
 
 const SIZE_PERCENT = { S: 100, M: 120, L: 140, ONE_SIZE: 100 } as const;
-const invalid = (code: string, message: string) =>
-  new BadRequestException({
-    statusCode: 400,
-    error: 'Bad Request',
-    code,
-    message,
-  });
 const pending = () =>
   new ConflictException({
     statusCode: 409,
@@ -246,48 +243,11 @@ export class OrdersService {
         money(subtotal);
         const now = new Date();
         let discount = 0n;
-        const coupon = dto.couponCode
+        let coupon = dto.couponCode
           ? await tx.coupon.findUnique({ where: { code: dto.couponCode } })
           : null;
-        if (dto.couponCode) {
-          if (
-            !coupon ||
-            coupon.startsAt > now ||
-            coupon.expiresAt <= now ||
-            subtotal < coupon.minSubtotalVnd ||
-            coupon.activeUsageCount >= coupon.usageLimit
-          )
-            throw invalid('INVALID_COUPON', 'Coupon is unavailable');
-          const used = await tx.couponRedemption.count({
-            where: {
-              userId,
-              couponId: coupon.id,
-              status: { in: ['HELD', 'CONSUMED'] },
-            },
-          });
-          if (used >= coupon.perUserLimit)
-            throw invalid('INVALID_COUPON', 'Coupon usage limit reached');
-          discount =
-            coupon.type === 'FIXED'
-              ? BigInt(coupon.value)
-              : (subtotal * BigInt(coupon.value) + 50n) / 100n;
-          if (
-            coupon.type === 'PERCENT' &&
-            coupon.maxDiscountVnd !== null &&
-            discount > coupon.maxDiscountVnd
-          )
-            discount = coupon.maxDiscountVnd;
-          if (discount > subtotal) discount = subtotal;
-          const reserved = await tx.coupon.updateMany({
-            where: {
-              id: coupon.id,
-              activeUsageCount: { lt: coupon.usageLimit },
-            },
-            data: { activeUsageCount: { increment: 1 } },
-          });
-          if (!reserved.count)
-            throw invalid('INVALID_COUPON', 'Coupon usage limit reached');
-        }
+        // Invalid code/validity stays 400; quota follows stock per Contract v3.0.
+        if (dto.couponCode) assertCouponValid(coupon, subtotal, now);
         // Aggregate all sizes of a product before reserving its shared stock.
         for (const [productId, quantity] of [...quantities].sort(([a], [b]) =>
           a.localeCompare(b),
@@ -314,6 +274,11 @@ export class OrdersService {
               ],
             });
           }
+        }
+        if (coupon) {
+          const reservation = await reserveCoupon(tx, userId, coupon.id, subtotal);
+          coupon = reservation.coupon;
+          discount = reservation.discount;
         }
         const order = await tx.order.create({
           data: {
@@ -367,6 +332,8 @@ export class OrdersService {
           totalVnd: money(order.totalVnd),
           createdAt: order.createdAt.toISOString(),
         };
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       });
     } catch (error) {
       if (error instanceof HttpException) throw error;

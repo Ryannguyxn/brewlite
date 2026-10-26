@@ -218,7 +218,7 @@ export interface AuthErrorResponse extends ApiErrorResponse {
 }
 
 // ============================================================================
-// ĐỊNH NGHĨA KIỂU DỮ LIỆU ORDER & CHECKOUT (SPRINT 2 & 3 — SCRUM-43)
+// ĐỊNH NGHĨA KIỂU DỮ LIỆU ORDER & CHECKOUT (SPRINT 2 & 3 — SCRUM-43 & SCRUM-44)
 // Khớp 100% với:
 // - docs/api/BrewLite_API_Contract_v3.0.md & Appendix A (v2.1 Mục 5.3, 8, 9)
 // - database/schema.dbml & backend/prisma/schema.prisma
@@ -333,6 +333,18 @@ export type OrderErrorCode =
 
 export interface OrderApiErrorResponse extends ApiErrorResponse {
   code: OrderErrorCode | string;
+  details?: InvalidCartDetail[] | InsufficientStockDetail[] | unknown;
+}
+
+/**
+ * Cấu trúc trạng thái lỗi đã chuẩn hóa khi tích hợp Cart với Order flow (SCRUM-44)
+ */
+export interface OrderSubmissionErrorState {
+  statusCode: number;
+  code: OrderErrorCode | string;
+  message: string;
+  isOutcomeUncertain: boolean;
+  detailLines: string[];
   details?: InvalidCartDetail[] | InsufficientStockDetail[] | unknown;
 }
 

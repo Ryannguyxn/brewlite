@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/context/AuthContext";
@@ -23,18 +24,280 @@ import {
   fetchCatalogData,
   formatVnd,
 } from "@/services/api.service";
-import { getDisplayCustomerName } from "@/services/auth.service";
+import {
+  clearStoredSession,
+  getDisplayCustomerName,
+  isTokenExpired,
+} from "@/services/auth.service";
 import {
   buildCreatePaymentPayload,
   fetchAuthMeProfile,
   fetchMyOrdersApi,
   generateIdempotencyKey,
+  isOrderPayable,
   selectTargetOrderFromMyOrders,
   submitPaymentApi,
   toPaymentSubmissionErrorState,
   validateCreatePaymentPayload,
+  validatePaymentResponseData,
   type SubmitPaymentApiResult,
 } from "@/services/payment.service";
+
+export type PaymentSubmissionOutcome =
+  | {
+      type: "success";
+      response: PaymentResponseDto;
+      replayed: boolean;
+      idempotencyKey: string;
+    }
+  | {
+      type: "failed";
+      response: PaymentResponseDto;
+      replayed: boolean;
+      idempotencyKey: string;
+      nextIdempotencyKey: string;
+    }
+  | {
+      type: "error";
+      error: PaymentSubmissionErrorState;
+    };
+
+export interface ExecutePaymentSubmissionDeps {
+  activeOrder: CreateOrderResponseDto | MyOrderDto | null;
+  orderStatus?: OrderStatus | string | null;
+  payload: CreatePaymentRequestDto;
+  idempotencyKey: string;
+  reuseExistingKey?: boolean;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  verifySession: () => boolean;
+  openAuthModal: (
+    mode?: "login" | "register",
+    options?: { resumeCheckout?: boolean; reasonMessage?: string }
+  ) => void;
+  submittingRef: { current: boolean };
+  isSubmitting: boolean;
+  setIsSubmitting: (submitting: boolean) => void;
+  setIdempotencyKey: (key: string) => void;
+  setLastSubmittedPayloadJson?: (json: string) => void;
+  setPaymentResult: (result: PaymentResponseDto | null) => void;
+  setIsReplayedResult?: (replayed: boolean) => void;
+  setOrderStatus: (status: OrderStatus) => void;
+  setIsResultModalOpen?: (open: boolean) => void;
+  setPaymentError: (error: PaymentSubmissionErrorState | null) => void;
+  clearCart: () => void;
+  setContextActiveOrder?: (order: CreateOrderResponseDto | null) => void;
+  onPointsEarned?: (points: number) => void;
+  submitPaymentFn?: typeof submitPaymentApi;
+}
+
+/**
+ * Hàm điều phối thực thi gửi `POST /payments` (tách biệt để dễ kiểm thử đầy đủ mọi nhánh):
+ * 1. Chặn double-submit (`submittingRef.current || isSubmitting`).
+ * 2. Chặn thanh toán nếu Order không còn ở trạng thái `PENDING` hoặc `PAYMENT_FAILED`.
+ * 3. Kiểm tra `Idempotency-Key` và `CreatePaymentRequestDto`.
+ * 4. Kiểm tra phiên đăng nhập JWT (401 -> xóa session, mở Login modal, giữ nguyên Cart).
+ * 5. Gọi `POST /payments` và kiểm tra toàn vẹn response khớp với `activeOrder.id` & `activeOrder.totalVnd`.
+ * 6. Chỉ xóa Cart khi response hợp lệ 100% và `paymentStatus === "SUCCESS"` (`orderStatus === "PAID"`).
+ */
+export async function executePaymentSubmission(
+  deps: ExecutePaymentSubmissionDeps
+): Promise<{ skipped: boolean; outcome: PaymentSubmissionOutcome | null }> {
+  if (deps.submittingRef.current || deps.isSubmitting || !deps.activeOrder) {
+    return { skipped: true, outcome: null };
+  }
+
+  const effectiveStatus = deps.orderStatus ?? deps.activeOrder.status;
+  const keyToUse = deps.reuseExistingKey
+    ? deps.idempotencyKey
+    : deps.idempotencyKey || generateIdempotencyKey("idem");
+
+  if (!isOrderPayable(deps.activeOrder, effectiveStatus)) {
+    const nonPayableError = toPaymentSubmissionErrorState(
+      {
+        statusCode: 409,
+        code: "INVALID_TRANSITION",
+        message: `Đơn hàng đang ở trạng thái ${String(
+          effectiveStatus
+        )} (không còn ở PENDING hoặc PAYMENT_FAILED) nên không thể thực hiện thanh toán.`,
+        canRetrySameKey: false,
+        shouldGenerateNewKey: false,
+        idempotencyKey: keyToUse,
+      },
+      keyToUse
+    );
+    deps.setPaymentError(nonPayableError);
+    return {
+      skipped: false,
+      outcome: { type: "error", error: nonPayableError },
+    };
+  }
+
+  const validation = validateCreatePaymentPayload(deps.payload, keyToUse);
+  if (!validation.isValid || !validation.payload) {
+    const validationErr = toPaymentSubmissionErrorState(
+      validation.error,
+      keyToUse
+    );
+    deps.setPaymentError(validationErr);
+    return {
+      skipped: false,
+      outcome: { type: "error", error: validationErr },
+    };
+  }
+
+  if (
+    validation.payload.orderId !== deps.activeOrder.id.trim().toLowerCase()
+  ) {
+    const mismatchOrderErr = toPaymentSubmissionErrorState(
+      {
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+        message:
+          "orderId trong yêu cầu thanh toán không khớp với đơn hàng hiện tại.",
+        canRetrySameKey: false,
+        shouldGenerateNewKey: false,
+        idempotencyKey: keyToUse,
+      },
+      keyToUse
+    );
+    deps.setPaymentError(mismatchOrderErr);
+    return {
+      skipped: false,
+      outcome: { type: "error", error: mismatchOrderErr },
+    };
+  }
+
+  if (
+    !deps.verifySession() ||
+    !deps.isAuthenticated ||
+    !deps.accessToken ||
+    isTokenExpired(deps.accessToken)
+  ) {
+    clearStoredSession();
+    const unauthError = toPaymentSubmissionErrorState(
+      {
+        statusCode: 401,
+        code: "UNAUTHORIZED",
+        message:
+          "Phiên đăng nhập thiếu hoặc đã hết hạn (401 UNAUTHORIZED). Vui lòng đăng nhập lại để thanh toán.",
+        canRetrySameKey: false,
+        shouldGenerateNewKey: false,
+        idempotencyKey: keyToUse,
+      },
+      keyToUse
+    );
+    deps.setPaymentError(unauthError);
+    deps.openAuthModal("login", {
+      reasonMessage: unauthError.message,
+    });
+    return {
+      skipped: false,
+      outcome: { type: "error", error: unauthError },
+    };
+  }
+
+  const callSubmitPayment = deps.submitPaymentFn || submitPaymentApi;
+  const expectedMethodLast4 =
+    "cardNumber" in validation.payload.paymentDetails
+      ? validation.payload.paymentDetails.cardNumber.slice(-4)
+      : validation.payload.paymentDetails.phoneNumber.slice(-4);
+
+  deps.submittingRef.current = true;
+  deps.setIsSubmitting(true);
+  deps.setPaymentError(null);
+  deps.setIdempotencyKey(keyToUse);
+  deps.setLastSubmittedPayloadJson?.(JSON.stringify(validation.payload));
+
+  try {
+    const result: SubmitPaymentApiResult = await callSubmitPayment(
+      validation.payload,
+      keyToUse,
+      {
+        accessToken: deps.accessToken,
+        expectedOrderId: deps.activeOrder.id,
+        expectedAmountVnd: deps.activeOrder.totalVnd,
+      }
+    );
+
+    // Kiểm tra chéo lần 2 tại tầng UI để đảm bảo tuyệt đối không xóa Cart hay hiển thị SUCCESS khi response sai/lệch Order
+    const verifiedResponse = validatePaymentResponseData(
+      result.response,
+      keyToUse,
+      {
+        expectedOrderId: deps.activeOrder.id,
+        expectedMethod: validation.payload.method,
+        expectedMethodLast4,
+        expectedAmountVnd: deps.activeOrder.totalVnd,
+      }
+    );
+
+    deps.setPaymentResult(verifiedResponse);
+    deps.setIsReplayedResult?.(Boolean(result.replayed));
+    deps.setOrderStatus(verifiedResponse.orderStatus);
+    deps.setIsResultModalOpen?.(true);
+
+    if (
+      verifiedResponse.paymentStatus === "SUCCESS" &&
+      verifiedResponse.orderStatus === "PAID" &&
+      verifiedResponse.failureReason === null
+    ) {
+      // API Contract v3.0 §3.2 & §9: Chỉ xóa Cart sau khi Payment SUCCESS (Order -> PAID)
+      deps.clearCart();
+      clearStoredActiveOrder();
+      deps.setContextActiveOrder?.(null);
+      if (!result.replayed) {
+        deps.onPointsEarned?.(verifiedResponse.pointsEarned);
+      }
+      return {
+        skipped: false,
+        outcome: {
+          type: "success",
+          response: verifiedResponse,
+          replayed: Boolean(result.replayed),
+          idempotencyKey: keyToUse,
+        },
+      };
+    }
+
+    // API Contract v3.0 §3.2 & §9: FAILED không xóa Cart; tạo Idempotency-Key mới cho lần thử tiếp theo
+    const nextKey = generateIdempotencyKey("idem");
+    deps.setIdempotencyKey(nextKey);
+    deps.setLastSubmittedPayloadJson?.("");
+    return {
+      skipped: false,
+      outcome: {
+        type: "failed",
+        response: verifiedResponse,
+        replayed: Boolean(result.replayed),
+        idempotencyKey: keyToUse,
+        nextIdempotencyKey: nextKey,
+      },
+    };
+  } catch (err: unknown) {
+    const errorState = toPaymentSubmissionErrorState(err, keyToUse);
+    deps.setPaymentError(errorState);
+
+    if (errorState.statusCode === 401 || errorState.code === "UNAUTHORIZED") {
+      clearStoredSession();
+      deps.openAuthModal("login", {
+        reasonMessage:
+          "Phiên đăng nhập đã hết hạn (401 UNAUTHORIZED). Vui lòng đăng nhập lại để tiếp tục thanh toán.",
+      });
+    } else if (errorState.shouldGenerateNewKey) {
+      const freshKey = generateIdempotencyKey("idem");
+      deps.setIdempotencyKey(freshKey);
+      deps.setLastSubmittedPayloadJson?.("");
+    }
+    return {
+      skipped: false,
+      outcome: { type: "error", error: errorState },
+    };
+  } finally {
+    deps.submittingRef.current = false;
+    deps.setIsSubmitting(false);
+  }
+}
 
 export interface PaymentPageViewProps {
   initialOrder?: CreateOrderResponseDto | MyOrderDto | null;
@@ -130,15 +393,20 @@ export default function PaymentPageView({
 
   const activeOrder = serverOrder ?? sessionCheckoutOrder;
 
-  const [orderStatus, setOrderStatus] = useState<OrderStatus>(
-    initialPaymentResult?.orderStatus ?? activeOrder?.status ?? "PENDING"
-  );
+  const [submittedOrderStatus, setSubmittedOrderStatus] =
+    useState<OrderStatus | null>(null);
 
-  useEffect(() => {
-    if (!paymentResult && activeOrder?.status) {
-      setOrderStatus(activeOrder.status);
-    }
-  }, [activeOrder?.id, activeOrder?.status, paymentResult]);
+  const orderStatus: OrderStatus =
+    submittedOrderStatus ??
+    paymentResult?.orderStatus ??
+    activeOrder?.status ??
+    "PENDING";
+
+  const isPayableOrder = useMemo<boolean>(() => {
+    if (!activeOrder) return false;
+    if (paymentResult?.paymentStatus === "SUCCESS") return false;
+    return isOrderPayable(activeOrder, orderStatus);
+  }, [activeOrder, orderStatus, paymentResult?.paymentStatus]);
 
   // Tải danh sách ảnh sản phẩm thật từ GET /products
   useEffect(() => {
@@ -206,35 +474,52 @@ export default function PaymentPageView({
 
       if (targetOrder) {
         setServerOrder(targetOrder);
-        setOrderStatus(targetOrder.status);
+        setSubmittedOrderStatus(targetOrder.status);
+
+        if (!isOrderPayable(targetOrder)) {
+          clearStoredActiveOrder();
+          setContextActiveOrder?.(null);
+        }
 
         // Nếu đơn hàng trên Server đã có Payment snapshot (ví dụ reload sau khi đã thanh toán):
-        // khôi phục kết quả từ GET /orders/me mà KHÔNG gọi POST /payments lại (API Contract v3.0 §4.2 & §9)
+        // khôi phục kết quả đã kiểm duyệt từ GET /orders/me mà KHÔNG gọi POST /payments lại (API Contract v3.0 §4.2 & §9)
         if (targetOrder.payment) {
-          const restoredPayment: PaymentResponseDto = {
-            paymentId: targetOrder.payment.id,
-            orderId: targetOrder.id,
-            paymentStatus: targetOrder.payment.status,
-            orderStatus:
-              targetOrder.payment.status === "SUCCESS"
-                ? "PAID"
-                : "PAYMENT_FAILED",
-            amountVnd: targetOrder.payment.amountVnd,
-            method: targetOrder.payment.method,
-            methodLast4: targetOrder.payment.methodLast4 || "0000",
-            mockReference: targetOrder.payment.mockReference || "MOCK-0000",
-            pointsEarned: targetOrder.pointsEarned,
-            failureReason:
-              targetOrder.payment.failureReason === "PAYMENT_DECLINED"
-                ? "PAYMENT_DECLINED"
-                : null,
-            createdAt: targetOrder.payment.createdAt,
-          };
-          setPaymentResult(restoredPayment);
+          try {
+            const candidatePayment: PaymentResponseDto = {
+              paymentId: targetOrder.payment.id,
+              orderId: targetOrder.id,
+              paymentStatus: targetOrder.payment.status,
+              orderStatus:
+                targetOrder.payment.status === "SUCCESS"
+                  ? "PAID"
+                  : "PAYMENT_FAILED",
+              amountVnd: targetOrder.payment.amountVnd,
+              method: targetOrder.payment.method,
+              methodLast4: targetOrder.payment.methodLast4 || "0000",
+              mockReference: targetOrder.payment.mockReference || "MOCK-0000",
+              pointsEarned: targetOrder.pointsEarned,
+              failureReason:
+                targetOrder.payment.failureReason === "PAYMENT_DECLINED"
+                  ? "PAYMENT_DECLINED"
+                  : null,
+              createdAt: targetOrder.payment.createdAt,
+            };
+            const verifiedSnapshot = validatePaymentResponseData(
+              candidatePayment,
+              "",
+              {
+                expectedOrderId: targetOrder.id,
+                expectedAmountVnd: targetOrder.totalVnd,
+              }
+            );
+            setPaymentResult(verifiedSnapshot);
+          } catch {
+            // Bỏ qua nếu snapshot payment không hợp lệ
+          }
         }
       } else if (sessionCheckoutOrder) {
         setServerOrder(sessionCheckoutOrder);
-        setOrderStatus(sessionCheckoutOrder.status);
+        setSubmittedOrderStatus(sessionCheckoutOrder.status);
       } else {
         setServerOrder(null);
       }
@@ -247,11 +532,20 @@ export default function PaymentPageView({
     } finally {
       setIsLoadingOrder(false);
     }
-  }, [isAuthLoading, isAuthenticated, accessToken, sessionCheckoutOrder]);
+  }, [
+    isAuthLoading,
+    isAuthenticated,
+    accessToken,
+    sessionCheckoutOrder,
+    setContextActiveOrder,
+  ]);
 
   useEffect(() => {
     if (initialOrder) return;
-    loadRealOrderAndProfile();
+    const timer = setTimeout(() => {
+      void loadRealOrderAndProfile();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [initialOrder, loadRealOrderAndProfile]);
 
   const customerFullName = useMemo(() => {
@@ -264,7 +558,7 @@ export default function PaymentPageView({
   const customerEmail = user?.email || "Chưa đăng nhập";
 
   // Đồng hồ đếm ngược 15 phút từ `expiresAt` thật của Server (hoặc `createdAt + 15 phút`)
-  const expiresAtDate = useMemo(() => {
+  const expiresAtDate = useMemo<Date | null>(() => {
     const myOrderWithExpiry = activeOrder as Partial<MyOrderDto> | null;
     if (
       myOrderWithExpiry?.expiresAt &&
@@ -275,23 +569,29 @@ export default function PaymentPageView({
     const createdMs = activeOrder?.createdAt
       ? Date.parse(activeOrder.createdAt)
       : NaN;
-    const baseMs = Number.isFinite(createdMs) ? createdMs : Date.now();
-    return new Date(baseMs + 15 * 60 * 1000);
+    if (Number.isFinite(createdMs)) {
+      return new Date(createdMs + 15 * 60 * 1000);
+    }
+    return null;
   }, [activeOrder]);
 
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(() => {
-    const diff = Math.floor((expiresAtDate.getTime() - Date.now()) / 1000);
-    return diff > 0 ? diff : 0;
-  });
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(15 * 60);
 
   useEffect(() => {
     const updateRemaining = () => {
+      if (!expiresAtDate) {
+        setRemainingSeconds(0);
+        return;
+      }
       const diff = Math.floor((expiresAtDate.getTime() - Date.now()) / 1000);
       setRemainingSeconds(diff > 0 ? diff : 0);
     };
-    updateRemaining();
-    const timer = setInterval(updateRemaining, 1000);
-    return () => clearInterval(timer);
+    const initialTimer = setTimeout(updateRemaining, 0);
+    const interval = setInterval(updateRemaining, 1000);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+    };
   }, [expiresAtDate]);
 
   const formattedCountdown = useMemo(() => {
@@ -301,6 +601,7 @@ export default function PaymentPageView({
   }, [remainingSeconds]);
 
   const formattedExpireClock = useMemo(() => {
+    if (!expiresAtDate) return "--:--";
     return expiresAtDate.toLocaleTimeString("vi-VN", {
       hour: "2-digit",
       minute: "2-digit",
@@ -352,14 +653,14 @@ export default function PaymentPageView({
   };
 
   const handleSelectMethod = (nextMethod: PaymentMethod) => {
-    if (isSubmitting) return;
+    if (isSubmitting || !isPayableOrder) return;
     setMethod(nextMethod);
     setPaymentError(null);
     refreshKeyIfChangedAfterSubmit(nextMethod, cardNumber, phoneNumber);
   };
 
   const handleCardInputChange = (rawVal: string) => {
-    if (isSubmitting) return;
+    if (isSubmitting || !isPayableOrder) return;
     const digitsOnly = rawVal.replace(/\D/g, "").slice(0, 16);
     setCardNumber(digitsOnly);
     setPaymentError(null);
@@ -367,7 +668,7 @@ export default function PaymentPageView({
   };
 
   const handleWalletInputChange = (rawVal: string) => {
-    if (isSubmitting) return;
+    if (isSubmitting || !isPayableOrder) return;
     const digitsOnly = rawVal.replace(/\D/g, "").slice(0, 10);
     setPhoneNumber(digitsOnly);
     setPaymentError(null);
@@ -375,7 +676,7 @@ export default function PaymentPageView({
   };
 
   const handleSetCardScenario = (scenario: "success" | "fail") => {
-    if (isSubmitting) return;
+    if (isSubmitting || !isPayableOrder) return;
     const nextCard =
       scenario === "success" ? "1234567890121234" : "1234567890120002";
     setMethod("CARD");
@@ -386,7 +687,7 @@ export default function PaymentPageView({
   };
 
   const handleSetWalletScenario = (scenario: "success" | "fail") => {
-    if (isSubmitting) return;
+    if (isSubmitting || !isPayableOrder) return;
     const nextPhone = scenario === "success" ? "0912345678" : "0912340000";
     setMethod("WALLET");
     setPhoneNumber(nextPhone);
@@ -401,82 +702,30 @@ export default function PaymentPageView({
   const handleSubmitPayment = async (options?: {
     reuseExistingKey?: boolean;
   }) => {
-    if (submittingRef.current || isSubmitting || !activeOrder) return;
-
-    const keyToUse = options?.reuseExistingKey
-      ? idempotencyKey
-      : idempotencyKey || generateIdempotencyKey("idem");
-
-    const validation = validateCreatePaymentPayload(
-      currentPaymentPayload,
-      keyToUse
-    );
-    if (!validation.isValid || !validation.payload) {
-      setPaymentError(
-        toPaymentSubmissionErrorState(validation.error, keyToUse)
-      );
-      return;
-    }
-
-    if (!verifySession() || !isAuthenticated || !accessToken) {
-      openAuthModal("login", {
-        reasonMessage:
-          "Vui lòng đăng nhập để thực hiện thanh toán đơn hàng của bạn.",
-      });
-      return;
-    }
-
-    submittingRef.current = true;
-    setIsSubmitting(true);
-    setPaymentError(null);
-    setIdempotencyKey(keyToUse);
-    setLastSubmittedPayloadJson(JSON.stringify(validation.payload));
-
-    try {
-      const result: SubmitPaymentApiResult = await submitPaymentApi(
-        validation.payload,
-        keyToUse,
-        {
-          accessToken,
-        }
-      );
-
-      setPaymentResult(result.response);
-      setIsReplayedResult(result.replayed);
-      setOrderStatus(result.response.orderStatus);
-      setIsResultModalOpen(true);
-
-      if (result.response.paymentStatus === "SUCCESS") {
-        // API Contract v3.0 §3.2 & §9: Chỉ xóa Cart sau khi Payment SUCCESS (Order -> PAID)
-        clearCart();
-        clearStoredActiveOrder();
-        setContextActiveOrder?.(null);
-        if (!result.replayed) {
-          setLoyaltyPoints((prev) => prev + result.response.pointsEarned);
-        }
-      } else {
-        // API Contract v3.0 §3.2 & §9: FAILED không xóa Cart; tạo Idempotency-Key mới cho lần thử tiếp theo
-        setIdempotencyKey(generateIdempotencyKey("idem"));
-        setLastSubmittedPayloadJson("");
-      }
-    } catch (err: unknown) {
-      const errorState = toPaymentSubmissionErrorState(err, keyToUse);
-      setPaymentError(errorState);
-
-      if (errorState.statusCode === 401 || errorState.code === "UNAUTHORIZED") {
-        openAuthModal("login", {
-          reasonMessage:
-            "Phiên đăng nhập đã hết hạn (401 UNAUTHORIZED). Vui lòng đăng nhập lại để tiếp tục thanh toán.",
-        });
-      } else if (errorState.shouldGenerateNewKey) {
-        const freshKey = generateIdempotencyKey("idem");
-        setIdempotencyKey(freshKey);
-        setLastSubmittedPayloadJson("");
-      }
-    } finally {
-      submittingRef.current = false;
-      setIsSubmitting(false);
-    }
+    await executePaymentSubmission({
+      activeOrder,
+      orderStatus,
+      payload: currentPaymentPayload,
+      idempotencyKey,
+      reuseExistingKey: options?.reuseExistingKey,
+      accessToken,
+      isAuthenticated,
+      verifySession,
+      openAuthModal,
+      submittingRef,
+      isSubmitting,
+      setIsSubmitting,
+      setIdempotencyKey,
+      setLastSubmittedPayloadJson,
+      setPaymentResult,
+      setIsReplayedResult,
+      setOrderStatus: setSubmittedOrderStatus,
+      setIsResultModalOpen,
+      setPaymentError,
+      clearCart,
+      setContextActiveOrder,
+      onPointsEarned: (pts) => setLoyaltyPoints((prev) => prev + pts),
+    });
   };
 
   return (
@@ -492,7 +741,7 @@ export default function PaymentPageView({
                 aria-label="Breadcrumb"
                 className="flex items-center gap-space-xs text-on-surface-variant font-label-md text-label-md"
               >
-                <a
+                <Link
                   href="/"
                   className="hover:text-[#C67C4E] transition-colors flex items-center gap-1"
                 >
@@ -500,7 +749,7 @@ export default function PaymentPageView({
                     restaurant_menu
                   </span>
                   Thực đơn
-                </a>
+                </Link>
                 <span className="material-symbols-outlined text-[14px] text-outline">
                   chevron_right
                 </span>
@@ -567,12 +816,12 @@ export default function PaymentPageView({
                   >
                     Đăng nhập ngay
                   </button>
-                  <a
+                  <Link
                     href="/"
                     className="px-5 py-3 rounded-xl border border-[#EFECE6] bg-[#FAF6EE] hover:bg-[#EFECE6] text-[#1E1510] font-title-sm text-title-sm font-semibold transition-colors"
                   >
                     Về Thực đơn
-                  </a>
+                  </Link>
                 </div>
               </div>
             </div>
@@ -603,12 +852,12 @@ export default function PaymentPageView({
                   >
                     Mở Giỏ hàng &amp; Đặt đơn
                   </button>
-                  <a
+                  <Link
                     href="/"
                     className="px-5 py-3 rounded-xl border border-[#EFECE6] bg-[#FAF6EE] hover:bg-[#EFECE6] text-[#1E1510] font-title-sm text-title-sm font-semibold transition-colors"
                   >
                     Khám phá Thực đơn
-                  </a>
+                  </Link>
                 </div>
               </div>
             </div>
@@ -649,13 +898,21 @@ export default function PaymentPageView({
                           <span className="w-2 h-2 rounded-full bg-[#C5221F] animate-pulse" />
                           THANH TOÁN THẤT BẠI - PAYMENT_FAILED
                         </span>
-                      ) : (
+                      ) : orderStatus === "PENDING" ? (
                         <span
                           id="paymentOrderStatusBadge"
                           className="inline-flex items-center gap-1 px-3 py-1 rounded-full font-label-md text-[12px] bg-[#FEFCE8] text-[#D97706] border border-[#FDE047] font-bold"
                         >
                           <span className="w-2 h-2 rounded-full bg-[#D97706] animate-pulse" />
                           CHỜ THANH TOÁN - PENDING
+                        </span>
+                      ) : (
+                        <span
+                          id="paymentOrderStatusBadge"
+                          className="inline-flex items-center gap-1 px-3 py-1 rounded-full font-label-md text-[12px] bg-[#EFECE6] text-[#53443b] border border-[#D7CCC8] font-bold"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-[#53443b]" />
+                          KHÔNG THỂ THANH TOÁN - {orderStatus}
                         </span>
                       )}
                     </div>
@@ -762,20 +1019,51 @@ export default function PaymentPageView({
                         </span>
                       </div>
 
-                      {/* Payment Method Tabs / Accordion */}
-                      <div className="flex flex-col gap-space-md">
-                        {/* PHƯƠNG THỨC 1: Thẻ thanh toán (CARD) */}
+                      {/* Payment Method Tabs / Accordion (Chỉ mở cho Order ở trạng thái PENDING hoặc PAYMENT_FAILED) */}
+                      {!isPayableOrder ? (
                         <div
-                          className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
-                            method === "CARD"
-                              ? "border-2 border-[#C67C4E] bg-[#FAF6EE]/50"
-                              : "border border-[#EFECE6] bg-white hover:border-[#C67C4E]/50"
+                          id="nonPayableOrderBanner"
+                          role="alert"
+                          aria-live="polite"
+                          className={`rounded-xl p-space-md border flex flex-col gap-2 ${
+                            orderStatus === "PAID"
+                              ? "bg-[#E6F4EA] border-[#A8DAB5] text-[#137333]"
+                              : "bg-[#FCE8E6] border-[#F5C2C7] text-[#C5221F]"
                           }`}
                         >
-                          <label
-                            className="flex items-center justify-between cursor-pointer"
-                            onClick={() => handleSelectMethod("CARD")}
+                          <div className="flex items-center gap-2 font-title-sm text-title-sm font-bold">
+                            <span className="material-symbols-outlined text-[20px]">
+                              {orderStatus === "PAID" ? "verified" : "block"}
+                            </span>
+                            <span>
+                              {orderStatus === "PAID"
+                                ? "Đơn hàng đã hoàn tất thanh toán (PAID)"
+                                : `Không thể thanh toán đơn hàng ở trạng thái ${orderStatus}`}
+                            </span>
+                          </div>
+                          <p className="font-body-sm text-body-sm text-[#1E1510] leading-relaxed">
+                            {orderStatus === "PAID"
+                              ? "Đơn hàng này đã được ghi nhận thanh toán thành công trên máy chủ. Form nhập thẻ/ví điện tử đã được khóa để ngăn gửi trùng yêu cầu POST /payments."
+                              : `Theo API Contract v3.0 Mục 3.2, chỉ các đơn hàng đang ở trạng thái PENDING hoặc PAYMENT_FAILED mới được phép thanh toán. Đơn hàng hiện tại đang ở trạng thái ${orderStatus} nên form thanh toán đã bị khóa.`}
+                          </p>
+                        </div>
+                      ) : (
+                        <div
+                          id="paymentMethodFormSection"
+                          className="flex flex-col gap-space-md"
+                        >
+                          {/* PHƯƠNG THỨC 1: Thẻ thanh toán (CARD) */}
+                          <div
+                            className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
+                              method === "CARD"
+                                ? "border-2 border-[#C67C4E] bg-[#FAF6EE]/50"
+                                : "border border-[#EFECE6] bg-white hover:border-[#C67C4E]/50"
+                            }`}
                           >
+                            <label
+                              className="flex items-center justify-between cursor-pointer"
+                              onClick={() => handleSelectMethod("CARD")}
+                            >
                             <div className="flex items-center gap-space-sm">
                               <input
                                 id="radioCard"
@@ -1104,6 +1392,7 @@ export default function PaymentPageView({
                           </div>
                         </div>
                       </div>
+                      )}
                     </div>
 
                     {/* HỘP THÔNG TIN KIỂM THỬ MOCK PAYMENT & IDEMPOTENCY */}
@@ -1202,6 +1491,7 @@ export default function PaymentPageView({
                               className="flex items-start justify-between gap-3 p-3 rounded-lg bg-[#FAF6EE] border border-[#EFECE6] hover:bg-[#FAF6EE]/80 transition-colors"
                             >
                               <div className="flex items-start gap-3">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img
                                   src={resolvedImg}
                                   alt={item.productName}
@@ -1390,7 +1680,7 @@ export default function PaymentPageView({
                       <button
                         id="btnSubmitPayment"
                         type="button"
-                        disabled={isSubmitting || orderStatus === "PAID"}
+                        disabled={isSubmitting || !isPayableOrder}
                         onClick={() =>
                           handleSubmitPayment({ reuseExistingKey: false })
                         }
@@ -1405,6 +1695,8 @@ export default function PaymentPageView({
                             ? "progress_activity"
                             : orderStatus === "PAID"
                             ? "check_circle"
+                            : !isPayableOrder
+                            ? "block"
                             : "lock"}
                         </span>
                         <span>
@@ -1414,6 +1706,8 @@ export default function PaymentPageView({
                             ? `Đơn hàng đã thanh toán • ${formatVnd(
                                 activeOrder.totalVnd
                               )}`
+                            : !isPayableOrder
+                            ? `Không thể thanh toán (${orderStatus})`
                             : orderStatus === "PAYMENT_FAILED"
                             ? `Thử thanh toán lại • ${formatVnd(
                                 activeOrder.totalVnd
@@ -1607,12 +1901,12 @@ export default function PaymentPageView({
                   : "Đóng & Thử lại phương thức khác"}
               </button>
               {paymentResult.paymentStatus === "SUCCESS" && (
-                <a
+                <Link
                   href="/"
                   className="py-3 px-4 rounded-xl border border-[#EFECE6] bg-[#FAF6EE] hover:bg-[#EFECE6] text-[#1E1510] font-title-sm text-title-sm font-semibold transition-colors flex items-center justify-center"
                 >
                   Về Thực đơn
-                </a>
+                </Link>
               )}
             </div>
           </div>

@@ -1,8 +1,10 @@
 import type {
   AuthMeResponseDto,
+  CreateOrderResponseDto,
   CreatePaymentRequestDto,
   GetMyOrdersResponseDto,
   MyOrderDto,
+  OrderStatus,
   PaymentErrorCode,
   PaymentMethod,
   PaymentResponseDto,
@@ -37,6 +39,17 @@ export const MIN_IDEMPOTENCY_KEY_LENGTH = 8;
 export const MAX_IDEMPOTENCY_KEY_LENGTH = 64;
 export const CARD_NUMBER_REGEX = /^[0-9]{16}$/;
 export const WALLET_PHONE_REGEX = /^[0-9]{10}$/;
+
+/**
+ * Điều hướng endpoint Backend qua Next.js rewrite proxy (`/api/backend/...`) khi chạy trên trình duyệt (client-side)
+ * để tránh lỗi CORS giữa frontend (cổng 3000) và backend (cổng 3001), đồng bộ với auth.service và order.service.
+ */
+export function resolveBackendEndpoint(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return typeof window !== "undefined"
+    ? `/api/backend${normalizedPath}`
+    : `${API_BASE_URL}${normalizedPath}`;
+}
 
 export interface PaymentServiceError extends Error {
   statusCode: number;
@@ -306,12 +319,67 @@ export function validateCreatePaymentPayload(
   };
 }
 
+export interface PaymentResponseValidationContext {
+  expectedOrderId?: string | null;
+  expectedMethod?: PaymentMethod | null;
+  expectedMethodLast4?: string | null;
+  expectedAmountVnd?: number | null;
+}
+
 /**
- * Kiểm tra cấu trúc dữ liệu phản hồi `PaymentResponseDto` từ `POST /payments` (API Contract v3.0 Mục 3.3).
+ * Kiểm tra trạng thái đơn hàng có được phép thanh toán theo API Contract v3.0 §3.2 hay không:
+ * Chỉ cho phép `PENDING` hoặc `PAYMENT_FAILED`. Các trạng thái `PAID`, `CANCELLED`, `EXPIRED`... đều bị chặn.
+ */
+export function isOrderPayableStatus(
+  status: unknown
+): status is "PENDING" | "PAYMENT_FAILED" {
+  return status === "PENDING" || status === "PAYMENT_FAILED";
+}
+
+/**
+ * Kiểm tra đối tượng Order có hợp lệ và đang ở trạng thái cho phép thanh toán (`PENDING` / `PAYMENT_FAILED`) hay không.
+ */
+export function isOrderPayable(
+  order:
+    | (Pick<CreateOrderResponseDto, "id" | "status" | "totalVnd"> &
+        Partial<Pick<MyOrderDto, "expiresAt">>)
+    | null
+    | undefined,
+  overrideStatus?: OrderStatus | string | null
+): boolean {
+  if (!order || typeof order !== "object") return false;
+  if (typeof order.id !== "string" || !isValidUuid(order.id.trim())) {
+    return false;
+  }
+  const effectiveStatus = overrideStatus ?? order.status;
+  if (!isOrderPayableStatus(effectiveStatus)) {
+    return false;
+  }
+  if (
+    typeof order.totalVnd !== "number" ||
+    !Number.isFinite(order.totalVnd) ||
+    !Number.isSafeInteger(order.totalVnd) ||
+    order.totalVnd <= 0
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Kiểm tra cấu trúc và tính toàn vẹn dữ liệu phản hồi `PaymentResponseDto` từ `POST /payments` (API Contract v3.0 Mục 3.3 & Mục 9).
+ * Siết chặt:
+ * - `paymentId` và `orderId` phải là UUID hợp lệ.
+ * - Nếu truyền `expected.expectedOrderId`, `orderId` phản hồi phải khớp với đơn hàng đang thanh toán.
+ * - Nếu truyền `expected.expectedAmountVnd`, `amountVnd` phản hồi phải khớp chính xác với `order.totalVnd`.
+ * - Nếu truyền `expected.expectedMethod` / `expectedMethodLast4`, phải khớp với phương thức vừa gửi.
+ * - Khi `paymentStatus === "SUCCESS"`: `orderStatus` phải là `"PAID"`, `failureReason` phải là `null`, và `pointsEarned === Math.floor(amountVnd / 10000)`.
+ * - Khi `paymentStatus === "FAILED"`: `orderStatus` phải là `"PAYMENT_FAILED"`, `failureReason` phải là `"PAYMENT_DECLINED"`, và `pointsEarned === 0`.
  */
 export function validatePaymentResponseData(
   raw: unknown,
-  idempotencyKey = ""
+  idempotencyKey = "",
+  expected?: PaymentResponseValidationContext
 ): PaymentResponseDto {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw createPaymentError(
@@ -324,28 +392,58 @@ export function validatePaymentResponseData(
   }
 
   const r = raw as Record<string, unknown>;
-  const paymentId = typeof r.paymentId === "string" ? r.paymentId.trim() : "";
-  const orderId = typeof r.orderId === "string" ? r.orderId.trim() : "";
+  const paymentId =
+    typeof r.paymentId === "string" ? r.paymentId.trim().toLowerCase() : "";
+  const orderId =
+    typeof r.orderId === "string" ? r.orderId.trim().toLowerCase() : "";
   const paymentStatus = r.paymentStatus;
   const orderStatus = r.orderStatus;
-  const amountVnd = Number(r.amountVnd);
+  const rawAmountVnd = r.amountVnd;
   const method = r.method;
   const methodLast4 =
     typeof r.methodLast4 === "string" ? r.methodLast4.trim() : "";
   const mockReference =
     typeof r.mockReference === "string" ? r.mockReference.trim() : "";
-  const pointsEarned = Number(r.pointsEarned);
+  const rawPointsEarned = r.pointsEarned;
   const failureReason = r.failureReason;
   const createdAt = typeof r.createdAt === "string" ? r.createdAt.trim() : "";
 
-  if (!paymentId || !orderId) {
+  if (!paymentId || !isValidUuid(paymentId)) {
     throw createPaymentError(
-      "Phản hồi thanh toán thiếu paymentId hoặc orderId.",
+      "Phản hồi thanh toán thiếu hoặc sai định dạng UUID của paymentId.",
       502,
       "INTERNAL_ERROR",
       idempotencyKey,
       { canRetrySameKey: true }
     );
+  }
+
+  if (!orderId || !isValidUuid(orderId)) {
+    throw createPaymentError(
+      "Phản hồi thanh toán thiếu hoặc sai định dạng UUID của orderId.",
+      502,
+      "INTERNAL_ERROR",
+      idempotencyKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  if (
+    typeof expected?.expectedOrderId === "string" &&
+    expected.expectedOrderId.trim()
+  ) {
+    const normalizedExpectedOrderId = expected.expectedOrderId
+      .trim()
+      .toLowerCase();
+    if (orderId !== normalizedExpectedOrderId) {
+      throw createPaymentError(
+        `Phản hồi thanh toán có orderId (${orderId}) không khớp với đơn hàng đang thanh toán (${normalizedExpectedOrderId}).`,
+        502,
+        "INTERNAL_ERROR",
+        idempotencyKey,
+        { canRetrySameKey: true }
+      );
+    }
   }
 
   if (paymentStatus !== "SUCCESS" && paymentStatus !== "FAILED") {
@@ -391,6 +489,19 @@ export function validatePaymentResponseData(
     );
   }
 
+  if (
+    expected?.expectedMethod &&
+    method !== expected.expectedMethod
+  ) {
+    throw createPaymentError(
+      `Phương thức thanh toán trong phản hồi (${method}) không khớp với yêu cầu đã gửi (${expected.expectedMethod}).`,
+      502,
+      "INTERNAL_ERROR",
+      idempotencyKey,
+      { canRetrySameKey: true }
+    );
+  }
+
   if (!/^[0-9]{4}$/.test(methodLast4)) {
     throw createPaymentError(
       "Trường methodLast4 phải gồm đúng 4 chữ số.",
@@ -402,9 +513,24 @@ export function validatePaymentResponseData(
   }
 
   if (
-    !Number.isFinite(amountVnd) ||
-    !Number.isSafeInteger(amountVnd) ||
-    amountVnd < 0
+    typeof expected?.expectedMethodLast4 === "string" &&
+    expected.expectedMethodLast4.trim() &&
+    methodLast4 !== expected.expectedMethodLast4.trim()
+  ) {
+    throw createPaymentError(
+      `Trường methodLast4 trong phản hồi (${methodLast4}) không khớp với 4 chữ số cuối đã gửi (${expected.expectedMethodLast4.trim()}).`,
+      502,
+      "INTERNAL_ERROR",
+      idempotencyKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  if (
+    typeof rawAmountVnd !== "number" ||
+    !Number.isFinite(rawAmountVnd) ||
+    !Number.isSafeInteger(rawAmountVnd) ||
+    rawAmountVnd <= 0
   ) {
     throw createPaymentError(
       "Số tiền amountVnd trong phản hồi không hợp lệ.",
@@ -414,11 +540,27 @@ export function validatePaymentResponseData(
       { canRetrySameKey: true }
     );
   }
+  const amountVnd = rawAmountVnd;
 
   if (
-    !Number.isFinite(pointsEarned) ||
-    !Number.isSafeInteger(pointsEarned) ||
-    pointsEarned < 0
+    typeof expected?.expectedAmountVnd === "number" &&
+    Number.isSafeInteger(expected.expectedAmountVnd) &&
+    amountVnd !== expected.expectedAmountVnd
+  ) {
+    throw createPaymentError(
+      `Số tiền thanh toán phản hồi (${amountVnd}) không khớp với tổng tiền đơn hàng (${expected.expectedAmountVnd}).`,
+      502,
+      "INTERNAL_ERROR",
+      idempotencyKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  if (
+    typeof rawPointsEarned !== "number" ||
+    !Number.isFinite(rawPointsEarned) ||
+    !Number.isSafeInteger(rawPointsEarned) ||
+    rawPointsEarned < 0
   ) {
     throw createPaymentError(
       "Điểm thưởng pointsEarned trong phản hồi không hợp lệ.",
@@ -428,6 +570,7 @@ export function validatePaymentResponseData(
       { canRetrySameKey: true }
     );
   }
+  const pointsEarned = rawPointsEarned;
 
   if (failureReason !== null && failureReason !== "PAYMENT_DECLINED") {
     throw createPaymentError(
@@ -439,9 +582,50 @@ export function validatePaymentResponseData(
     );
   }
 
-  if (!mockReference || !createdAt) {
+  if (paymentStatus === "SUCCESS") {
+    if (failureReason !== null) {
+      throw createPaymentError(
+        "Phản hồi SUCCESS không hợp lệ vì có failureReason khác null.",
+        502,
+        "INTERNAL_ERROR",
+        idempotencyKey,
+        { canRetrySameKey: true }
+      );
+    }
+    const expectedPoints = Math.floor(amountVnd / 10000);
+    if (pointsEarned !== expectedPoints) {
+      throw createPaymentError(
+        `Điểm thưởng pointsEarned (${pointsEarned}) không khớp công thức floor(amountVnd / 10000) (${expectedPoints}).`,
+        502,
+        "INTERNAL_ERROR",
+        idempotencyKey,
+        { canRetrySameKey: true }
+      );
+    }
+  } else {
+    if (failureReason !== "PAYMENT_DECLINED") {
+      throw createPaymentError(
+        "Phản hồi FAILED bắt buộc phải có failureReason = PAYMENT_DECLINED.",
+        502,
+        "INTERNAL_ERROR",
+        idempotencyKey,
+        { canRetrySameKey: true }
+      );
+    }
+    if (pointsEarned !== 0) {
+      throw createPaymentError(
+        "Phản hồi FAILED bắt buộc phải có pointsEarned = 0.",
+        502,
+        "INTERNAL_ERROR",
+        idempotencyKey,
+        { canRetrySameKey: true }
+      );
+    }
+  }
+
+  if (!mockReference || !createdAt || Number.isNaN(Date.parse(createdAt))) {
     throw createPaymentError(
-      "Phản hồi thanh toán thiếu mockReference hoặc createdAt.",
+      "Phản hồi thanh toán thiếu mockReference hoặc createdAt không phải ngày ISO 8601 hợp lệ.",
       502,
       "INTERNAL_ERROR",
       idempotencyKey,
@@ -549,6 +733,8 @@ export async function submitPaymentApi(
   idempotencyKey: string,
   options?: {
     accessToken?: string | null;
+    expectedOrderId?: string | null;
+    expectedAmountVnd?: number | null;
   }
 ): Promise<SubmitPaymentApiResult> {
   const keyValidation = validateIdempotencyKey(idempotencyKey);
@@ -573,6 +759,20 @@ export async function submitPaymentApi(
   const cleanPayload = payloadValidation.payload;
   const cleanKey = keyValidation.normalizedKey;
 
+  if (
+    typeof options?.expectedOrderId === "string" &&
+    options.expectedOrderId.trim() &&
+    cleanPayload.orderId !== options.expectedOrderId.trim().toLowerCase()
+  ) {
+    throw createPaymentError(
+      "orderId trong payload không khớp với đơn hàng đang được chọn thanh toán.",
+      400,
+      "VALIDATION_ERROR",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
   const token = options?.accessToken ?? getStoredToken();
   if (!token || isTokenExpired(token)) {
     clearStoredSession();
@@ -587,7 +787,7 @@ export async function submitPaymentApi(
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}/payments`, {
+    res = await fetch(resolveBackendEndpoint("/payments"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -675,8 +875,18 @@ export async function submitPaymentApi(
     );
   }
 
-  // API Contract v3.0 Mục 3.3: HTTP 200 cho cả SUCCESS và FAILED
-  const validatedResponse = validatePaymentResponseData(bodyData, cleanKey);
+  const expectedMethodLast4 =
+    "cardNumber" in cleanPayload.paymentDetails
+      ? cleanPayload.paymentDetails.cardNumber.slice(-4)
+      : cleanPayload.paymentDetails.phoneNumber.slice(-4);
+
+  // API Contract v3.0 Mục 3.3 & Mục 9: Kiểm tra toàn vẹn response & đối chiếu với đơn hàng đang thanh toán
+  const validatedResponse = validatePaymentResponseData(bodyData, cleanKey, {
+    expectedOrderId: options?.expectedOrderId ?? cleanPayload.orderId,
+    expectedMethod: cleanPayload.method,
+    expectedMethodLast4,
+    expectedAmountVnd: options?.expectedAmountVnd,
+  });
   const replayedHeader = res.headers.get("Idempotency-Replayed");
   const replayed = replayedHeader === "true";
 
@@ -707,12 +917,23 @@ export async function fetchMyOrdersApi(
     );
   }
 
-  const res = await fetch(`${API_BASE_URL}/orders/me`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(resolveBackendEndpoint("/orders/me"), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  } catch {
+    throw createPaymentError(
+      "Không thể kết nối tới máy chủ để tải danh sách đơn hàng (GET /orders/me).",
+      0,
+      "NETWORK_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
 
   if (res.status === 401) {
     clearStoredSession();
@@ -735,7 +956,19 @@ export async function fetchMyOrdersApi(
     );
   }
 
-  const data = (await res.json()) as GetMyOrdersResponseDto;
+  let data: GetMyOrdersResponseDto;
+  try {
+    data = (await res.json()) as GetMyOrdersResponseDto;
+  } catch {
+    throw createPaymentError(
+      "Phản hồi danh sách đơn hàng từ máy chủ không phải JSON hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
   return {
     items: Array.isArray(data?.items) ? data.items : [],
     meta: data?.meta ?? {
@@ -787,7 +1020,7 @@ export async function fetchAuthMeProfile(
   if (!token) return null;
 
   try {
-    const res = await fetch(`${API_BASE_URL}/auth/me`, {
+    const res = await fetch(resolveBackendEndpoint("/auth/me"), {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,

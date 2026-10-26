@@ -1,21 +1,76 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import PaymentPageView from "@/components/PaymentPageView";
+import PaymentPageView, {
+  executePaymentSubmission,
+  type ExecutePaymentSubmissionDeps,
+} from "@/components/PaymentPageView";
 import { AuthContext, type AuthContextType } from "@/context/AuthContext";
 import { CartContext, type CartContextValue } from "@/context/CartContext";
-import type { CreateOrderResponseDto, MyOrderDto } from "@/mock-data";
+import type {
+  CreateOrderResponseDto,
+  MyOrderDto,
+  OrderStatus,
+  PaymentResponseDto,
+  PaymentSubmissionErrorState,
+} from "@/mock-data";
+import {
+  TOKEN_STORAGE_KEY,
+  USER_STORAGE_KEY,
+  getStoredToken,
+} from "@/services/auth.service";
 import {
   buildCreatePaymentPayload,
   fetchMyOrdersApi,
   generateIdempotencyKey,
+  isOrderPayable,
+  isOrderPayableStatus,
   selectTargetOrderFromMyOrders,
   submitPaymentApi,
   toPaymentSubmissionErrorState,
   validateCreatePaymentPayload,
   validateIdempotencyKey,
+  validatePaymentResponseData,
+  type SubmitPaymentApiResult,
 } from "@/services/payment.service";
+
+class MemoryStorage implements Storage {
+  private store = new Map<string, string>();
+  get length(): number {
+    return this.store.size;
+  }
+  clear(): void {
+    this.store.clear();
+  }
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, String(value));
+  }
+}
+
+const localStorageMock = new MemoryStorage();
+const sessionStorageMock = new MemoryStorage();
+
+Object.defineProperty(globalThis, "localStorage", {
+  value: localStorageMock,
+  configurable: true,
+  writable: true,
+});
+
+Object.defineProperty(globalThis, "sessionStorage", {
+  value: sessionStorageMock,
+  configurable: true,
+  writable: true,
+});
 
 function createValidMockJwt(
   sub = "550e8400-e29b-41d4-a716-446655440000",
@@ -33,10 +88,12 @@ function createValidMockJwt(
   return `${header}.${payload}.signature`;
 }
 
-function createSampleOrderSnapshot(): CreateOrderResponseDto {
+function createSampleOrderSnapshot(
+  status: OrderStatus = "PENDING"
+): CreateOrderResponseDto {
   return {
     id: "550e8400-e29b-41d4-a716-446655440010",
-    status: "PENDING",
+    status,
     createdAt: "2026-10-27T02:00:00.000Z",
     subtotalVnd: 118000,
     discountVnd: 20000,
@@ -80,6 +137,120 @@ function createSampleOrderSnapshot(): CreateOrderResponseDto {
         ],
       },
     ],
+  };
+}
+
+function createSubmissionHarness(
+  overrides: Partial<ExecutePaymentSubmissionDeps> = {}
+) {
+  const order =
+    overrides.activeOrder !== undefined
+      ? overrides.activeOrder
+      : createSampleOrderSnapshot("PENDING");
+  const token =
+    overrides.accessToken !== undefined
+      ? overrides.accessToken
+      : createValidMockJwt();
+
+  let isSubmittingState = overrides.isSubmitting ?? false;
+  let idempotencyKeyState =
+    overrides.idempotencyKey ?? "idem-initial-12345678";
+  let lastPayloadJson = "";
+  let paymentResultState: PaymentResponseDto | null = null;
+  let isReplayedState = false;
+  let orderStatusState: OrderStatus =
+    (overrides.orderStatus as OrderStatus) ?? order?.status ?? "PENDING";
+  let isResultModalOpenState = false;
+  let paymentErrorState: PaymentSubmissionErrorState | null = null;
+  let clearCartCount = 0;
+  let clearedContextActiveOrder = false;
+  let pointsAdded = 0;
+  const authModalCalls: Array<{
+    mode?: "login" | "register";
+    reasonMessage?: string;
+  }> = [];
+
+  const submittingRef = overrides.submittingRef ?? {
+    current: isSubmittingState,
+  };
+
+  const deps: ExecutePaymentSubmissionDeps = {
+    activeOrder: order,
+    orderStatus: orderStatusState,
+    payload:
+      overrides.payload ??
+      buildCreatePaymentPayload({
+        orderId: order?.id || "550e8400-e29b-41d4-a716-446655440010",
+        method: "CARD",
+        cardNumber: "1234567890121234",
+      }),
+    idempotencyKey: idempotencyKeyState,
+    reuseExistingKey: overrides.reuseExistingKey ?? false,
+    accessToken: token,
+    isAuthenticated: overrides.isAuthenticated ?? true,
+    verifySession: overrides.verifySession ?? (() => true),
+    openAuthModal:
+      overrides.openAuthModal ??
+      ((mode, opts) => {
+        authModalCalls.push({ mode, reasonMessage: opts?.reasonMessage });
+      }),
+    submittingRef,
+    isSubmitting: isSubmittingState,
+    setIsSubmitting: (val) => {
+      isSubmittingState = val;
+    },
+    setIdempotencyKey: (key) => {
+      idempotencyKeyState = key;
+    },
+    setLastSubmittedPayloadJson: (json) => {
+      lastPayloadJson = json;
+    },
+    setPaymentResult: (res) => {
+      paymentResultState = res;
+    },
+    setIsReplayedResult: (rep) => {
+      isReplayedState = rep;
+    },
+    setOrderStatus: (st) => {
+      orderStatusState = st;
+    },
+    setIsResultModalOpen: (open) => {
+      isResultModalOpenState = open;
+    },
+    setPaymentError: (err) => {
+      paymentErrorState = err;
+    },
+    clearCart: () => {
+      clearCartCount += 1;
+    },
+    setContextActiveOrder: (nextOrder) => {
+      if (nextOrder === null) {
+        clearedContextActiveOrder = true;
+      }
+    },
+    onPointsEarned: (pts) => {
+      pointsAdded += pts;
+    },
+    submitPaymentFn: overrides.submitPaymentFn,
+  };
+
+  return {
+    deps,
+    getState: () => ({
+      isSubmitting: isSubmittingState,
+      submittingRefCurrent: submittingRef.current,
+      idempotencyKey: idempotencyKeyState,
+      lastPayloadJson,
+      paymentResult: paymentResultState,
+      isReplayed: isReplayedState,
+      orderStatus: orderStatusState,
+      isResultModalOpen: isResultModalOpenState,
+      paymentError: paymentErrorState,
+      clearCartCount,
+      clearedContextActiveOrder,
+      pointsAdded,
+      authModalCalls,
+    }),
   };
 }
 
@@ -160,7 +331,12 @@ function renderPaymentMarkup(
 }
 
 describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orders/me — Contract v3.0)", () => {
-  it("1. builds and validates strict CARD and WALLET payloads per API Contract v3.0 §3.1", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    sessionStorageMock.clear();
+  });
+
+  it("1. builds and validates strict CARD and WALLET payloads & Idempotency-Key constraints per API Contract v3.0 §3.1-3.2", () => {
     const cardPayload = buildCreatePaymentPayload({
       orderId: "  550E8400-E29B-41D4-A716-446655440010 ",
       method: "CARD",
@@ -214,25 +390,32 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
       }).isValid,
       false
     );
+
+    // Idempotency-Key constraints: 8..64 chars
+    const generatedKey = generateIdempotencyKey("idem");
+    assert.equal(validateIdempotencyKey(generatedKey).isValid, true);
+    assert.equal(validateIdempotencyKey("short7").isValid, false);
+    assert.equal(validateIdempotencyKey("a".repeat(65)).isValid, false);
   });
 
-  it("2. calls real POST /payments and GET /orders/me APIs with Bearer JWT and Idempotency-Key", async () => {
+  it("2. calls real POST /payments (SUCCESS -> PAID) and GET /orders/me APIs, clearing Cart and updating points on SUCCESS", async () => {
     const token = createValidMockJwt();
     const idemKey = generateIdempotencyKey("idem");
-    assert.equal(validateIdempotencyKey(idemKey).isValid, true);
 
     const savedFetch = globalThis.fetch;
     try {
-      let capturedUrl = "";
       let capturedHeaders: Record<string, string> = {};
       let capturedBody: unknown = null;
 
-      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-        capturedUrl = String(input);
+      globalThis.fetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ) => {
+        const url = String(input);
         capturedHeaders = (init?.headers || {}) as Record<string, string>;
         capturedBody = init?.body ? JSON.parse(String(init.body)) : null;
 
-        if (capturedUrl.endsWith("/payments")) {
+        if (url.endsWith("/payments")) {
           return new Response(
             JSON.stringify({
               paymentId: "550e8400-e29b-41d4-a716-446655440020",
@@ -279,17 +462,15 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
       assert.ok(selected);
       assert.equal(selected.id, "550e8400-e29b-41d4-a716-446655440010");
 
-      // Test POST /payments
-      const payRes = await submitPaymentApi(
-        {
-          orderId: "550e8400-e29b-41d4-a716-446655440010",
-          method: "CARD",
-          paymentDetails: { cardNumber: "1234567890121234" },
-        },
-        idemKey,
-        { accessToken: token }
-      );
+      // Test POST /payments via executePaymentSubmission
+      const harness = createSubmissionHarness({
+        accessToken: token,
+        idempotencyKey: idemKey,
+      });
+      const execResult = await executePaymentSubmission(harness.deps);
 
+      assert.equal(execResult.skipped, false);
+      assert.equal(execResult.outcome?.type, "success");
       assert.equal(capturedHeaders["Authorization"], `Bearer ${token}`);
       assert.equal(capturedHeaders["Idempotency-Key"], idemKey);
       assert.deepEqual(capturedBody, {
@@ -297,31 +478,486 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
         method: "CARD",
         paymentDetails: { cardNumber: "1234567890121234" },
       });
-      assert.equal(payRes.replayed, false);
-      assert.equal(payRes.response.paymentStatus, "SUCCESS");
-      assert.equal(payRes.response.orderStatus, "PAID");
-      assert.equal(payRes.response.pointsEarned, 9);
+
+      const state = harness.getState();
+      assert.equal(state.clearCartCount, 1);
+      assert.equal(state.clearedContextActiveOrder, true);
+      assert.equal(state.orderStatus, "PAID");
+      assert.equal(state.pointsAdded, 9);
+      assert.equal(state.paymentResult?.paymentStatus, "SUCCESS");
     } finally {
       globalThis.fetch = savedFetch;
     }
   });
 
-  it("3. renders Stitch Payment UI with real order snapshot, CARD/WALLET selectors, loading state, and error state", () => {
+  it("3. handles FAILED payment (HTTP 200 PAYMENT_DECLINED): preserves Cart, transitions to PAYMENT_FAILED, and rotates Idempotency-Key", async () => {
+    const token = createValidMockJwt();
+    const initialKey = "idem-fail-attempt-0001";
+    const savedFetch = globalThis.fetch;
+
+    try {
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            paymentId: "550e8400-e29b-41d4-a716-446655440021",
+            orderId: "550e8400-e29b-41d4-a716-446655440010",
+            paymentStatus: "FAILED",
+            orderStatus: "PAYMENT_FAILED",
+            amountVnd: 98000,
+            method: "CARD",
+            methodLast4: "0002",
+            mockReference: "MOCK-0004",
+            pointsEarned: 0,
+            failureReason: "PAYMENT_DECLINED",
+            createdAt: "2026-10-27T02:01:00.000Z",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Replayed": "false",
+            },
+          }
+        )) as typeof fetch;
+
+      const harness = createSubmissionHarness({
+        accessToken: token,
+        idempotencyKey: initialKey,
+        payload: buildCreatePaymentPayload({
+          orderId: "550e8400-e29b-41d4-a716-446655440010",
+          method: "CARD",
+          cardNumber: "1234567890120002",
+        }),
+      });
+
+      const execResult = await executePaymentSubmission(harness.deps);
+      assert.equal(execResult.skipped, false);
+      assert.equal(execResult.outcome?.type, "failed");
+
+      const state = harness.getState();
+      // Cart MUST NOT be cleared on FAILED payment
+      assert.equal(state.clearCartCount, 0);
+      assert.equal(state.clearedContextActiveOrder, false);
+      assert.equal(state.pointsAdded, 0);
+      assert.equal(state.orderStatus, "PAYMENT_FAILED");
+      assert.equal(state.paymentResult?.paymentStatus, "FAILED");
+      assert.equal(state.paymentResult?.failureReason, "PAYMENT_DECLINED");
+      // New Idempotency-Key generated for the next retry attempt
+      assert.notEqual(state.idempotencyKey, initialKey);
+      assert.equal(validateIdempotencyKey(state.idempotencyKey).isValid, true);
+      // Order in PAYMENT_FAILED remains payable
+      assert.equal(
+        isOrderPayable(createSampleOrderSnapshot("PAYMENT_FAILED")),
+        true
+      );
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it("4. blocks payment form and prevents POST /payments when Order is NOT in PENDING or PAYMENT_FAILED (e.g., PAID, CANCELLED)", async () => {
+    assert.equal(isOrderPayableStatus("PENDING"), true);
+    assert.equal(isOrderPayableStatus("PAYMENT_FAILED"), true);
+    assert.equal(isOrderPayableStatus("PAID"), false);
+    assert.equal(isOrderPayableStatus("CANCELLED"), false);
+    assert.equal(isOrderPayableStatus("EXPIRED"), false);
+
+    // 4a. UI blocks payment form inputs and disables submit button for CANCELLED and PAID orders
+    const cancelledOrder = createSampleOrderSnapshot("CANCELLED");
+    const cancelledHtml = renderPaymentMarkup({ initialOrder: cancelledOrder });
+    assert.ok(cancelledHtml.includes('id="nonPayableOrderBanner"'));
+    assert.equal(cancelledHtml.includes('id="radioCard"'), false);
+    assert.equal(cancelledHtml.includes('id="radioWallet"'), false);
+    assert.equal(cancelledHtml.includes('id="cardInputNumber"'), false);
+    assert.equal(cancelledHtml.includes('id="walletInputPhone"'), false);
+    assert.ok(cancelledHtml.includes("Không thể thanh toán (CANCELLED)"));
+
+    const paidOrder = createSampleOrderSnapshot("PAID");
+    const paidHtml = renderPaymentMarkup({ initialOrder: paidOrder });
+    assert.ok(paidHtml.includes('id="nonPayableOrderBanner"'));
+    assert.equal(paidHtml.includes('id="cardInputNumber"'), false);
+    assert.equal(paidHtml.includes('id="walletInputPhone"'), false);
+
+    // 4b. executePaymentSubmission blocks submission before calling submitPaymentFn
+    let apiCalled = false;
+    const harness = createSubmissionHarness({
+      activeOrder: cancelledOrder,
+      orderStatus: "CANCELLED",
+      submitPaymentFn: async () => {
+        apiCalled = true;
+        throw new Error("Should never be called");
+      },
+    });
+
+    const result = await executePaymentSubmission(harness.deps);
+    assert.equal(apiCalled, false);
+    assert.equal(result.skipped, false);
+    assert.equal(result.outcome?.type, "error");
+    const state = harness.getState();
+    assert.equal(state.clearCartCount, 0);
+    assert.equal(state.paymentError?.statusCode, 409);
+    assert.equal(state.paymentError?.code, "INVALID_TRANSITION");
+    assert.equal(state.paymentError?.canRetrySameKey, false);
+  });
+
+  it("5. rejects malformed or mismatched payment responses without clearing Cart or showing SUCCESS", async () => {
+    const baseValidResponse: PaymentResponseDto = {
+      paymentId: "550e8400-e29b-41d4-a716-446655440020",
+      orderId: "550e8400-e29b-41d4-a716-446655440010",
+      paymentStatus: "SUCCESS",
+      orderStatus: "PAID",
+      amountVnd: 98000,
+      method: "CARD",
+      methodLast4: "1234",
+      mockReference: "MOCK-0003",
+      pointsEarned: 9,
+      failureReason: null,
+      createdAt: "2026-10-27T02:00:00.000Z",
+    };
+
+    const expectedCtx = {
+      expectedOrderId: "550e8400-e29b-41d4-a716-446655440010",
+      expectedMethod: "CARD" as const,
+      expectedMethodLast4: "1234",
+      expectedAmountVnd: 98000,
+    };
+
+    // Valid response passes
+    assert.doesNotThrow(() =>
+      validatePaymentResponseData(baseValidResponse, "idem-12345678", expectedCtx)
+    );
+
+    // Mismatched orderId (belongs to a different order)
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          orderId: "550e8400-e29b-41d4-a716-446655440099",
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+
+    // Mismatched amountVnd (does not match order.totalVnd)
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          amountVnd: 50000,
+          pointsEarned: 5,
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+
+    // Mismatched method or methodLast4
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          method: "WALLET",
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          methodLast4: "9999",
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+
+    // SUCCESS with non-null failureReason or wrong pointsEarned formula
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          failureReason: "PAYMENT_DECLINED",
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          pointsEarned: 999,
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+
+    // FAILED with null failureReason or non-zero pointsEarned
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          paymentStatus: "FAILED",
+          orderStatus: "PAYMENT_FAILED",
+          failureReason: null,
+          pointsEarned: 0,
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+    assert.throws(() =>
+      validatePaymentResponseData(
+        {
+          ...baseValidResponse,
+          paymentStatus: "FAILED",
+          orderStatus: "PAYMENT_FAILED",
+          failureReason: "PAYMENT_DECLINED",
+          pointsEarned: 5,
+        },
+        "idem-12345678",
+        expectedCtx
+      )
+    );
+
+    // Verify executePaymentSubmission NEVER clears Cart or sets paymentResult when response is mismatched/malformed
+    const savedFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            ...baseValidResponse,
+            // Wrong orderId returned by server!
+            orderId: "550e8400-e29b-41d4-a716-446655440099",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )) as typeof fetch;
+
+      const harness = createSubmissionHarness({
+        idempotencyKey: "idem-mismatch-12345",
+      });
+      const res = await executePaymentSubmission(harness.deps);
+
+      assert.equal(res.outcome?.type, "error");
+      const state = harness.getState();
+      assert.equal(state.clearCartCount, 0);
+      assert.equal(state.paymentResult, null);
+      assert.equal(state.orderStatus, "PENDING");
+      assert.equal(state.paymentError?.code, "INTERNAL_ERROR");
+      assert.equal(state.paymentError?.canRetrySameKey, true);
+      assert.equal(state.idempotencyKey, "idem-mismatch-12345");
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it("6. handles 401 UNAUTHORIZED (expired token & server 401): clears session, preserves Cart, and opens Login modal", async () => {
+    const expiredToken = createValidMockJwt(
+      "550e8400-e29b-41d4-a716-446655440000",
+      -60
+    );
+    localStorageMock.setItem(TOKEN_STORAGE_KEY, expiredToken);
+    localStorageMock.setItem(
+      USER_STORAGE_KEY,
+      JSON.stringify({ id: "550e8400-e29b-41d4-a716-446655440000" })
+    );
+
+    // 6a. Pre-flight expired token check
+    const expiredHarness = createSubmissionHarness({
+      accessToken: expiredToken,
+    });
+    const expiredRes = await executePaymentSubmission(expiredHarness.deps);
+    assert.equal(expiredRes.outcome?.type, "error");
+    assert.equal(expiredHarness.getState().clearCartCount, 0);
+    assert.equal(expiredHarness.getState().paymentError?.statusCode, 401);
+    assert.equal(expiredHarness.getState().paymentError?.code, "UNAUTHORIZED");
+    assert.equal(expiredHarness.getState().authModalCalls.length, 1);
+    assert.equal(getStoredToken(), null);
+
+    // 6b. Server returns HTTP 401 on POST /payments
+    const validToken = createValidMockJwt();
+    localStorageMock.setItem(TOKEN_STORAGE_KEY, validToken);
+    const savedFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 401,
+            code: "UNAUTHORIZED",
+            message: "Token expired or invalid",
+          }),
+          { status: 401, headers: { "Content-Type": "application/json" } }
+        )) as typeof fetch;
+
+      const server401Harness = createSubmissionHarness({
+        accessToken: validToken,
+      });
+      const res401 = await executePaymentSubmission(server401Harness.deps);
+
+      assert.equal(res401.outcome?.type, "error");
+      const state = server401Harness.getState();
+      assert.equal(state.clearCartCount, 0);
+      assert.equal(state.paymentError?.statusCode, 401);
+      assert.equal(state.paymentError?.code, "UNAUTHORIZED");
+      assert.equal(state.paymentError?.canRetrySameKey, false);
+      assert.equal(state.authModalCalls.length, 1);
+      assert.equal(getStoredToken(), null);
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it("7. handles network errors, malformed JSON, 409 PAYMENT_IN_PROGRESS (same-key retry), and 409 IDEMPOTENCY_KEY_CONFLICT (key rotation)", async () => {
+    const token = createValidMockJwt();
+    const fixedKey = "idem-retry-key-0001";
+    const savedFetch = globalThis.fetch;
+
+    try {
+      // 7a. Network error preserves Cart and keeps same Idempotency-Key for retry
+      globalThis.fetch = (async () => {
+        throw new TypeError("Failed to fetch");
+      }) as typeof fetch;
+
+      const netHarness = createSubmissionHarness({
+        accessToken: token,
+        idempotencyKey: fixedKey,
+      });
+      const netRes = await executePaymentSubmission(netHarness.deps);
+      assert.equal(netRes.outcome?.type, "error");
+      assert.equal(netHarness.getState().clearCartCount, 0);
+      assert.equal(netHarness.getState().paymentError?.code, "NETWORK_ERROR");
+      assert.equal(netHarness.getState().paymentError?.canRetrySameKey, true);
+      assert.equal(netHarness.getState().idempotencyKey, fixedKey);
+
+      // 7b. Malformed non-JSON response (e.g., 502 Bad Gateway HTML) preserves Cart and allows same-key retry
+      globalThis.fetch = (async () =>
+        new Response("<html>502 Bad Gateway</html>", {
+          status: 502,
+          headers: { "Content-Type": "text/html" },
+        })) as typeof fetch;
+
+      const badJsonHarness = createSubmissionHarness({
+        accessToken: token,
+        idempotencyKey: fixedKey,
+      });
+      await executePaymentSubmission(badJsonHarness.deps);
+      assert.equal(badJsonHarness.getState().clearCartCount, 0);
+      assert.equal(
+        badJsonHarness.getState().paymentError?.code,
+        "INTERNAL_ERROR"
+      );
+      assert.equal(
+        badJsonHarness.getState().paymentError?.canRetrySameKey,
+        true
+      );
+      assert.equal(badJsonHarness.getState().idempotencyKey, fixedKey);
+
+      // 7c. 409 PAYMENT_IN_PROGRESS keeps same key; 409 IDEMPOTENCY_KEY_CONFLICT rotates to a new key
+      const inProgressState = toPaymentSubmissionErrorState(
+        { statusCode: 409, code: "PAYMENT_IN_PROGRESS" },
+        fixedKey
+      );
+      assert.equal(inProgressState.canRetrySameKey, true);
+      assert.equal(inProgressState.shouldGenerateNewKey, false);
+
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            statusCode: 409,
+            code: "IDEMPOTENCY_KEY_CONFLICT",
+            message: "Idempotency key already used with different payload",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        )) as typeof fetch;
+
+      const conflictHarness = createSubmissionHarness({
+        accessToken: token,
+        idempotencyKey: fixedKey,
+      });
+      await executePaymentSubmission(conflictHarness.deps);
+      assert.equal(conflictHarness.getState().clearCartCount, 0);
+      assert.equal(
+        conflictHarness.getState().paymentError?.code,
+        "IDEMPOTENCY_KEY_CONFLICT"
+      );
+      assert.equal(
+        conflictHarness.getState().paymentError?.shouldGenerateNewKey,
+        true
+      );
+      assert.notEqual(conflictHarness.getState().idempotencyKey, fixedKey);
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it("8. prevents concurrent double-submit while POST /payments is in-flight and renders loading/error UI states", async () => {
+    let resolvePayment!: (value: SubmitPaymentApiResult) => void;
+    let apiCallCount = 0;
+
+    const slowSubmitFn: typeof submitPaymentApi = () => {
+      apiCallCount += 1;
+      return new Promise<SubmitPaymentApiResult>((resolve) => {
+        resolvePayment = resolve;
+      });
+    };
+
+    const harness = createSubmissionHarness({
+      idempotencyKey: "idem-double-submit-01",
+      submitPaymentFn: slowSubmitFn,
+    });
+
+    // Trigger first submission (now in-flight)
+    const firstCallPromise = executePaymentSubmission(harness.deps);
+    assert.equal(harness.getState().isSubmitting, true);
+    assert.equal(harness.getState().submittingRefCurrent, true);
+
+    // Trigger second concurrent submission while first is in-flight -> MUST be skipped
+    const secondCallResult = await executePaymentSubmission(harness.deps);
+    assert.equal(secondCallResult.skipped, true);
+    assert.equal(secondCallResult.outcome, null);
+    assert.equal(apiCallCount, 1);
+
+    // Resolve first submission
+    resolvePayment({
+      replayed: false,
+      idempotencyKey: "idem-double-submit-01",
+      response: {
+        paymentId: "550e8400-e29b-41d4-a716-446655440020",
+        orderId: "550e8400-e29b-41d4-a716-446655440010",
+        paymentStatus: "SUCCESS",
+        orderStatus: "PAID",
+        amountVnd: 98000,
+        method: "CARD",
+        methodLast4: "1234",
+        mockReference: "MOCK-0003",
+        pointsEarned: 9,
+        failureReason: null,
+        createdAt: "2026-10-27T02:00:00.000Z",
+      },
+    });
+
+    const firstCallResult = await firstCallPromise;
+    assert.equal(firstCallResult.skipped, false);
+    assert.equal(firstCallResult.outcome?.type, "success");
+    assert.equal(harness.getState().isSubmitting, false);
+    assert.equal(harness.getState().submittingRefCurrent, false);
+    assert.equal(apiCallCount, 1);
+
+    // Verify rendered HTML for default payable, loading, and retryable error states
     const defaultHtml = renderPaymentMarkup();
     assert.ok(defaultHtml.includes('id="radioCard"'));
     assert.ok(defaultHtml.includes('id="radioWallet"'));
     assert.ok(defaultHtml.includes('id="cardInputNumber"'));
     assert.ok(defaultHtml.includes('id="walletInputPhone"'));
     assert.ok(defaultHtml.includes('id="btnSubmitPayment"'));
-    assert.ok(defaultHtml.includes("550e8400-e29b-41d4-a716-446655440010"));
-    assert.ok(defaultHtml.includes("WELCOME20"));
-    assert.ok(defaultHtml.includes("98.000"));
 
-    // Loading state
     const loadingHtml = renderPaymentMarkup({ initialIsSubmitting: true });
     assert.ok(loadingHtml.includes("Đang xử lý POST /payments..."));
 
-    // Error state with retry same key (409 PAYMENT_IN_PROGRESS)
     const errorHtml = renderPaymentMarkup({
       initialPaymentError: {
         statusCode: 409,

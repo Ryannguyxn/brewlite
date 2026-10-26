@@ -66,10 +66,12 @@ export class PaymentsService extends PaymentProcessor {
   }
 
   async execute(
-    userId: string,
+    authenticatedUserId: string,
     key: string,
     input: CreatePaymentDto,
   ): Promise<Result> {
+    // PostgreSQL UUID equality is case-insensitive; the key lock must use the same identity.
+    const userId = authenticatedUserId.toLowerCase();
     const dto = this.bodyPipe.transform(input);
     const idempotencyKey = this.keyPipe.transform(key);
     // Only accepted fields enter the hash; no raw credential is persisted or logged.
@@ -88,10 +90,29 @@ export class PaymentsService extends PaymentProcessor {
               }))
             )
               throw notFound();
+            // Completed snapshots are immutable: replay does not need a processing lock.
+            // Ownership and validation still run first, including for expired/paid Orders.
+            const completed = await this.replay(
+              tx,
+              userId,
+              idempotencyKey,
+              requestHash,
+            );
+            if (completed) return completed;
             const [lock] = await tx.$queryRaw<{ acquired: boolean }[]>`
             SELECT pg_try_advisory_xact_lock(hashtextextended(${JSON.stringify([userId, idempotencyKey])}, 0)) AS acquired`;
             // Zero wait on a busy key is bounded; callers retry the exact same key.
-            if (!lock?.acquired) throw inProgress();
+            if (!lock?.acquired) {
+              // A competing writer may have committed between the first read and try-lock.
+              const committed = await this.replay(
+                tx,
+                userId,
+                idempotencyKey,
+                requestHash,
+              );
+              if (committed) return committed;
+              throw inProgress();
+            }
             const replay = await this.replay(
               tx,
               userId,

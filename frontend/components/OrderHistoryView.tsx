@@ -638,10 +638,17 @@ export default function OrderHistoryView() {
     !useMockPreview &&
     (!isAuthenticated || !currentAuthUserId);
 
+  const memberTierName = useMemo(() => {
+    if (!isAuthenticated) return "Khách";
+    if (totalConfirmedPoints >= 500) return "Hạng Vàng";
+    if (totalConfirmedPoints >= 200) return "Hạng Bạc";
+    return "Thành viên";
+  }, [isAuthenticated, totalConfirmedPoints]);
+
   const displayCustomerName =
     isAuthenticated && user
       ? getDisplayCustomerName(user)
-      : MOCK_USER_PROFILE.fullName;
+      : "Khách hàng BrewLite";
 
   const freeCoffeeEquivalent = Math.floor(totalConfirmedPoints / 100);
 
@@ -726,7 +733,7 @@ export default function OrderHistoryView() {
                 <div className="flex flex-col">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="px-2.5 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-md text-label-md font-bold tracking-wide uppercase">
-                      {MOCK_USER_PROFILE.tierName}
+                      {memberTierName}
                     </span>
                     <span className="font-title-sm text-title-sm text-on-surface">
                       {displayCustomerName}

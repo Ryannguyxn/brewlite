@@ -945,4 +945,203 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
       }
     }
   });
+
+  it("12. SCRUM-65: Integrate Order History with GET /orders/me & User Isolation", async () => {
+    // 12a. Gửi Bearer JWT hợp lệ và headers theo chuẩn API Contract v3.0 §4.1
+    const userAId = "aaaa1111-1111-4111-8111-111111111111";
+    const tokenA = createValidTestJwt(userAId);
+    let capturedUrl = "";
+    let capturedHeaders: Record<string, string> = {};
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(input);
+      capturedHeaders = (init?.headers as Record<string, string>) || {};
+      return new Response(JSON.stringify(MOCK_MY_ORDERS_RESPONSE), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const resA = await getMyOrdersApi({
+      query: { page: 1, limit: 10 },
+      tokenOverride: tokenA,
+    });
+
+    assert.ok(capturedUrl.includes("/orders/me?page=1&limit=10"));
+    assert.equal(capturedHeaders.Authorization, `Bearer ${tokenA}`);
+    assert.equal(capturedHeaders.Accept, "application/json");
+    assert.equal(resA.items.length, 4);
+
+    // 12b. User Isolation: User A vs User B
+    const ordersHolder: { current: OrderHistoryItemDto[] } = { current: [] };
+    const ownerHolder: { current: string | null } = { current: null };
+
+    await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: userAId,
+      accessToken: tokenA,
+      verifySession: () => true,
+      setIsLoading: () => {},
+      setOrders: (orders) => {
+        ordersHolder.current = orders;
+      },
+      setMeta: () => {},
+      setErrorState: () => {},
+      setLoadedOwnerUserId: (id) => {
+        ownerHolder.current = id;
+      },
+    });
+
+    assert.equal(ownerHolder.current, userAId);
+    assert.equal(ordersHolder.current.length, 4);
+
+    // Khi User A logout -> state bị xóa sạch, không rò rỉ đơn hàng
+    await executeFetchOrderHistory({
+      isAuthenticated: false,
+      userId: null,
+      accessToken: null,
+      verifySession: () => false,
+      setIsLoading: () => {},
+      setOrders: (orders) => {
+        ordersHolder.current = orders;
+      },
+      setMeta: () => {},
+      setErrorState: () => {},
+      setLoadedOwnerUserId: (id) => {
+        ownerHolder.current = id;
+      },
+    });
+
+    assert.equal(ownerHolder.current, null);
+    assert.equal(ordersHolder.current.length, 0);
+
+    // Khi User B đăng nhập với tài khoản chưa có đơn hàng (Empty State)
+    const userBId = "bbbb2222-2222-4222-8222-222222222222";
+    const tokenB = createValidTestJwt(userBId);
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          items: [],
+          meta: { page: null, limit: null, total: 0, totalPages: null },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }) as typeof fetch;
+
+    await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: userBId,
+      accessToken: tokenB,
+      verifySession: () => true,
+      setIsLoading: () => {},
+      setOrders: (orders) => {
+        ordersHolder.current = orders;
+      },
+      setMeta: () => {},
+      setErrorState: () => {},
+      setLoadedOwnerUserId: (id) => {
+        ownerHolder.current = id;
+      },
+    });
+
+    assert.equal(ownerHolder.current, userBId);
+    assert.equal(ordersHolder.current.length, 0);
+
+    // 12c. 401 Session hết hạn: xóa token, GIỮ NGUYÊN giỏ hàng và mở login modal
+    let unauthorizedOpened = false;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          statusCode: 401,
+          code: "UNAUTHORIZED",
+          message: "Token expired",
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    localStorageMock.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify([{ cartItemId: "cart-item-1", quantity: 3 }])
+    );
+
+    await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: userAId,
+      accessToken: tokenA,
+      verifySession: () => true,
+      onUnauthorized: () => {
+        unauthorizedOpened = true;
+      },
+      setIsLoading: () => {},
+      setOrders: (orders) => {
+        ordersHolder.current = orders;
+      },
+      setMeta: () => {},
+      setErrorState: () => {},
+      setLoadedOwnerUserId: (id) => {
+        ownerHolder.current = id;
+      },
+    });
+
+    assert.equal(unauthorizedOpened, true);
+    assert.equal(ownerHolder.current, null);
+    assert.equal(ordersHolder.current.length, 0);
+    assert.ok(localStorageMock.getItem(CART_STORAGE_KEY) !== null);
+
+    // 12d. Reject corrupt backend data (ERD arithmetic invariant: totalVnd !== subtotal - discount)
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "550e8400-e29b-41d4-a716-446655440099",
+              status: "PAID",
+              createdAt: "2026-10-25T01:50:00.000Z",
+              expiresAt: "2026-10-25T02:05:00.000Z",
+              subtotalVnd: 100000,
+              discountVnd: 20000,
+              totalVnd: 50000,
+              couponCode: null,
+              pointsEarned: 5,
+              items: [],
+              payment: null,
+            },
+          ],
+          meta: { page: null, limit: null, total: 1, totalPages: null },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    const errorHolder: { current: OrderHistoryErrorState | null } = { current: null };
+    await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: userAId,
+      accessToken: tokenA,
+      verifySession: () => true,
+      setIsLoading: () => {},
+      setOrders: (orders) => {
+        ordersHolder.current = orders;
+      },
+      setMeta: () => {},
+      setErrorState: (err) => {
+        errorHolder.current = err;
+      },
+      setLoadedOwnerUserId: (id) => {
+        ownerHolder.current = id;
+      },
+    });
+
+    assert.equal(ordersHolder.current.length, 0);
+    assert.equal(errorHolder.current?.statusCode, 500);
+    assert.equal(errorHolder.current?.code, "INTERNAL_ERROR");
+  });
 });

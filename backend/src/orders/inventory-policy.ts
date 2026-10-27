@@ -46,7 +46,7 @@ export async function reserveInventory(
 }
 
 /**
- * Shared expiration primitive for Create Order and the future Scheduler.
+ * Shared expiration primitive for Create Order and the Scheduler.
  * Caller owns the transaction. CANCELLED is the one-time release marker; never
  * set it separately or swallow an error and commit a partial release.
  */

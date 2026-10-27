@@ -698,20 +698,31 @@ export default function CartDrawer({
                 </div>
               </div>
               <div className="flex items-center justify-between gap-2 pt-1 border-t border-outline-variant/30">
-                <button
-                  id="btnViewActiveOrderModal"
-                  type="button"
-                  disabled={isSubmittingOrder}
-                  onClick={() =>
-                    setOrderCallOutcome({
-                      type: "success",
-                      order: displayedActiveOrder,
-                    })
-                  }
-                  className="text-[11px] font-semibold text-primary hover:underline cursor-pointer disabled:opacity-50"
-                >
-                  Xem chi tiết đơn hàng
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    id="btnViewActiveOrderModal"
+                    type="button"
+                    disabled={isSubmittingOrder}
+                    onClick={() =>
+                      setOrderCallOutcome({
+                        type: "success",
+                        order: displayedActiveOrder,
+                      })
+                    }
+                    className="text-[11px] font-semibold text-primary hover:underline cursor-pointer disabled:opacity-50"
+                  >
+                    Xem chi tiết đơn hàng
+                  </button>
+                  <a
+                    id="btnPayActiveOrder"
+                    href={`/payment?orderId=${encodeURIComponent(
+                      displayedActiveOrder.id
+                    )}`}
+                    className="text-[11px] font-bold text-on-primary bg-primary hover:bg-primary-container px-2.5 py-1 rounded-md transition-colors"
+                  >
+                    Thanh toán ngay →
+                  </a>
+                </div>
                 {setContextActiveOrder && (
                   <button
                     id="btnDismissActiveOrderBanner"
@@ -1485,6 +1496,19 @@ export default function CartDrawer({
                 hàng ở trạng thái <strong>PENDING</strong> chờ thanh toán.
               </p>
 
+              <a
+                id="btnProceedToPayment"
+                href={`/payment?orderId=${encodeURIComponent(
+                  orderCallOutcome.order.id
+                )}`}
+                className="w-full py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-md font-bold hover:bg-primary-container transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  payment
+                </span>
+                <span>Tiến hành thanh toán đơn hàng →</span>
+              </a>
+
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -1496,7 +1520,7 @@ export default function CartDrawer({
                 <button
                   type="button"
                   onClick={handleCloseDrawer}
-                  className="flex-1 py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-md hover:bg-primary-container transition-colors cursor-pointer whitespace-nowrap"
+                  className="flex-1 py-2.5 px-3 rounded-lg border border-outline-variant text-on-surface font-label-md hover:bg-surface-container transition-colors cursor-pointer whitespace-nowrap"
                 >
                   Về thực đơn
                 </button>
@@ -1618,6 +1642,25 @@ export default function CartDrawer({
                       </ul>
                     )}
                   </div>
+
+                  {orderCallOutcome.code === "PENDING_ORDER_EXISTS" && (
+                    <a
+                      id="btnPayExistingPendingOrder"
+                      href={
+                        displayedActiveOrder?.id
+                          ? `/payment?orderId=${encodeURIComponent(
+                              displayedActiveOrder.id
+                            )}`
+                          : "/payment"
+                      }
+                      className="w-full py-2.5 px-3 rounded-lg bg-primary text-on-primary font-label-md font-bold hover:bg-primary-container transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        payment
+                      </span>
+                      <span>Thanh toán đơn hàng đang chờ xử lý →</span>
+                    </a>
+                  )}
 
                   <div className="flex gap-2">
                     {(orderCallOutcome.code === "INVALID_CART" ||

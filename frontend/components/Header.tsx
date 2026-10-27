@@ -87,7 +87,7 @@ export default function Header({
           </button>
         </div>
 
-        <div className="hidden lg:flex items-center flex-1 max-w-sm mx-space-sm">
+        <div className="hidden lg:flex items-center flex-1 max-w-sm min-w-0 mx-space-sm">
           <div className="relative w-full">
             <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-outline">
               <span className="material-symbols-outlined text-[20px]">
@@ -104,9 +104,9 @@ export default function Header({
           </div>
         </div>
 
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden md:flex items-center gap-1 flex-shrink-0">
           <Link
-            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors ${
+            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors whitespace-nowrap ${
               activeNav === "thuc-don"
                 ? "bg-primary text-on-primary shadow-sm font-semibold"
                 : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
@@ -118,7 +118,7 @@ export default function Header({
           <button
             type="button"
             onClick={() => handleNotice("Khuyến mãi")}
-            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors cursor-pointer ${
+            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
               activeNav === "khuyen-mai"
                 ? "bg-primary text-on-primary shadow-sm font-semibold"
                 : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
@@ -129,7 +129,7 @@ export default function Header({
           <Link
             href="/orders"
             id="header-order-history-nav"
-            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors ${
+            className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors whitespace-nowrap ${
               activeNav === "lich-su-don-hang"
                 ? "bg-primary text-on-primary shadow-sm font-semibold"
                 : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
@@ -138,7 +138,7 @@ export default function Header({
             Lịch sử đơn hàng
           </Link>
           <a
-            className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors"
+            className="px-3 py-2 font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface rounded-lg transition-colors whitespace-nowrap cursor-pointer"
             href="#footer"
           >
             Về BrewLite

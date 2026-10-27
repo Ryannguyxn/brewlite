@@ -27,8 +27,16 @@ function tryResolveFile(basePath) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier.startsWith("next/") && !specifier.endsWith(".js")) {
-    return nextResolve(`${specifier}.js`, context);
+  if (specifier.startsWith("next/")) {
+    const resolved = tryResolveFile(
+      path.join(FRONTEND_ROOT, "node_modules", specifier)
+    );
+    if (resolved) {
+      return { url: resolved, shortCircuit: true };
+    }
+    if (!specifier.endsWith(".js")) {
+      return nextResolve(`${specifier}.js`, context);
+    }
   }
 
   if (specifier.startsWith("@/")) {

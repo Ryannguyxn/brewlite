@@ -1,14 +1,23 @@
 import {
+  MOCK_MY_ORDERS_RESPONSE,
   type CreateOrderItemDto,
   type CreateOrderRequestDto,
   type CreateOrderResponseDto,
   type DrinkSize,
+  type GetMyOrdersQueryParams,
+  type GetMyOrdersResponseDto,
   type InsufficientStockDetail,
   type InvalidCartDetail,
   type OrderErrorCode,
+  type OrderHistoryItemDto,
+  type OrderHistoryMetaDto,
   type OrderItemSnapshotDto,
+  type OrderPaymentSummaryDto,
+  type OrderStatus,
   type OrderSubmissionErrorState,
   type OrderToppingSnapshotDto,
+  type PaymentMethod,
+  type PaymentStatus,
 } from "@/mock-data";
 import {
   API_BASE_URL,
@@ -1097,4 +1106,1256 @@ export async function createOrderApi(
     errorData?.details,
     !isDeterministic4xx
   );
+}
+
+// ============================================================================
+// ORDER HISTORY SERVICE (`GET /orders/me` — SPRINT 3 SCRUM-64)
+// Đối chiếu chuẩn 100% với:
+// - docs/api/BrewLite_API_Contract_v3.0.md §4 (`GET /orders/me`) & §9
+// - backend/src/orders/orders.controller.ts & orders.service.ts
+// - backend/src/orders/dto/get-my-orders-query.dto.ts
+// - backend/src/orders/dto/get-my-orders-response.dto.ts
+// ============================================================================
+
+export const MIN_MY_ORDERS_PAGE = 1;
+export const MIN_MY_ORDERS_LIMIT = 1;
+export const MAX_MY_ORDERS_LIMIT = 100;
+
+export const VALID_ORDER_STATUSES: readonly OrderStatus[] = [
+  "PENDING",
+  "PAYMENT_FAILED",
+  "PAID",
+  "PREPARING",
+  "READY",
+  "COMPLETED",
+  "CANCELLED",
+] as const;
+
+export const VALID_PAYMENT_STATUSES: readonly PaymentStatus[] = [
+  "SUCCESS",
+  "FAILED",
+] as const;
+
+export const VALID_PAYMENT_METHODS: readonly PaymentMethod[] = [
+  "CARD",
+  "WALLET",
+] as const;
+
+/**
+ * Kiểm tra tham số truy vấn `page` và `limit` cho `GET /orders/me`
+ * (API Contract v3.0 §4.1 & `backend/src/orders/orders.service.ts`):
+ * - Hoặc KHÔNG truyền cả `page` lẫn `limit` (trả về toàn bộ lịch sử đơn hàng của user).
+ * - Hoặc truyền ĐỒNG THỜI cả `page` (số nguyên dương >= 1) và `limit` (số nguyên từ 1 đến 100).
+ * - Nếu chỉ truyền 1 trong 2 tham số hoặc giá trị ngoài khoảng hợp lệ -> trả về `400 VALIDATION_ERROR`.
+ */
+export function validateMyOrdersQuery(query?: GetMyOrdersQueryParams): {
+  isValid: boolean;
+  hasPagination: boolean;
+  page: number | null;
+  limit: number | null;
+  queryString: string;
+  error?: OrderServiceError;
+} {
+  if (!query || (query.page === undefined && query.limit === undefined)) {
+    return {
+      isValid: true,
+      hasPagination: false,
+      page: null,
+      limit: null,
+      queryString: "",
+    };
+  }
+
+  const hasPage = query.page !== undefined;
+  const hasLimit = query.limit !== undefined;
+
+  if (hasPage !== hasLimit) {
+    return {
+      isValid: false,
+      hasPagination: false,
+      page: null,
+      limit: null,
+      queryString: "",
+      error: createOrderError(
+        "Tham số phân trang page và limit phải được gửi cùng nhau hoặc cùng bỏ trống.",
+        400,
+        "VALIDATION_ERROR",
+        undefined,
+        false
+      ),
+    };
+  }
+
+  const page = query.page as number;
+  const limit = query.limit as number;
+
+  if (
+    typeof page !== "number" ||
+    !Number.isFinite(page) ||
+    !Number.isSafeInteger(page) ||
+    page < MIN_MY_ORDERS_PAGE
+  ) {
+    return {
+      isValid: false,
+      hasPagination: false,
+      page: null,
+      limit: null,
+      queryString: "",
+      error: createOrderError(
+        `Tham số page phải là số nguyên lớn hơn hoặc bằng ${MIN_MY_ORDERS_PAGE}.`,
+        400,
+        "VALIDATION_ERROR",
+        undefined,
+        false
+      ),
+    };
+  }
+
+  if (
+    typeof limit !== "number" ||
+    !Number.isFinite(limit) ||
+    !Number.isSafeInteger(limit) ||
+    limit < MIN_MY_ORDERS_LIMIT ||
+    limit > MAX_MY_ORDERS_LIMIT
+  ) {
+    return {
+      isValid: false,
+      hasPagination: false,
+      page: null,
+      limit: null,
+      queryString: "",
+      error: createOrderError(
+        `Tham số limit phải là số nguyên trong khoảng từ ${MIN_MY_ORDERS_LIMIT} đến ${MAX_MY_ORDERS_LIMIT}.`,
+        400,
+        "VALIDATION_ERROR",
+        undefined,
+        false
+      ),
+    };
+  }
+
+  return {
+    isValid: true,
+    hasPagination: true,
+    page,
+    limit,
+    queryString: `?page=${page}&limit=${limit}`,
+  };
+}
+
+/**
+ * Kiểm tra chặt chẽ `OrderPaymentSummaryDto | null` trong `GET /orders/me` (API Contract v3.0 §4.2).
+ * Lưu ý: `GET /orders/me` là truy vấn chỉ đọc (idempotent), nên `isOutcomeUncertain = false`.
+ */
+export function validateOrderPaymentSummaryData(
+  raw: unknown,
+  orderIdx = 0
+): OrderPaymentSummaryDto | null {
+  if (raw === null) {
+    return null;
+  }
+
+  if (!raw || typeof raw !== "object") {
+    throw createOrderError(
+      `Dữ liệu thanh toán (payment) của đơn hàng thứ ${orderIdx + 1} không hợp lệ (phải là object hoặc null).`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const payment = raw as Record<string, unknown>;
+
+  if (typeof payment.id !== "string" || !isValidUuid(payment.id.trim())) {
+    throw createOrderError(
+      `Mã giao dịch thanh toán (payment.id) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof payment.status !== "string" ||
+    !VALID_PAYMENT_STATUSES.includes(payment.status as PaymentStatus)
+  ) {
+    throw createOrderError(
+      `Trạng thái giao dịch (payment.status) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof payment.method !== "string" ||
+    !VALID_PAYMENT_METHODS.includes(payment.method as PaymentMethod)
+  ) {
+    throw createOrderError(
+      `Phương thức thanh toán (payment.method) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    payment.methodLast4 !== null &&
+    (typeof payment.methodLast4 !== "string" ||
+      !/^\d{4}$/.test(payment.methodLast4.trim()))
+  ) {
+    throw createOrderError(
+      `Trường payment.methodLast4 của đơn hàng thứ ${orderIdx + 1} phải là 4 chữ số hoặc null.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof payment.amountVnd !== "number" ||
+    !Number.isSafeInteger(payment.amountVnd) ||
+    payment.amountVnd < 0
+  ) {
+    throw createOrderError(
+      `Số tiền thanh toán (payment.amountVnd) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    payment.mockReference !== null &&
+    (typeof payment.mockReference !== "string" || !payment.mockReference.trim())
+  ) {
+    throw createOrderError(
+      `Mã tham chiếu giao dịch (payment.mockReference) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    payment.failureReason !== null &&
+    (typeof payment.failureReason !== "string" || !payment.failureReason.trim())
+  ) {
+    throw createOrderError(
+      `Lý do thất bại (payment.failureReason) của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof payment.createdAt !== "string" ||
+    !payment.createdAt.trim() ||
+    Number.isNaN(Date.parse(payment.createdAt))
+  ) {
+    throw createOrderError(
+      `Thời gian giao dịch (payment.createdAt) của đơn hàng thứ ${orderIdx + 1} không đúng chuẩn ISO 8601.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  return {
+    id: payment.id.trim(),
+    status: payment.status as PaymentStatus,
+    method: payment.method as PaymentMethod,
+    methodLast4:
+      typeof payment.methodLast4 === "string"
+        ? payment.methodLast4.trim()
+        : null,
+    amountVnd: payment.amountVnd,
+    mockReference:
+      typeof payment.mockReference === "string"
+        ? payment.mockReference.trim()
+        : null,
+    failureReason:
+      typeof payment.failureReason === "string"
+        ? payment.failureReason.trim()
+        : null,
+    createdAt: payment.createdAt.trim(),
+  };
+}
+
+/**
+ * Kiểm tra chặt chẽ từng phần tử `OrderHistoryItemDto` trong `GET /orders/me`
+ * (API Contract v3.0 §4.2 & ERD invariants).
+ */
+export function validateOrderHistoryItemData(
+  raw: unknown,
+  orderIdx = 0
+): OrderHistoryItemDto {
+  if (!raw || typeof raw !== "object") {
+    throw createOrderError(
+      `Dữ liệu đơn hàng thứ ${orderIdx + 1} trong danh sách lịch sử không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const record = raw as Record<string, unknown>;
+
+  if (typeof record.id !== "string" || !isValidUuid(record.id.trim())) {
+    throw createOrderError(
+      `Mã đơn hàng (id) ở vị trí thứ ${orderIdx + 1} không đúng định dạng UUID.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof record.status !== "string" ||
+    !VALID_ORDER_STATUSES.includes(record.status as OrderStatus)
+  ) {
+    throw createOrderError(
+      `Trạng thái đơn hàng (status) ở vị trí thứ ${orderIdx + 1} không thuộc danh mục hợp lệ của API Contract v3.0.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof record.createdAt !== "string" ||
+    !record.createdAt.trim() ||
+    Number.isNaN(Date.parse(record.createdAt))
+  ) {
+    throw createOrderError(
+      `Thời gian tạo đơn (createdAt) ở đơn hàng thứ ${orderIdx + 1} không đúng chuẩn ISO 8601.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof record.expiresAt !== "string" ||
+    !record.expiresAt.trim() ||
+    Number.isNaN(Date.parse(record.expiresAt))
+  ) {
+    throw createOrderError(
+      `Thời gian hết hạn giữ chỗ (expiresAt) ở đơn hàng thứ ${orderIdx + 1} bị thiếu hoặc không đúng chuẩn ISO 8601.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof record.subtotalVnd !== "number" ||
+    !Number.isSafeInteger(record.subtotalVnd) ||
+    record.subtotalVnd < 0 ||
+    typeof record.discountVnd !== "number" ||
+    !Number.isSafeInteger(record.discountVnd) ||
+    record.discountVnd < 0 ||
+    typeof record.totalVnd !== "number" ||
+    !Number.isSafeInteger(record.totalVnd) ||
+    record.totalVnd < 0 ||
+    record.discountVnd > record.subtotalVnd ||
+    record.totalVnd !== record.subtotalVnd - record.discountVnd
+  ) {
+    throw createOrderError(
+      `Dữ liệu tổng tiền (subtotalVnd, discountVnd, totalVnd) ở đơn hàng thứ ${orderIdx + 1} không hợp lệ hoặc vi phạm bất biến totalVnd = subtotalVnd - discountVnd.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    record.couponCode !== null &&
+    (typeof record.couponCode !== "string" || !record.couponCode.trim())
+  ) {
+    throw createOrderError(
+      `Trường couponCode ở đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (
+    typeof record.pointsEarned !== "number" ||
+    !Number.isSafeInteger(record.pointsEarned) ||
+    record.pointsEarned < 0
+  ) {
+    throw createOrderError(
+      `Điểm tích lũy (pointsEarned) ở đơn hàng thứ ${orderIdx + 1} phải là số nguyên không âm.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  if (!Array.isArray(record.items) || record.items.length === 0) {
+    throw createOrderError(
+      `Danh sách món (items) ở đơn hàng thứ ${orderIdx + 1} bị rỗng hoặc không hợp lệ.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const validatedItems: OrderItemSnapshotDto[] = record.items.map(
+    (rawItem: unknown, idx: number) => {
+      if (!rawItem || typeof rawItem !== "object") {
+        throw createOrderError(
+          `Dữ liệu dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      const item = rawItem as Record<string, unknown>;
+
+      if (typeof item.id !== "string" || !isValidUuid(item.id.trim())) {
+        throw createOrderError(
+          `Mã dòng món (id) thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (
+        typeof item.productId !== "string" ||
+        !isValidUuid(item.productId.trim())
+      ) {
+        throw createOrderError(
+          `Mã sản phẩm (productId) ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (typeof item.productName !== "string" || !item.productName.trim()) {
+        throw createOrderError(
+          `Tên sản phẩm (productName) ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (
+        typeof item.size !== "string" ||
+        !VALID_DRINK_SIZES.includes(item.size as DrinkSize)
+      ) {
+        throw createOrderError(
+          `Kích cỡ (size) ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (
+        typeof item.sizeMultiplierPercent !== "number" ||
+        !Number.isSafeInteger(item.sizeMultiplierPercent) ||
+        item.sizeMultiplierPercent <= 0
+      ) {
+        throw createOrderError(
+          `Hệ số kích cỡ (sizeMultiplierPercent) ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (
+        typeof item.basePriceVnd !== "number" ||
+        !Number.isSafeInteger(item.basePriceVnd) ||
+        item.basePriceVnd < 0
+      ) {
+        throw createOrderError(
+          `Giá gốc (basePriceVnd) ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (
+        typeof item.quantity !== "number" ||
+        !Number.isSafeInteger(item.quantity) ||
+        item.quantity < MIN_ORDER_QUANTITY ||
+        item.quantity > MAX_ORDER_QUANTITY
+      ) {
+        throw createOrderError(
+          `Số lượng (quantity) ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (
+        typeof item.unitPriceVnd !== "number" ||
+        !Number.isSafeInteger(item.unitPriceVnd) ||
+        item.unitPriceVnd < 0 ||
+        typeof item.lineTotalVnd !== "number" ||
+        !Number.isSafeInteger(item.lineTotalVnd) ||
+        item.lineTotalVnd < 0 ||
+        item.lineTotalVnd !== item.unitPriceVnd * item.quantity
+      ) {
+        throw createOrderError(
+          `Đơn giá hoặc thành tiền ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ (yêu cầu lineTotalVnd = unitPriceVnd * quantity).`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      if (!Array.isArray(item.toppings)) {
+        throw createOrderError(
+          `Danh sách toppings ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không phải mảng.`,
+          500,
+          "INTERNAL_ERROR",
+          undefined,
+          false
+        );
+      }
+
+      const validatedToppings: OrderToppingSnapshotDto[] = item.toppings.map(
+        (rawTop: unknown, topIdx: number) => {
+          if (!rawTop || typeof rawTop !== "object") {
+            throw createOrderError(
+              `Topping thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+              500,
+              "INTERNAL_ERROR",
+              undefined,
+              false
+            );
+          }
+
+          const top = rawTop as Record<string, unknown>;
+          if (typeof top.id !== "string" || !isValidUuid(top.id.trim())) {
+            throw createOrderError(
+              `Mã topping (id) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+              500,
+              "INTERNAL_ERROR",
+              undefined,
+              false
+            );
+          }
+
+          if (typeof top.name !== "string" || !top.name.trim()) {
+            throw createOrderError(
+              `Tên topping (name) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+              500,
+              "INTERNAL_ERROR",
+              undefined,
+              false
+            );
+          }
+
+          if (
+            typeof top.priceVnd !== "number" ||
+            !Number.isSafeInteger(top.priceVnd) ||
+            top.priceVnd < 0
+          ) {
+            throw createOrderError(
+              `Giá topping (priceVnd) thứ ${topIdx + 1} ở dòng món thứ ${idx + 1} của đơn hàng thứ ${orderIdx + 1} không hợp lệ.`,
+              500,
+              "INTERNAL_ERROR",
+              undefined,
+              false
+            );
+          }
+
+          return {
+            id: top.id.trim(),
+            name: top.name.trim(),
+            priceVnd: top.priceVnd,
+          };
+        }
+      );
+
+      return {
+        id: item.id.trim(),
+        productId: item.productId.trim(),
+        productName: item.productName.trim(),
+        size: item.size as DrinkSize,
+        sizeMultiplierPercent: item.sizeMultiplierPercent,
+        basePriceVnd: item.basePriceVnd,
+        quantity: item.quantity,
+        unitPriceVnd: item.unitPriceVnd,
+        lineTotalVnd: item.lineTotalVnd,
+        toppings: validatedToppings,
+      };
+    }
+  );
+
+  const computedItemsSubtotal = validatedItems.reduce(
+    (sum, item) => sum + item.lineTotalVnd,
+    0
+  );
+  if (computedItemsSubtotal !== record.subtotalVnd) {
+    throw createOrderError(
+      `Tổng thành tiền các dòng món (lineTotalVnd) không khớp với subtotalVnd của đơn hàng thứ ${orderIdx + 1}.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const validatedPayment = validateOrderPaymentSummaryData(
+    record.payment,
+    orderIdx
+  );
+
+  if (
+    validatedPayment !== null &&
+    validatedPayment.amountVnd !== record.totalVnd
+  ) {
+    throw createOrderError(
+      `Số tiền thanh toán (payment.amountVnd) không khớp với totalVnd của đơn hàng thứ ${orderIdx + 1}.`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  return {
+    id: record.id.trim(),
+    status: record.status as OrderStatus,
+    createdAt: record.createdAt.trim(),
+    expiresAt: record.expiresAt.trim(),
+    subtotalVnd: record.subtotalVnd,
+    discountVnd: record.discountVnd,
+    totalVnd: record.totalVnd,
+    couponCode:
+      typeof record.couponCode === "string" ? record.couponCode.trim() : null,
+    pointsEarned: record.pointsEarned,
+    items: validatedItems,
+    payment: validatedPayment,
+  };
+}
+
+/**
+ * Kiểm tra chặt chẽ `meta` trong `GET /orders/me` (API Contract v3.0 §4.1 & §4.2):
+ * - Chế độ không phân trang: `page === null`, `limit === null`, `totalPages === null`, `total === itemsLength`.
+ * - Chế độ phân trang: `page >= 1`, `1 <= limit <= 100`, `total >= 0`, `totalPages === (total === 0 ? 0 : Math.ceil(total / limit))`.
+ */
+export function validateMyOrdersMetaData(
+  raw: unknown,
+  itemsLength: number
+): OrderHistoryMetaDto {
+  if (!raw || typeof raw !== "object") {
+    throw createOrderError(
+      "Thiếu hoặc sai định dạng siêu dữ liệu phân trang (meta) trong phản hồi GET /orders/me.",
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const meta = raw as Record<string, unknown>;
+
+  if (
+    typeof meta.total !== "number" ||
+    !Number.isSafeInteger(meta.total) ||
+    meta.total < 0
+  ) {
+    throw createOrderError(
+      "Trường meta.total trong phản hồi GET /orders/me phải là số nguyên không âm.",
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const isUnpaginated =
+    meta.page === null && meta.limit === null && meta.totalPages === null;
+
+  if (isUnpaginated) {
+    if (meta.total !== itemsLength) {
+      throw createOrderError(
+        "Trường meta.total không khớp với số lượng phần tử items trong chế độ không phân trang.",
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+    return {
+      page: null,
+      limit: null,
+      total: meta.total,
+      totalPages: null,
+    };
+  }
+
+  if (
+    typeof meta.page !== "number" ||
+    !Number.isSafeInteger(meta.page) ||
+    meta.page < MIN_MY_ORDERS_PAGE ||
+    typeof meta.limit !== "number" ||
+    !Number.isSafeInteger(meta.limit) ||
+    meta.limit < MIN_MY_ORDERS_LIMIT ||
+    meta.limit > MAX_MY_ORDERS_LIMIT ||
+    typeof meta.totalPages !== "number" ||
+    !Number.isSafeInteger(meta.totalPages) ||
+    meta.totalPages < 0
+  ) {
+    throw createOrderError(
+      "Siêu dữ liệu phân trang (meta.page, meta.limit, meta.totalPages) trong phản hồi GET /orders/me không hợp lệ.",
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const expectedTotalPages =
+    meta.total === 0 ? 0 : Math.ceil(meta.total / meta.limit);
+  if (meta.totalPages !== expectedTotalPages) {
+    throw createOrderError(
+      "Trường meta.totalPages trong phản hồi GET /orders/me không khớp công thức ceil(total / limit).",
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  return {
+    page: meta.page,
+    limit: meta.limit,
+    total: meta.total,
+    totalPages: meta.totalPages,
+  };
+}
+
+/**
+ * Kiểm tra toàn bộ phản hồi `GetMyOrdersResponseDto` từ `GET /orders/me` (API Contract v3.0 §4.2).
+ * Tuyệt đối không tự điền giá trị mặc định che giấu dữ liệu sai từ máy chủ.
+ */
+export function validateMyOrdersResponseData(
+  data: unknown
+): GetMyOrdersResponseDto {
+  if (!data || typeof data !== "object") {
+    throw createOrderError(
+      "Phản hồi lịch sử đơn hàng từ máy chủ không hợp lệ hoặc không thể đọc dữ liệu.",
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const record = data as Record<string, unknown>;
+
+  if (!Array.isArray(record.items)) {
+    throw createOrderError(
+      "Phản hồi lịch sử đơn hàng từ máy chủ không chứa mảng items hợp lệ.",
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  const validatedItems = record.items.map((rawOrder, idx) =>
+    validateOrderHistoryItemData(rawOrder, idx)
+  );
+  const validatedMeta = validateMyOrdersMetaData(
+    record.meta,
+    validatedItems.length
+  );
+
+  return {
+    items: validatedItems,
+    meta: validatedMeta,
+  };
+}
+
+/**
+ * Tạo dữ liệu phản hồi `GetMyOrdersResponseDto` từ Mock Data (hỗ trợ cả phân trang và không phân trang)
+ * để dùng cho kiểm thử hoặc khi chạy chế độ `?state=mock`.
+ */
+export function buildMockMyOrdersResponse(
+  query?: GetMyOrdersQueryParams
+): GetMyOrdersResponseDto {
+  const validation = validateMyOrdersQuery(query);
+  if (!validation.isValid) {
+    throw (
+      validation.error ||
+      createOrderError(
+        "Tham số phân trang không hợp lệ.",
+        400,
+        "VALIDATION_ERROR",
+        undefined,
+        false
+      )
+    );
+  }
+
+  const allItems = MOCK_MY_ORDERS_RESPONSE.items;
+  if (
+    !validation.hasPagination ||
+    validation.page === null ||
+    validation.limit === null
+  ) {
+    return {
+      items: allItems,
+      meta: {
+        page: null,
+        limit: null,
+        total: allItems.length,
+        totalPages: null,
+      },
+    };
+  }
+
+  const total = allItems.length;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / validation.limit);
+  const startIdx = (validation.page - 1) * validation.limit;
+  const pagedItems = allItems.slice(startIdx, startIdx + validation.limit);
+
+  return {
+    items: pagedItems,
+    meta: {
+      page: validation.page,
+      limit: validation.limit,
+      total,
+      totalPages,
+    },
+  };
+}
+
+/**
+ * Gọi API `GET /orders/me` tới Backend thật để tải danh sách lịch sử đơn hàng của người dùng hiện tại (SCRUM-64).
+ * Tuân thủ nghiêm ngặt API Contract v3.0 §4 & §9:
+ * - Bắt buộc có JWT `Authorization: Bearer <accessToken>` hợp lệ.
+ * - Khi gặp `401 UNAUTHORIZED` (token thiếu, hết hạn hoặc bị từ chối bởi Backend): xóa phiên đăng nhập (`clearStoredSession()`) nhưng BẢO LƯU GIỎ HÀNG (`brewlite_cart_v1`).
+ * - Hỗ trợ cả chế độ không phân trang (`GET /orders/me`) và có phân trang (`GET /orders/me?page=X&limit=Y`).
+ * - Chỉ chấp nhận đúng HTTP `200 OK` và kiểm tra toàn diện cấu trúc `GetMyOrdersResponseDto`.
+ * - Vì `GET /orders/me` là truy vấn chỉ đọc (idempotent), `isOutcomeUncertain` luôn là `false` và người dùng có thể bấm "Thử lại" an toàn khi gặp lỗi mạng / 5xx.
+ */
+export async function getMyOrdersApi(options?: {
+  query?: GetMyOrdersQueryParams;
+  tokenOverride?: string | null;
+  signal?: AbortSignal;
+  useMockData?: boolean;
+}): Promise<GetMyOrdersResponseDto> {
+  // 1. Kiểm tra tham số phân trang (nếu có) trước khi gọi mạng
+  const queryValidation = validateMyOrdersQuery(options?.query);
+  if (!queryValidation.isValid) {
+    throw (
+      queryValidation.error ||
+      createOrderError(
+        "Tham số truy vấn lịch sử đơn hàng không hợp lệ.",
+        400,
+        "VALIDATION_ERROR",
+        undefined,
+        false
+      )
+    );
+  }
+
+  // Hỗ trợ chế độ xem dữ liệu mẫu tường minh (?state=mock hoặc test unit)
+  // Hỗ trợ chế độ xem dữ liệu mẫu tường minh (?state=mock hoặc test unit)
+  // Tuyệt đối chặn trong môi trường production, bảo vệ dữ liệu thực và API Contract
+  if (options?.useMockData) {
+    if (process.env.NODE_ENV === "production") {
+      throw createOrderError(
+        "Chế độ dữ liệu mẫu (mock data) không được phép trong môi trường production.",
+        403,
+        "FORBIDDEN",
+        undefined,
+        false
+      );
+    }
+    return buildMockMyOrdersResponse(options?.query);
+  }
+
+  // 2. Kiểm tra JWT token hợp lệ và chưa hết hạn trước khi gửi request
+  const candidateToken = options?.tokenOverride ?? getStoredToken();
+  if (!candidateToken || !candidateToken.trim()) {
+    clearStoredSession();
+    throw createOrderError(
+      "Vui lòng đăng nhập để xem lịch sử đơn hàng của bạn.",
+      401,
+      "UNAUTHORIZED",
+      undefined,
+      false
+    );
+  }
+
+  try {
+    validateJwtToken(candidateToken);
+  } catch {
+    clearStoredSession();
+    throw createOrderError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để xem lịch sử đơn hàng.",
+      401,
+      "UNAUTHORIZED",
+      undefined,
+      false
+    );
+  }
+
+  const isBrowser = typeof window !== "undefined";
+  const pathWithQuery = `/orders/me${queryValidation.queryString}`;
+  const primaryUrl = isBrowser
+    ? `/api/backend${pathWithQuery}`
+    : `${API_BASE_URL}${pathWithQuery}`;
+  const fallbackUrl = isBrowser
+    ? `${API_BASE_URL}${pathWithQuery}`
+    : `/api/backend${pathWithQuery}`;
+
+  const requestInit: RequestInit = {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${candidateToken.trim()}`,
+    },
+    cache: "no-store",
+    signal: options?.signal,
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(primaryUrl, requestInit);
+  } catch (primaryErr) {
+    if (options?.signal?.aborted) {
+      throw primaryErr;
+    }
+    try {
+      response = await fetch(fallbackUrl, requestInit);
+    } catch (fallbackErr) {
+      if (options?.signal?.aborted) {
+        throw fallbackErr;
+      }
+      throw createOrderError(
+        "Không thể kết nối đến máy chủ để tải lịch sử đơn hàng (GET /orders/me). Vui lòng kiểm tra kết nối mạng và thử lại.",
+        503,
+        "NETWORK_ERROR",
+        undefined,
+        false
+      );
+    }
+  }
+
+  // 3. Xử lý HTTP 200 OK theo đúng API Contract v3.0 §4.2
+  if (response.status === 200) {
+    let rawData: unknown;
+    try {
+      rawData = await response.json();
+    } catch {
+      throw createOrderError(
+        "Máy chủ phản hồi HTTP 200 OK nhưng dữ liệu JSON lịch sử đơn hàng không hợp lệ.",
+        500,
+        "INTERNAL_ERROR",
+        undefined,
+        false
+      );
+    }
+    return validateMyOrdersResponseData(rawData);
+  }
+
+  // Nếu máy chủ trả về một mã 2xx khác 200 (ví dụ 204 No Content), từ chối vì sai hợp đồng API Contract v3.0 §4.2
+  if (response.status >= 200 && response.status < 300) {
+    throw createOrderError(
+      `Phản hồi từ máy chủ không đúng hợp đồng GET /orders/me (nhận HTTP ${response.status}, yêu cầu HTTP 200 OK).`,
+      500,
+      "INTERNAL_ERROR",
+      undefined,
+      false
+    );
+  }
+
+  // 4. Xử lý các mã lỗi HTTP từ Backend (400, 401, 500)
+  const errorData = await response.json().catch(() => null);
+
+  if (response.status === 401 || errorData?.code === "UNAUTHORIZED") {
+    // Xóa phiên đăng nhập đã hết hạn nhưng BẢO LƯU GIỎ HÀNG (`brewlite_cart_v1`)
+    clearStoredSession();
+    throw createOrderError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để xem lịch sử đơn hàng.",
+      401,
+      "UNAUTHORIZED",
+      errorData?.details,
+      false
+    );
+  }
+
+  const is5xx = response.status >= 500 && response.status <= 599;
+  const resolvedCode: OrderErrorCode | string =
+    typeof errorData?.code === "string" && errorData.code.trim()
+      ? errorData.code.trim()
+      : response.status === 400
+      ? "VALIDATION_ERROR"
+      : is5xx
+      ? "INTERNAL_ERROR"
+      : "SERVER_ERROR";
+
+  const rawMessage = Array.isArray(errorData?.message)
+    ? errorData.message.join(", ")
+    : typeof errorData?.message === "string" && errorData.message.trim()
+    ? errorData.message.trim()
+    : is5xx
+    ? "Máy chủ đang gặp sự cố khi truy xuất lịch sử đơn hàng. Vui lòng thử tải lại sau giây lát."
+    : `Không thể tải lịch sử đơn hàng (HTTP ${response.status}).`;
+
+  throw createOrderError(
+    rawMessage,
+    response.status,
+    resolvedCode,
+    errorData?.details,
+    false
+  );
+}
+
+export type OrderHistoryFilterTab =
+  | "all"
+  | "PENDING"
+  | "PAID_GROUP"
+  | "PAYMENT_FAILED"
+  | "CANCELLED";
+
+export interface OrderStatusPresentationMeta {
+  status: OrderStatus;
+  label: string;
+  shortLabel: string;
+  filterGroup: Exclude<OrderHistoryFilterTab, "all">;
+  icon: string;
+  badgeClassName: string;
+  cardClassName: string;
+  reservationNote: string;
+}
+
+/**
+ * Ánh xạ trạng thái đơn hàng (`OrderStatus`) sang nhãn hiển thị, màu sắc chuẩn Stitch
+ * và ghi chú quy tắc nghiệp vụ giữ chỗ tồn kho / mã giảm giá theo API Contract v3.0 §4.2 & §9.
+ */
+export function getOrderStatusPresentation(
+  status: OrderStatus
+): OrderStatusPresentationMeta {
+  switch (status) {
+    case "PAID":
+      return {
+        status,
+        label: "Đã thanh toán (PAID)",
+        shortLabel: "Đã thanh toán",
+        filterGroup: "PAID_GROUP",
+        icon: "check_circle",
+        badgeClassName: "bg-[#E8F5E9] text-[#1B5E20] border-[#A5D6A7]",
+        cardClassName:
+          "bg-surface-container-lowest border-transparent hover:border-outline-variant",
+        reservationNote:
+          "Thanh toán thành công • Đã khấu trừ tồn kho & xác nhận mã giảm giá (CONFIRMED).",
+      };
+    case "PREPARING":
+      return {
+        status,
+        label: "Đang pha chế (PREPARING)",
+        shortLabel: "Đang pha chế",
+        filterGroup: "PAID_GROUP",
+        icon: "coffee_maker",
+        badgeClassName: "bg-[#E8F5E9] text-[#1B5E20] border-[#A5D6A7]",
+        cardClassName:
+          "bg-surface-container-lowest border-transparent hover:border-outline-variant",
+        reservationNote:
+          "Quầy Barista đang chuẩn bị đồ uống của bạn theo công thức đã chọn.",
+      };
+    case "READY":
+      return {
+        status,
+        label: "Sẵn sàng nhận món (READY)",
+        shortLabel: "Sẵn sàng",
+        filterGroup: "PAID_GROUP",
+        icon: "notifications_active",
+        badgeClassName: "bg-[#E8F5E9] text-[#1B5E20] border-[#A5D6A7]",
+        cardClassName:
+          "bg-surface-container-lowest border-transparent hover:border-outline-variant",
+        reservationNote:
+          "Đồ uống đã hoàn tất tại quầy • Sẵn sàng phục vụ hoặc giao hàng.",
+      };
+    case "COMPLETED":
+      return {
+        status,
+        label: "Hoàn tất (COMPLETED)",
+        shortLabel: "Hoàn tất",
+        filterGroup: "PAID_GROUP",
+        icon: "verified",
+        badgeClassName: "bg-[#E8F5E9] text-[#1B5E20] border-[#A5D6A7]",
+        cardClassName:
+          "bg-surface-container-lowest border-transparent hover:border-outline-variant",
+        reservationNote:
+          "Đơn hàng đã phục vụ hoàn tất • Điểm tích lũy thành viên đã được cộng vào tài khoản.",
+      };
+    case "PENDING":
+      return {
+        status,
+        label: "Chờ xử lý (PENDING)",
+        shortLabel: "Chờ xử lý",
+        filterGroup: "PENDING",
+        icon: "schedule",
+        badgeClassName:
+          "bg-tertiary-fixed text-on-tertiary-fixed border-tertiary-fixed-dim",
+        cardClassName:
+          "bg-surface-container-lowest border-tertiary-fixed-dim hover:border-tertiary",
+        reservationNote:
+          "Đang giữ chỗ tồn kho & mã giảm giá (HELD) trong 15 phút chờ thanh toán.",
+      };
+    case "PAYMENT_FAILED":
+      return {
+        status,
+        label: "Thanh toán thất bại (PAYMENT_FAILED)",
+        shortLabel: "Thất bại",
+        filterGroup: "PAYMENT_FAILED",
+        icon: "error",
+        badgeClassName:
+          "bg-error-container text-on-error-container border-error/20",
+        cardClassName:
+          "bg-surface-container-lowest border-error/25 hover:border-error/50",
+        reservationNote:
+          "Giao dịch gần nhất bị từ chối • Tồn kho & mã giảm giá vẫn được giữ (HELD) cho tới khi đơn hết hạn hoặc bị hủy.",
+      };
+    case "CANCELLED":
+    default:
+      return {
+        status: "CANCELLED",
+        label: "Đã hủy (CANCELLED)",
+        shortLabel: "Đã hủy",
+        filterGroup: "CANCELLED",
+        icon: "cancel",
+        badgeClassName:
+          "bg-surface-container-highest text-on-surface-variant border-outline-variant",
+        cardClassName:
+          "bg-surface-container-low/80 border-transparent hover:border-outline-variant opacity-85 hover:opacity-100",
+        reservationNote:
+          "Đơn hàng đã hủy • Đã hoàn trả tồn kho & giải phóng lượt dùng mã giảm giá (RELEASED).",
+      };
+  }
+}
+
+/**
+ * Đếm số lượng đơn hàng theo từng tab bộ lọc trên màn hình Lịch sử đơn hàng (SCRUM-64).
+ */
+export function computeOrderStatusCounts(orders: OrderHistoryItemDto[]): {
+  all: number;
+  PENDING: number;
+  PAID_GROUP: number;
+  PAYMENT_FAILED: number;
+  CANCELLED: number;
+} {
+  const counts = {
+    all: orders.length,
+    PENDING: 0,
+    PAID_GROUP: 0,
+    PAYMENT_FAILED: 0,
+    CANCELLED: 0,
+  };
+
+  for (const order of orders) {
+    const group = getOrderStatusPresentation(order.status).filterGroup;
+    counts[group] += 1;
+  }
+
+  return counts;
+}
+
+/**
+ * Lọc danh sách đơn hàng theo tab trạng thái và từ khóa tìm kiếm (mã đơn UUID, tên món, tên topping, mã coupon).
+ */
+export function filterAndSearchOrders(
+  orders: OrderHistoryItemDto[],
+  statusFilter: OrderHistoryFilterTab,
+  searchQuery: string
+): OrderHistoryItemDto[] {
+  const normalizedQuery = (searchQuery || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^#/, "");
+
+  return orders.filter((order) => {
+    if (statusFilter !== "all") {
+      const group = getOrderStatusPresentation(order.status).filterGroup;
+      if (group !== statusFilter) {
+        return false;
+      }
+    }
+
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    const idMatches = order.id.toLowerCase().includes(normalizedQuery);
+    const couponMatches = order.couponCode
+      ? order.couponCode.toLowerCase().includes(normalizedQuery)
+      : false;
+    const itemMatches = order.items.some(
+      (item) =>
+        item.productName.toLowerCase().includes(normalizedQuery) ||
+        item.toppings.some((t) =>
+          t.name.toLowerCase().includes(normalizedQuery)
+        )
+    );
+    const refMatches = order.payment?.mockReference
+      ? order.payment.mockReference.toLowerCase().includes(normalizedQuery)
+      : false;
+
+    return idMatches || couponMatches || itemMatches || refMatches;
+  });
+}
+
+/**
+ * Định dạng chuỗi ISO 8601 sang định dạng hiển thị tiếng Việt `HH:mm - DD/MM/YYYY`.
+ */
+export function formatOrderTimestampVi(isoString: string): string {
+  const timestamp = Date.parse(isoString);
+  if (Number.isNaN(timestamp)) {
+    return isoString;
+  }
+  const date = new Date(timestamp);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${hours}:${minutes} - ${day}/${month}/${year}`;
 }

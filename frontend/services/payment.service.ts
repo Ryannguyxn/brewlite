@@ -356,17 +356,10 @@ export function isOrderExpired(
   if (!order || typeof order !== "object") return true;
   if (order.status === "EXPIRED") return true;
 
-  if (order.expiresAt && typeof order.expiresAt === "string") {
-    const expiresMs = new Date(order.expiresAt).getTime();
+  if (typeof order.expiresAt === "string") {
+    const expiresMs = Date.parse(order.expiresAt);
     if (Number.isFinite(expiresMs)) {
       return referenceNowMs >= expiresMs;
-    }
-  }
-
-  if (order.createdAt && typeof order.createdAt === "string") {
-    const createdMs = new Date(order.createdAt).getTime();
-    if (Number.isFinite(createdMs)) {
-      return referenceNowMs >= createdMs + 15 * 60 * 1000;
     }
   }
 
@@ -1056,12 +1049,9 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
   const createdMs = typeof o.createdAt === "string" ? Date.parse(o.createdAt) : NaN;
   if (!Number.isFinite(createdMs)) return null;
 
-  let expiresAtIso: string;
-  if (typeof o.expiresAt === "string" && Number.isFinite(Date.parse(o.expiresAt))) {
-    expiresAtIso = new Date(Date.parse(o.expiresAt)).toISOString();
-  } else {
-    expiresAtIso = new Date(createdMs + 15 * 60 * 1000).toISOString();
-  }
+  const expiresMs = typeof o.expiresAt === "string" ? Date.parse(o.expiresAt) : NaN;
+  if (!Number.isFinite(expiresMs)) return null;
+  const expiresAtIso = new Date(expiresMs).toISOString();
 
   if (
     typeof o.subtotalVnd !== "number" ||

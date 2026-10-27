@@ -1006,7 +1006,7 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
 
     assert.equal(result.skipped, false);
     assert.equal(result.outcome?.type, "error");
-    assert.equal(result.outcome?.error.code, "ORDER_EXPIRED");
+    assert.equal(result.outcome?.error.code, "INVALID_TRANSITION");
     assert.equal(apiCallCount, 0);
 
     // Verify rendered HTML shows nonPayableOrderBanner with expired notice
@@ -1138,7 +1138,28 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
       isInternal502
     );
 
-    // 6. Valid response conforms cleanly
+    // 6. Order missing expiresAt (must throw 502 malformed response, NO fallback to createdAt)
+    const sample = createSampleOrderSnapshot();
+    const orderMissingExpiresAt = { ...sample };
+    delete (orderMissingExpiresAt as Record<string, unknown>).expiresAt;
+    assert.throws(
+      () =>
+        validateMyOrdersResponse({
+          items: [orderMissingExpiresAt],
+        }),
+      isInternal502
+    );
+
+    // 7. Order with invalid/malformed expiresAt date string
+    assert.throws(
+      () =>
+        validateMyOrdersResponse({
+          items: [{ ...createSampleOrderSnapshot(), expiresAt: "not-a-valid-date" }],
+        }),
+      isInternal502
+    );
+
+    // 8. Valid response conforms cleanly
     const validRaw = {
       items: [createSampleOrderSnapshot()],
       meta: { page: 1, limit: 10, total: 1, totalPages: 1 },

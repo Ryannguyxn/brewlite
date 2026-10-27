@@ -77,7 +77,11 @@ fixtures của mình. Không reset/drop dữ liệu hoặc sửa schema trong te
 
 Concurrency suite cần PostgreSQL với nhiều connection thật: same-key parallel,
 different keys/same Order, key busy/rollback/retry, Payment chờ Order cancellation.
-Kiểm tra cùng Scheduler thực và toàn luồng FE vẫn cần phối hợp sau SCRUM-57/59.
+SCRUM-59 bổ sung `test/order-lifecycle.integration-spec.ts`: test Payment thật với
+Scheduler, chờ Order lock theo cả hai chiều, replay sau expiry/cancellation,
+FAILED → retry SUCCESS và vòng đời tới COMPLETED/History. Xem
+[ghi chú lifecycle](../../../docs/api/SCRUM59_Order_Payment_Lifecycle.md).
+Kiểm thử giao diện FE toàn luồng vẫn là bước phối hợp riêng.
 
 ## Bổ sung SCRUM-55
 

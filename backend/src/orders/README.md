@@ -91,5 +91,22 @@ cart is rejected. Transactions retry bounded, known-aborted lock/deadlock errors
 
 See [SCRUM58_Inventory_Concurrency.md](../../../docs/api/SCRUM58_Inventory_Concurrency.md)
 for lock ordering, PostgreSQL integration tests, and the callable primitive for
-SCRUM-59. The scheduled batch runner and optional Inventory Movement audit table
-are not implemented here. Payment and promotion logic retain their own modules.
+SCRUM-59. Payment and promotion logic retain their own modules.
+
+## SCRUM-59 Order–Payment lifecycle
+
+OrderExpirationService now runs every minute through the Nest application
+lifecycle. It scans expired unpaid Orders in small batches using the database
+clock, then calls the SCRUM-58 primitive in one transaction per Order. A failed
+Order rolls back independently; subsequent batches continue. Repeated/concurrent
+sweeps cannot release resources twice or cancel an Order already committed PAID.
+
+Automatic scheduling defaults to enabled, with 50 rows per batch. Configure
+ORDER_EXPIRATION_ENABLED and ORDER_EXPIRATION_BATCH_SIZE in backend/.env when
+needed; the unpaid Order TTL remains 15 minutes. No new migration or dependency
+is required. Shutdown stops the timer and drains the active transaction before
+Prisma disconnects. No Scheduler HTTP endpoint is exposed.
+
+See [SCRUM59_Order_Payment_Lifecycle.md](../../../docs/api/SCRUM59_Order_Payment_Lifecycle.md)
+for configuration, lock ordering and real lifecycle/concurrency tests. Optional
+Inventory Movement audit and customer cancellation remain outside this task.

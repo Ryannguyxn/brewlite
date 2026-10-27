@@ -1867,7 +1867,7 @@ export default function OrderHistoryView() {
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-1">
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                     <button
                       type="button"
                       onClick={() => setSelectedOrderSnapshot(null)}
@@ -1875,6 +1875,22 @@ export default function OrderHistoryView() {
                     >
                       Đóng
                     </button>
+                    {(selectedOrderSnapshot.status === "PENDING" ||
+                      selectedOrderSnapshot.status === "PAYMENT_FAILED") &&
+                      Number.isFinite(Date.parse(selectedOrderSnapshot.expiresAt)) &&
+                      Date.now() < new Date(selectedOrderSnapshot.expiresAt).getTime() && (
+                        <Link
+                          href={`/payment?orderId=${selectedOrderSnapshot.id}`}
+                          className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-container transition-colors flex items-center gap-1.5"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">
+                            payment
+                          </span>
+                          <span>
+                            Thanh toán ngay ({formatVnd(selectedOrderSnapshot.totalVnd)})
+                          </span>
+                        </Link>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -1882,12 +1898,12 @@ export default function OrderHistoryView() {
                         setSelectedOrderSnapshot(null);
                         handleReorderItems(target);
                       }}
-                      className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-container transition-colors flex items-center gap-1.5 cursor-pointer"
+                      className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md text-label-md transition-colors flex items-center gap-1.5 cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[16px]">
                         repeat
                       </span>
-                      <span>Đặt lại đơn này</span>
+                      <span>Đặt lại món</span>
                     </button>
                   </div>
                 </>

@@ -7,6 +7,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import type { Prisma } from '../src/generated/prisma/client.js';
 import type { OrderStatus } from '../src/generated/prisma/enums.js';
 import {
   expireOrderInTransaction,
@@ -159,6 +160,36 @@ describe('SCRUM-58 PostgreSQL inventory concurrency', () => {
   const redemption = (orderId: string) =>
     prisma.couponRedemption.findUniqueOrThrow({ where: { orderId } });
 
+  async function reservationState(
+    owner: Customer,
+    productIds: string[],
+    couponId: string,
+    db: Prisma.TransactionClient = prisma,
+  ) {
+    const [stocks, orders, orderItems, redemptions, discount] =
+      await Promise.all([
+        db.product.findMany({
+          where: { id: { in: productIds } },
+          select: { id: true, stock: true },
+          orderBy: { id: 'asc' },
+        }),
+        db.order.count({ where: { userId: owner.id } }),
+        db.orderItem.count({ where: { order: { userId: owner.id } } }),
+        db.couponRedemption.count({ where: { userId: owner.id } }),
+        db.coupon.findUniqueOrThrow({
+          where: { id: couponId },
+          select: { activeUsageCount: true },
+        }),
+      ]);
+    return {
+      stocks,
+      orders,
+      orderItems,
+      redemptions,
+      activeUsageCount: discount.activeUsageCount,
+    };
+  }
+
   async function waitForLock(queryPattern: string) {
     await expect
       .poll(
@@ -273,6 +304,155 @@ describe('SCRUM-58 PostgreSQL inventory concurrency', () => {
       (await prisma.coupon.findUniqueOrThrow({ where: { id: discount.id } }))
         .activeUsageCount,
     ).toBe(0);
+  });
+
+  it.each(['global', 'per-user'] as const)(
+    'rolls back reserved stock and all rows when %s coupon quota rejects Create Order',
+    async (quota) => {
+      const productIds = await Promise.all([product(5), product(4)]);
+      const previousOwner = await customer();
+      const discount = await coupon();
+      if (quota === 'per-user') {
+        // Global quota still has room; the same customer's CONSUMED redemption
+        // alone must reject the next use after their previous Order is PAID.
+        await prisma.coupon.update({
+          where: { id: discount.id },
+          data: { usageLimit: 2 },
+        });
+      }
+      const previous = await create(
+        previousOwner,
+        [item(productIds[0])],
+        discount.code,
+      ).expect(201);
+      await pay(previousOwner, previous.body.id).expect(200);
+      const owner = quota === 'global' ? await customer() : previousOwner;
+      const before = await reservationState(owner, productIds, discount.id);
+      expect(before).toMatchObject({
+        orders: quota === 'global' ? 0 : 1,
+        orderItems: quota === 'global' ? 0 : 1,
+        redemptions: quota === 'global' ? 0 : 1,
+        activeUsageCount: 1,
+      });
+
+      const reservedStocks: (typeof before.stocks)[] = [];
+      const transaction = prisma.$transaction.bind(prisma);
+      // Observe the real database transaction immediately before Prisma rolls
+      // it back. Queries and the HTTP/service callback are NOT replaced.
+      const observeFailure = async (
+        work: (tx: Prisma.TransactionClient) => Promise<unknown>,
+        options?: {
+          maxWait?: number;
+          timeout?: number;
+          isolationLevel?: Prisma.TransactionIsolationLevel;
+        },
+      ) =>
+        transaction(async (tx) => {
+          try {
+            return await work(tx);
+          } catch (error) {
+            reservedStocks.push(
+              (await reservationState(owner, productIds, discount.id, tx))
+                .stocks,
+            );
+            throw error;
+          }
+        }, options);
+      const spy = vi
+        .spyOn(prisma, '$transaction')
+        .mockImplementation(observeFailure as PrismaService['$transaction']);
+      try {
+        const response = await create(
+          owner,
+          productIds.map((id) => item(id)),
+          discount.code,
+        ).expect(409);
+        expect(response.body).toMatchObject({
+          statusCode: 409,
+          code: 'COUPON_UNAVAILABLE',
+        });
+        expect(spy).toHaveBeenCalledTimes(1); // A quota rejection is not retryable.
+        expect(reservedStocks).toEqual([
+          before.stocks.map(({ id, stock }) => ({ id, stock: stock - 1 })),
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
+
+      // Both products are restored; no Order, OrderItem or redemption was added,
+      // and the existing coupon's active_usage_count remains exactly one.
+      expect(await reservationState(owner, productIds, discount.id)).toEqual(
+        before,
+      );
+    },
+  );
+
+  it('returns 500 INTERNAL_ERROR after three real serialization aborts with no persisted side effects', async () => {
+    const productIds = await Promise.all([product(5), product(4)]);
+    const owner = await customer();
+    const discount = await coupon();
+    const before = await reservationState(owner, productIds, discount.id);
+    expect(before).toMatchObject({
+      orders: 0,
+      orderItems: 0,
+      redemptions: 0,
+      activeUsageCount: 0,
+    });
+    const attempts: (typeof before)[] = [];
+    const transaction = prisma.$transaction.bind(prisma);
+    const abortAfterWrites = async (
+      work: (tx: Prisma.TransactionClient) => Promise<unknown>,
+      options?: {
+        maxWait?: number;
+        timeout?: number;
+        isolationLevel?: Prisma.TransactionIsolationLevel;
+      },
+    ) =>
+      transaction(async (tx) => {
+        const result = await work(tx);
+        attempts.push(
+          await reservationState(owner, productIds, discount.id, tx),
+        );
+        // Let PostgreSQL abort AFTER the real request reserved stock/coupon and
+        // inserted Order/items/redemption. No fabricated Prisma error or result.
+        await tx.$executeRaw`DO $$ BEGIN RAISE EXCEPTION 'test retry exhaustion' USING ERRCODE = '40001'; END $$`;
+        return result;
+      }, options);
+    const spy = vi
+      .spyOn(prisma, '$transaction')
+      .mockImplementation(abortAfterWrites as PrismaService['$transaction']);
+    try {
+      const response = await create(
+        owner,
+        productIds.map((id) => item(id)),
+        discount.code,
+      ).expect(500);
+      expect(response.body).toEqual({
+        statusCode: 500,
+        message: 'Internal server error',
+        error: 'Internal Server Error',
+        code: 'INTERNAL_ERROR',
+      });
+      expect(spy).toHaveBeenCalledTimes(3);
+      expect(attempts).toHaveLength(3);
+      for (const attempt of attempts) {
+        expect(attempt).toEqual({
+          stocks: before.stocks.map(({ id, stock }) => ({
+            id,
+            stock: stock - 1,
+          })),
+          orders: 1,
+          orderItems: 2,
+          redemptions: 1,
+          activeUsageCount: 1,
+        });
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await reservationState(owner, productIds, discount.id)).toEqual(
+      before,
+    );
   });
 
   it.each([true, false])(

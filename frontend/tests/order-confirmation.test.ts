@@ -140,24 +140,15 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.equal(isOrderExpired(cancelledOrder, now), true);
     });
 
-    it("should infer 15-minute expiration from createdAt when expiresAt is missing", () => {
+    it("should rely strictly on expiresAt and NOT infer/fallback from createdAt", () => {
       const now = Date.now();
-      const created10MinAgo = new Date(now - 10 * 60 * 1000).toISOString();
-      assert.equal(
-        isOrderExpired(
-          { createdAt: created10MinAgo, status: "PAYMENT_FAILED" },
-          now
-        ),
-        false
-      );
-
       const created16MinAgo = new Date(now - 16 * 60 * 1000).toISOString();
       assert.equal(
         isOrderExpired(
           { createdAt: created16MinAgo, status: "PAYMENT_FAILED" },
           now
         ),
-        true
+        false
       );
     });
   });

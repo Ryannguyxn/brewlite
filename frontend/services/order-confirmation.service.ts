@@ -86,8 +86,6 @@ export interface PaymentApiResponse {
   createdAt: string;
 }
 
-const ORDER_EXPIRATION_MINUTES = 15;
-const ORDER_EXPIRATION_MS = ORDER_EXPIRATION_MINUTES * 60 * 1000;
 
 /**
  * Định tuyến endpoint: sử dụng Next.js proxy rewrite `/api/backend/...` trên trình duyệt
@@ -142,16 +140,11 @@ export function isOrderExpired(
   order: { expiresAt?: string | null; createdAt?: string | null; status?: string },
   referenceNowMs: number = Date.now()
 ): boolean {
-  if (order.status === "CANCELLED") return true;
+  if (order.status === "CANCELLED" || order.status === "EXPIRED") return true;
+  if (order.status === "PAID") return false;
 
   if (order.expiresAt) {
     return computeOrderRemainingSeconds(order.expiresAt, referenceNowMs) <= 0;
-  }
-  if (order.createdAt) {
-    const createdMs = new Date(order.createdAt).getTime();
-    if (!isNaN(createdMs)) {
-      return referenceNowMs >= createdMs + ORDER_EXPIRATION_MS;
-    }
   }
   return false;
 }

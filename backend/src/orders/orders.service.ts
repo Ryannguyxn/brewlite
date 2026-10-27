@@ -16,6 +16,12 @@ import { Prisma } from '../generated/prisma/client.js';
 import { readPaymentSnapshot } from '../payments/payment-snapshot.js';
 import type { CreateOrderDto } from './dto/create-order.dto.js';
 import type { GetMyOrdersQueryDto } from './dto/get-my-orders-query.dto.js';
+import {
+  expireOrderInTransaction,
+  inventoryQuantities,
+  reserveInventory,
+} from './inventory-policy.js';
+import { runInventoryTransaction } from './inventory-transaction.js';
 
 const SIZE_PERCENT = { S: 100, M: 120, L: 140, ONE_SIZE: 100 } as const;
 const pending = () =>
@@ -147,8 +153,9 @@ export class OrdersService {
   }
 
   async create(userId: string, dto: CreateOrderDto) {
+    userId = userId.toLowerCase();
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const createOrCleanup = async (tx: Prisma.TransactionClient) => {
         if (
           !(await tx.user.findUnique({
             where: { id: userId },
@@ -162,21 +169,22 @@ export class OrdersService {
             message: 'Unauthorized',
           });
         }
-        if (
-          await tx.order.findFirst({
-            where: { userId, status: { in: ['PENDING', 'PAYMENT_FAILED'] } },
-            select: { id: true },
-          })
-        )
-          throw pending();
-        const quantities = new Map<string, number>();
-        for (const item of dto.items)
-          quantities.set(
-            item.productId,
-            (quantities.get(item.productId) ?? 0) + item.quantity,
-          );
+        // Serialize Create Order for the same customer before stock checks. Do
+        // not lock User: Payment locks Order first and updates User for loyalty.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'create-order:' + userId}, 0))::text`;
+        const active = await tx.order.findFirst({
+          where: { userId, status: { in: ['PENDING', 'PAYMENT_FAILED'] } },
+          select: { id: true },
+        });
+        if (active) {
+          const status = await expireOrderInTransaction(tx, active.id);
+          if (status === 'PENDING' || status === 'PAYMENT_FAILED')
+            throw pending();
+          return null; // Commit cleanup, then recheck in a fresh transaction.
+        }
+        const quantities = inventoryQuantities(dto.items);
         const products = await tx.product.findMany({
-          where: { id: { in: [...quantities.keys()] } },
+          where: { id: { in: quantities.map(([id]) => id) } },
           include: {
             category: { select: { isActive: true } },
             productToppings: { select: { toppingId: true } },
@@ -193,7 +201,9 @@ export class OrdersService {
             throw invalidCart(item.productId, 'TOO_MANY_TOPPINGS');
           if (new Set(item.toppingIds).size !== item.toppingIds.length)
             throw invalidCart(item.productId, 'DUPLICATE_TOPPING');
-          const product = products.find((p) => p.id === item.productId);
+          const product = products.find(
+            (p) => p.id === item.productId.toLowerCase(),
+          );
           if (!product) throw invalidCart(item.productId, 'PRODUCT_NOT_FOUND');
           if (!product.category.isActive)
             throw invalidCart(product.id, 'PRODUCT_UNAVAILABLE');
@@ -248,35 +258,14 @@ export class OrdersService {
           : null;
         // Invalid code/validity stays 400; quota follows stock per Contract v3.0.
         if (dto.couponCode) assertCouponValid(coupon, subtotal, now);
-        // Aggregate all sizes of a product before reserving its shared stock.
-        for (const [productId, quantity] of [...quantities].sort(([a], [b]) =>
-          a.localeCompare(b),
-        )) {
-          const reserved = await tx.product.updateMany({
-            where: { id: productId, stock: { gte: quantity } },
-            data: { stock: { decrement: quantity } },
-          });
-          if (!reserved.count) {
-            const product = await tx.product.findUnique({
-              where: { id: productId },
-            });
-            throw new ConflictException({
-              statusCode: 409,
-              error: 'Conflict',
-              code: 'INSUFFICIENT_STOCK',
-              message: 'Insufficient product stock',
-              details: [
-                {
-                  productId,
-                  requestedQuantity: quantity,
-                  availableQuantity: product?.stock ?? 0,
-                },
-              ],
-            });
-          }
-        }
+        await reserveInventory(tx, quantities);
         if (coupon) {
-          const reservation = await reserveCoupon(tx, userId, coupon.id, subtotal);
+          const reservation = await reserveCoupon(
+            tx,
+            userId,
+            coupon.id,
+            subtotal,
+          );
           coupon = reservation.coupon;
           discount = reservation.discount;
         }
@@ -332,9 +321,17 @@ export class OrdersService {
           totalVnd: money(order.totalVnd),
           createdAt: order.createdAt.toISOString(),
         };
-      }, {
-        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-      });
+      };
+      // Cleanup commits before a new reservation to avoid Coupon -> Product lock
+      // inversion between old/new carts. A failed cleanup never creates an Order.
+      for (let phase = 0; phase < 2; phase++) {
+        const result = await runInventoryTransaction(
+          this.prisma,
+          createOrCleanup,
+        );
+        if (result !== null) return result;
+      }
+      throw new Error('Active Order changed repeatedly during creation');
     } catch (error) {
       if (error instanceof HttpException) throw error;
       if (
@@ -345,7 +342,12 @@ export class OrdersService {
         )
       )
         throw pending();
-      throw new InternalServerErrorException('Internal server error');
+      throw new InternalServerErrorException({
+        statusCode: 500,
+        message: 'Internal server error',
+        error: 'Internal Server Error',
+        code: 'INTERNAL_ERROR',
+      });
     }
   }
 }

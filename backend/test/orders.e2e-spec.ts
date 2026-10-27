@@ -48,17 +48,22 @@ describe('POST /orders (real guard/controller/service; mocked database)', () => 
   let token: string;
   const tx = {
     user: { findUnique: vi.fn() },
-    order: { findFirst: vi.fn(), create: vi.fn() },
+    order: { findFirst: vi.fn(), findUniqueOrThrow: vi.fn(), create: vi.fn() },
     product: { findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
     topping: { findMany: vi.fn() },
     coupon: { findUnique: vi.fn(), updateMany: vi.fn() },
     couponRedemption: { count: vi.fn() },
     $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(),
   };
   beforeEach(async () => {
     vi.resetAllMocks();
     tx.user.findUnique.mockResolvedValue({ id: userId });
     tx.order.findFirst.mockResolvedValue(null);
+    tx.order.findUniqueOrThrow.mockResolvedValue({ status: 'PENDING' });
+    tx.$queryRaw.mockResolvedValue([
+      { id: 'existing', now: new Date(), expired: false },
+    ]);
     tx.product.findMany.mockResolvedValue([product]);
     tx.topping.findMany.mockResolvedValue([topping]);
     tx.product.updateMany.mockResolvedValue({ count: 1 });

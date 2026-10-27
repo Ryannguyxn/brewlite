@@ -15,8 +15,8 @@ size check to allow ONE_SIZE with a 100% multiplier.
    down (floor) for size pricing, and aggregates stock across sizes per product.
    It verifies active category, the product's sizePolicy, and that every topping
    is available and linked to that product.
-4. In one Prisma transaction it reserves coupon quota (if supplied), conditionally
-   decrements stock, and inserts the order, line/topping snapshots and HELD coupon
+4. In one Prisma transaction it conditionally decrements stock, reserves coupon
+   quota (if supplied), and inserts the order, line/topping snapshots and HELD coupon
    redemption. Any error rolls back all of these writes.
 5. Controller returns 201 with PENDING status and JSON numeric prices.
 
@@ -24,7 +24,9 @@ Sizes use catalog multipliers S=100%, M=120%, L=140%, ONE_SIZE=100%.
 STANDARD products accept only S/M/L; ONE_SIZE products accept only ONE_SIZE.
 Category inactivity returns INVALID_CART; insufficient stock returns 409.
 Orders expire after 15 minutes per schema.dbml. Existing active-order constraint
-is respected: PENDING/PAYMENT_FAILED blocks a second order with 409.
+is respected: an unexpired PENDING/PAYMENT_FAILED blocks a second order with 409.
+SCRUM-58 serializes Create Order per customer and atomically cancels/releases an
+expired active Order before starting a separate transaction for the replacement.
 Coupon codes are trimmed and uppercased. Percent discounts use half-up rounding,
 optional maximum discount, then a subtotal cap; fixed discounts are capped at
 subtotal. Validity windows are startsAt inclusive, expiresAt exclusive.
@@ -79,7 +81,15 @@ PostgreSQL 18 instance with all six migrations passed 14 integration tests
 (8 Orders, 6 Auth). TypeScript, lint and build passed. Application .env and
 application database were not modified during this verification.
 
-Payments, expiration cleanup, coupon release/consumption, advanced concurrent
-quota enforcement and transaction retries remain Sprint 3 scope. In particular,
-expired pending orders still need the future cancellation/release workflow;
-this endpoint does not automatically clear them.
+## SCRUM-58 inventory concurrency
+
+Shared inventory helpers aggregate and sort Product IDs, reserve stock atomically,
+and release expired unpaid Orders once under an Order row lock. Cancellation,
+stock release and held-coupon release commit together. A failed cleanup prevents
+replacement Order creation; a committed cleanup remains effective if the new
+cart is rejected. Transactions retry bounded, known-aborted lock/deadlock errors.
+
+See [SCRUM58_Inventory_Concurrency.md](../../../docs/api/SCRUM58_Inventory_Concurrency.md)
+for lock ordering, PostgreSQL integration tests, and the callable primitive for
+SCRUM-59. The scheduled batch runner and optional Inventory Movement audit table
+are not implemented here. Payment and promotion logic retain their own modules.

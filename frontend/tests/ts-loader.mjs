@@ -27,6 +27,10 @@ function tryResolveFile(basePath) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier.startsWith("next/") && !specifier.endsWith(".js")) {
+    return nextResolve(`${specifier}.js`, context);
+  }
+
   if (specifier.startsWith("@/")) {
     const subPath = specifier.slice(2);
     const target = path.join(FRONTEND_ROOT, subPath);

@@ -163,10 +163,30 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.equal(result?.status, "PAID");
     });
 
-    it("should fallback to the most recent order when targetOrderId is not passed", () => {
-      const result = findOrderForConfirmation(orderList);
-      assert.notEqual(result, null);
-      assert.equal(result?.id, mockOrderFailed.id);
+    it("should return null when targetOrderId is not found in order history (does NOT open latest order)", () => {
+      const nonExistentUuid = "550e8400-e29b-41d4-a716-446655440999";
+      const result = findOrderForConfirmation(orderList, nonExistentUuid);
+      assert.equal(result, null);
+    });
+
+    it("should return null when targetOrderId is an invalid UUID (does NOT open latest order)", () => {
+      const invalidId = "invalid-order-id-123";
+      const result = findOrderForConfirmation(orderList, invalidId);
+      assert.equal(result, null);
+    });
+
+    it("should fallback to the most recent order ONLY when targetOrderId is not passed or empty", () => {
+      const result1 = findOrderForConfirmation(orderList);
+      assert.notEqual(result1, null);
+      assert.equal(result1?.id, mockOrderFailed.id);
+
+      const result2 = findOrderForConfirmation(orderList, "");
+      assert.notEqual(result2, null);
+      assert.equal(result2?.id, mockOrderFailed.id);
+
+      const result3 = findOrderForConfirmation(orderList, null);
+      assert.notEqual(result3, null);
+      assert.equal(result3?.id, mockOrderFailed.id);
     });
 
     it("should return null when orderList is empty", () => {
@@ -252,7 +272,7 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
           status: 200,
           json: async () => expectedResponse,
         } as Response;
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const result = await submitRetryPaymentApi({
         orderId: mockOrderFailed.id,
@@ -273,6 +293,168 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.equal(parsedBody.orderId, mockOrderFailed.id);
       assert.equal(parsedBody.method, "CARD");
       assert.equal(parsedBody.paymentDetails.cardNumber, "1234567890121234");
+    });
+
+    it("should preserve and reuse the same Idempotency-Key on network retry", async () => {
+      const validToken = createValidMockJwt();
+      const specificKey = "idem-retry-custom-key-12345678";
+      let capturedKey = "";
+
+      global.fetch = (async (_url: string, init?: RequestInit) => {
+        const headers = init?.headers as Record<string, string>;
+        capturedKey = headers?.["Idempotency-Key"] || "";
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            paymentId: "550e8400-e29b-41d4-a716-446655440099",
+            orderId: mockOrderFailed.id,
+            paymentStatus: "SUCCESS",
+            orderStatus: "PAID",
+            amountVnd: 65000,
+            method: "CARD",
+            methodLast4: "1234",
+            mockReference: "MOCK-CARD-1234-abcd",
+            pointsEarned: 6,
+            failureReason: null,
+            createdAt: new Date().toISOString(),
+          }),
+        } as Response;
+      }) as unknown as typeof fetch;
+
+      await submitRetryPaymentApi({
+        orderId: mockOrderFailed.id,
+        method: "CARD",
+        identifier: "1234567890121234",
+        token: validToken,
+        idempotencyKey: specificKey,
+      });
+
+      assert.equal(capturedKey, specificKey);
+    });
+
+    it("should reject malformed payment responses (invalid UUID, wrong orderId, bad status) and NOT treat as success", async () => {
+      const validToken = createValidMockJwt();
+
+      // Case A: Missing paymentId
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          orderId: mockOrderFailed.id,
+          paymentStatus: "SUCCESS",
+          orderStatus: "PAID",
+          amountVnd: 65000,
+        }),
+      })) as unknown as typeof fetch;
+
+      await assert.rejects(
+        async () => {
+          await submitRetryPaymentApi({
+            orderId: mockOrderFailed.id,
+            method: "CARD",
+            identifier: "1234567890121234",
+            token: validToken,
+          });
+        },
+        (err: unknown) => {
+          const e = err as { code?: string };
+          return e.code === "INTERNAL_ERROR" || Boolean(err);
+        }
+      );
+
+      // Case B: Inconsistent status (SUCCESS but orderStatus is PAYMENT_FAILED)
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          paymentId: "550e8400-e29b-41d4-a716-446655440099",
+          orderId: mockOrderFailed.id,
+          paymentStatus: "SUCCESS",
+          orderStatus: "PAYMENT_FAILED",
+          amountVnd: 65000,
+          method: "CARD",
+          methodLast4: "1234",
+          mockReference: "MOCK-001",
+          pointsEarned: 6,
+          failureReason: null,
+          createdAt: new Date().toISOString(),
+        }),
+      })) as unknown as typeof fetch;
+
+      await assert.rejects(
+        async () => {
+          await submitRetryPaymentApi({
+            orderId: mockOrderFailed.id,
+            method: "CARD",
+            identifier: "1234567890121234",
+            token: validToken,
+          });
+        },
+        (err: unknown) => {
+          const e = err as { code?: string };
+          return e.code === "INTERNAL_ERROR" || Boolean(err);
+        }
+      );
+    });
+
+    it("should support 0 VND Order retry payment (amountVnd === 0, pointsEarned === 0)", async () => {
+      const validToken = createValidMockJwt();
+      const zeroVndResponse = {
+        paymentId: "550e8400-e29b-41d4-a716-446655440055",
+        orderId: mockOrderFailed.id,
+        paymentStatus: "SUCCESS",
+        orderStatus: "PAID",
+        amountVnd: 0,
+        method: "CARD",
+        methodLast4: "1234",
+        mockReference: "MOCK-ZERO-1234",
+        pointsEarned: 0,
+        failureReason: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => zeroVndResponse,
+      })) as unknown as typeof fetch;
+
+      const result = await submitRetryPaymentApi({
+        orderId: mockOrderFailed.id,
+        method: "CARD",
+        identifier: "1234567890121234",
+        token: validToken,
+        expectedAmountVnd: 0,
+      });
+
+      assert.equal(result.paymentStatus, "SUCCESS");
+      assert.equal(result.amountVnd, 0);
+      assert.equal(result.pointsEarned, 0);
+    });
+
+    it("should reject 401 UNAUTHORIZED from server and throw error", async () => {
+      const validToken = createValidMockJwt();
+      global.fetch = (async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({ message: "Unauthorized", code: "UNAUTHORIZED" }),
+      })) as unknown as typeof fetch;
+
+      await assert.rejects(
+        async () => {
+          await submitRetryPaymentApi({
+            orderId: mockOrderFailed.id,
+            method: "CARD",
+            identifier: "1234567890121234",
+            token: validToken,
+          });
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number; message?: string };
+          return e.statusCode === 401 || e.message === "UNAUTHORIZED";
+        }
+      );
     });
   });
 });

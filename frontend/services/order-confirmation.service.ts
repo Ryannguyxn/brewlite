@@ -7,7 +7,7 @@
 
 import { isValidUuid } from "./api.service";
 import { isTokenExpired } from "./auth.service";
-import { validateMyOrdersResponse } from "./payment.service";
+import { validateMyOrdersResponse, validatePaymentResponseData } from "./payment.service";
 
 export type OrderStatus =
   | "PENDING"
@@ -199,13 +199,18 @@ export function findOrderForConfirmation(
 ): OrderConfirmationData | null {
   if (!orders || orders.length === 0) return null;
 
-  if (targetOrderId && isValidUuid(targetOrderId)) {
-    const match = orders.find((o) => o.id === targetOrderId);
-    if (match) return match;
+  // Nếu người dùng/URL truyền targetOrderId cụ thể:
+  // Bắt buộc phải tìm đúng đơn hàng đó. Nếu không tìm thấy hoặc UUID không hợp lệ,
+  // trả về null để giao diện báo lỗi - TUYỆT ĐỐI không fallback sang orders[0] để tránh mở nhầm đơn!
+  if (targetOrderId !== undefined && targetOrderId !== null && targetOrderId.trim() !== "") {
+    const cleanId = targetOrderId.trim();
+    if (!isValidUuid(cleanId)) return null;
+    const match = orders.find((o) => o.id === cleanId);
+    return match || null;
   }
 
-  // Mặc định chọn đơn hàng đầu tiên (do backend trả về sort createdAt DESC, id DESC)
-  return orders[0];
+  // Chỉ khi không cung cấp targetOrderId mới fallback về đơn hàng mới nhất của người dùng
+  return orders[0] || null;
 }
 
 /**
@@ -218,15 +223,20 @@ export async function submitRetryPaymentApi(params: {
   identifier: string; // 16 chữ số cho CARD, 10 chữ số cho WALLET
   token: string;
   idempotencyKey?: string;
+  expectedAmountVnd?: number;
 }): Promise<PaymentApiResponse> {
-  const { orderId, method, identifier, token, idempotencyKey } = params;
+  const { orderId, method, identifier, token, idempotencyKey, expectedAmountVnd } = params;
 
   if (!token || isTokenExpired(token)) {
-    throw new Error("UNAUTHORIZED");
+    const unauthErr = new Error("UNAUTHORIZED");
+    (unauthErr as unknown as { statusCode: number }).statusCode = 401;
+    throw unauthErr;
   }
 
   if (!isValidUuid(orderId)) {
-    throw new Error("INVALID_ORDER_ID");
+    const invalidErr = new Error("INVALID_ORDER_ID");
+    (invalidErr as unknown as { statusCode: number }).statusCode = 400;
+    throw invalidErr;
   }
 
   const keyToUse = idempotencyKey || generateIdempotencyKey();
@@ -253,28 +263,31 @@ export async function submitRetryPaymentApi(params: {
   });
 
   if (response.status === 401) {
-    throw new Error("UNAUTHORIZED");
+    const unauthErr = new Error("UNAUTHORIZED");
+    (unauthErr as unknown as { statusCode: number }).statusCode = 401;
+    throw unauthErr;
   }
 
   const raw = await response.json().catch(() => null);
 
   if (!response.ok) {
     const errCode = raw?.message || raw?.code || `HTTP_${response.status}`;
-    throw new Error(String(errCode));
+    const apiErr = new Error(String(errCode));
+    (apiErr as unknown as { statusCode: number; code?: string }).statusCode = response.status;
+    (apiErr as unknown as { statusCode: number; code?: string }).code = raw?.code || String(errCode);
+    throw apiErr;
   }
 
-  // Validate response contract v3.0
-  if (
-    !raw ||
-    typeof raw.paymentId !== "string" ||
-    raw.orderId !== orderId ||
-    !["SUCCESS", "FAILED"].includes(raw.paymentStatus) ||
-    !["PAID", "PAYMENT_FAILED"].includes(raw.orderStatus)
-  ) {
-    throw new Error("MALFORMED_PAYMENT_RESPONSE");
-  }
+  // Validate response nghiêm ngặt theo Contract v3.0 qua validatePaymentResponseData:
+  // Ngăn chặn hoàn toàn response lỗi/malformed bị coi nhầm là success
+  const validated = validatePaymentResponseData(raw, keyToUse, {
+    expectedOrderId: orderId,
+    expectedAmountVnd,
+    expectedMethod: method,
+    expectedMethodLast4: identifier.replace(/\s+/g, "").slice(-4),
+  });
 
-  return raw as PaymentApiResponse;
+  return validated as unknown as PaymentApiResponse;
 }
 
 /**

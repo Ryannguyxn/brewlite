@@ -18,7 +18,6 @@ import { PaymentFailedRetryView } from "@/components/PaymentFailedRetryView";
 function OrderConfirmationContent() {
   const searchParams = useSearchParams();
   const orderIdParam = searchParams.get("orderId");
-  const initialStatusParam = searchParams.get("status");
 
   const { accessToken, user, isAuthenticated } = useAuth();
   const token = accessToken || (typeof window !== "undefined" ? getStoredToken() : null);
@@ -166,13 +165,13 @@ function OrderConfirmationContent() {
     );
   }
 
-  // 4. Kiểm tra trạng thái đơn: Thành công hay Thất bại/Thử lại
+  // 4. Kiểm tra trạng thái đơn hàng (CHỈ DỰA VÀO DỮ LIỆU SERVER XÁC NHẬN)
+  // Tuyệt đối KHÔNG tin URL query param status=PAID khi server chưa xác nhận!
   const isSuccessStatus =
     order.status === "PAID" ||
     order.status === "PREPARING" ||
     order.status === "READY" ||
-    order.status === "COMPLETED" ||
-    initialStatusParam === "PAID";
+    order.status === "COMPLETED";
 
   if (isSuccessStatus) {
     return (

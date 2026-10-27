@@ -10,6 +10,7 @@ import {
   type PaymentApiResponse,
   computeOrderRemainingSeconds,
   formatRemainingTime,
+  generateIdempotencyKey,
   isOrderExpired,
   submitRetryPaymentApi,
 } from "@/services/order-confirmation.service";
@@ -38,6 +39,10 @@ export function PaymentFailedRetryView({
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodType>("CARD");
   const [cardIdentifier, setCardIdentifier] = useState<string>("1234567890121234");
   const [walletIdentifier, setWalletIdentifier] = useState<string>("0912345678");
+
+  // Idempotency-Key & Network Uncertain State
+  const [currentIdempotencyKey, setCurrentIdempotencyKey] = useState<string>(() => generateIdempotencyKey());
+  const [isNetworkUncertain, setIsNetworkUncertain] = useState<boolean>(false);
 
   // Loading & error
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -97,25 +102,49 @@ export function PaymentFailedRetryView({
         method: selectedMethod,
         identifier: cleanNumber,
         token,
+        idempotencyKey: currentIdempotencyKey,
+        expectedAmountVnd: order.totalVnd,
       });
 
       if (result.paymentStatus === "SUCCESS") {
+        setIsNetworkUncertain(false);
         if (onRetrySuccess) {
           onRetrySuccess(result);
         } else {
           // Chuyển hướng sang OrderSuccessView
-          router.push(`/order-confirmation?orderId=${order.id}&status=PAID`);
+          router.push(`/order-confirmation?orderId=${order.id}`);
         }
       } else {
+        // Giao dịch FAILED dứt khoát từ server (PAYMENT_DECLINED)
+        setIsNetworkUncertain(false);
+        setCurrentIdempotencyKey(generateIdempotencyKey());
         setSubmitError(
           `Giao dịch vẫn bị từ chối (${result.failureReason || "PAYMENT_DECLINED"}). Vui lòng thử phương thức khác.`
         );
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg === "UNAUTHORIZED") {
+      const isNetworkErr =
+        err instanceof TypeError ||
+        msg.includes("fetch") ||
+        msg.includes("Network") ||
+        msg.includes("Failed to fetch") ||
+        msg.includes("PAYMENT_IN_PROGRESS");
+
+      if (isNetworkErr) {
+        // Lỗi mạng hoặc 409 PAYMENT_IN_PROGRESS: BẢO LƯU Idempotency-Key để retry an toàn
+        setIsNetworkUncertain(true);
+        setSubmitError(
+          "Không thể kết nối đến máy chủ hoặc giao dịch đang xử lý. Idempotency-Key đã được giữ nguyên để bạn có thể thử lại an toàn."
+        );
+      } else if (msg === "UNAUTHORIZED" || (err as { statusCode?: number })?.statusCode === 401) {
+        setIsNetworkUncertain(false);
         setSubmitError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.");
       } else {
+        setIsNetworkUncertain(false);
+        if (msg.includes("IDEMPOTENCY_KEY_CONFLICT")) {
+          setCurrentIdempotencyKey(generateIdempotencyKey());
+        }
         setSubmitError(`Lỗi thanh toán: ${msg}`);
       }
     } finally {
@@ -171,27 +200,50 @@ export function PaymentFailedRetryView({
                   <h1 className="font-headline-md text-2xl md:text-3xl font-bold text-on-surface">
                     {isExpiredState
                       ? "Đơn hàng đã hết hạn thanh toán"
+                      : order.status === "PENDING"
+                      ? "Đơn hàng đang chờ thanh toán"
+                      : order.status === "CANCELLED"
+                      ? "Đơn hàng đã bị hủy"
                       : "Thanh toán thất bại & Thử lại"}
                   </h1>
                   <span
                     id="orderStatusBadge"
                     className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
-                      isExpiredState
+                      isExpiredState || order.status === "CANCELLED"
                         ? "bg-surface-container-highest text-on-surface-variant border-outline-variant"
+                        : order.status === "PENDING"
+                        ? "bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]"
                         : "bg-[#FEE2E2] text-[#DC2626] border-[#FECACA]"
                     }`}
                   >
                     <span
                       className={`w-2 h-2 rounded-full ${
-                        isExpiredState ? "bg-on-surface-variant" : "bg-[#DC2626]"
+                        isExpiredState || order.status === "CANCELLED"
+                          ? "bg-on-surface-variant"
+                          : order.status === "PENDING"
+                          ? "bg-[#D97706]"
+                          : "bg-[#DC2626]"
                       }`}
                     ></span>
-                    {isExpiredState ? "ĐÃ HỦY (CANCELLED / EXPIRED)" : "PAYMENT_FAILED"}
+                    {/* Hiển thị chính xác trạng thái từ server, không tự ý gán ép CANCELLED/EXPIRED */}
+                    {isExpiredState
+                      ? order.status === "CANCELLED"
+                        ? "CANCELLED (ĐÃ HỦY)"
+                        : `${order.status} (QUÁ HẠN 15 PHÚT)`
+                      : order.status === "PENDING"
+                      ? "PENDING (CHỜ THANH TOÁN)"
+                      : order.status === "CANCELLED"
+                      ? "CANCELLED (ĐÃ HỦY)"
+                      : "PAYMENT_FAILED (BỊ TỪ CHỐI)"}
                   </span>
                 </div>
                 <p className="text-sm text-on-surface-variant max-w-2xl leading-relaxed">
                   {isExpiredState
-                    ? "Thời gian giữ chỗ tồn kho (15 phút) đã kết thúc. Đơn hàng đã tự động bị hủy và các sản phẩm đã được hoàn trả lại giỏ hàng/kho."
+                    ? "Thời gian giữ chỗ tồn kho (15 phút) đã kết thúc. Bạn không thể tiếp tục thanh toán cho đơn hàng này nữa."
+                    : order.status === "PENDING"
+                    ? "Đơn hàng của bạn đang ở trạng thái chờ thanh toán. Vui lòng chọn phương thức Thẻ hoặc Ví để hoàn tất trong thời hạn 15 phút."
+                    : order.status === "CANCELLED"
+                    ? "Đơn hàng này đã bị hủy trên hệ thống và tồn kho đã được hoàn trả."
                     : "Giao dịch thanh toán chưa thể hoàn tất. Đơn hàng của bạn đang được bảo lưu tạm thời, bạn có thể đổi phương thức và thử lại ngay."}
                 </p>
               </div>
@@ -486,9 +538,41 @@ export function PaymentFailedRetryView({
 
                   {/* Error display */}
                   {submitError && (
-                    <div className="p-3.5 rounded-lg bg-[#FEF2F2] border border-[#FECACA] text-xs text-[#DC2626] flex items-center gap-2">
-                      <span className="material-symbols-outlined text-[18px]">error</span>
-                      <span>{submitError}</span>
+                    <div
+                      id="retryErrorBanner"
+                      className={`p-4 rounded-xl border text-xs flex flex-col gap-2.5 ${
+                        isNetworkUncertain
+                          ? "bg-[#FFFBEB] border-[#FDE68A] text-[#92400E]"
+                          : "bg-[#FEF2F2] border-[#FECACA] text-[#DC2626]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-sm">
+                        <span className="material-symbols-outlined text-[20px]">
+                          {isNetworkUncertain ? "wifi_off" : "error"}
+                        </span>
+                        <span>
+                          {isNetworkUncertain
+                            ? "Trạng thái giao dịch chưa xác định (Network Uncertain)"
+                            : "Lỗi thanh toán"}
+                        </span>
+                      </div>
+                      <span id="retryErrorMessage">{submitError}</span>
+                      {isNetworkUncertain && (
+                        <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-[#FDE68A]">
+                          <span className="font-mono text-[11px] text-[#B45309]">
+                            Idempotency-Key: {currentIdempotencyKey.slice(0, 8)}...
+                          </span>
+                          <button
+                            type="button"
+                            id="btnRetrySameKey"
+                            onClick={handleRetrySubmit}
+                            disabled={isSubmitting}
+                            className="px-3 py-1.5 rounded-lg bg-primary hover:bg-[#70370e] text-on-primary font-bold text-xs transition-colors cursor-pointer"
+                          >
+                            {isSubmitting ? "Đang gửi lại..." : "Thử lại cùng Idempotency-Key"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 

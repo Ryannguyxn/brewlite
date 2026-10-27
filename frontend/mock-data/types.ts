@@ -357,9 +357,7 @@ export interface OrderSubmissionErrorState {
 // - database/schema.dbml (`orders`, `order_items`, `order_item_toppings`, `payments`)
 // ============================================================================
 
-export type PaymentMethod = "CARD" | "WALLET";
-
-export type PaymentStatus = "SUCCESS" | "FAILED";
+// PaymentMethod & PaymentStatus are defined above
 
 /**
  * Thông tin tóm tắt giao dịch thanh toán gắn với Order trong `GET /orders/me`
@@ -410,8 +408,6 @@ export interface OrderHistoryMetaDto {
   total: number;
   totalPages: number | null;
 }
-
-export type MyOrdersMetaDto = OrderHistoryMetaDto;
 
 /**
  * Tham số truy vấn `GET /orders/me` (API Contract v3.0 §4.1)
@@ -482,3 +478,117 @@ export interface SiteConfigData {
   branches: BranchInfo[];
   quickLinks: QuickLink[];
 }
+
+
+// ============================================================================
+// ĐỊNH NGHĨA KIỂU DỮ LIỆU PAYMENT & PROFILE (SPRINT 3 — SCRUM-67 / API CONTRACT v3.0)
+// Khớp 100% với:
+// - docs/api/BrewLite_API_Contract_v3.0.md (Mục 3: POST /payments, Mục 8: GET /auth/me, Mục 9)
+// - backend/src/payments/dto/create-payment.dto.ts & payment-response.dto.ts
+// ============================================================================
+
+export type PaymentMethod = "CARD" | "WALLET";
+
+export type PaymentStatus = "SUCCESS" | "FAILED";
+
+export type PaymentOrderStatus = "PAID" | "PAYMENT_FAILED";
+
+export type PaymentFailureReason = "PAYMENT_DECLINED" | null;
+
+/** Thông tin chi tiết khi method = "CARD" (chỉ gồm cardNumber đúng 16 chữ số) */
+export interface CardPaymentDetailsDto {
+  cardNumber: string;
+}
+
+/** Thông tin chi tiết khi method = "WALLET" (chỉ gồm phoneNumber đúng 10 chữ số) */
+export interface WalletPaymentDetailsDto {
+  phoneNumber: string;
+}
+
+/**
+ * Payload gửi lên `POST /payments` (API Contract v3.0 Mục 3.1)
+ * Header bắt buộc: `Authorization: Bearer <JWT>` & `Idempotency-Key: <8..64 ký tự>`
+ * TUYỆT ĐỐI KHÔNG gửi userId, amount, amountVnd, status, paymentStatus, orderStatus, pointsEarned, role
+ */
+export type CreatePaymentRequestDto =
+  | {
+      orderId: string;
+      method: "CARD";
+      paymentDetails: CardPaymentDetailsDto;
+    }
+  | {
+      orderId: string;
+      method: "WALLET";
+      paymentDetails: WalletPaymentDetailsDto;
+    };
+
+/**
+ * Response HTTP 200 của `POST /payments` cho cả Mock SUCCESS và Mock FAILED (API Contract v3.0 Mục 3.3)
+ */
+export interface PaymentResponseDto {
+  paymentId: string;
+  orderId: string;
+  paymentStatus: PaymentStatus;
+  orderStatus: PaymentOrderStatus;
+  amountVnd: number;
+  method: PaymentMethod;
+  methodLast4: string;
+  mockReference: string;
+  pointsEarned: number;
+  failureReason: PaymentFailureReason;
+  createdAt: string;
+}
+
+/**
+ * Mã lỗi HTTP của `POST /payments` theo API Contract v3.0 Mục 3.4
+ */
+export type PaymentErrorCode =
+  | "VALIDATION_ERROR"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "INVALID_TRANSITION"
+  | "IDEMPOTENCY_KEY_CONFLICT"
+  | "PAYMENT_IN_PROGRESS"
+  | "INTERNAL_ERROR"
+  | "NETWORK_ERROR";
+
+export interface PaymentApiErrorResponse extends ApiErrorResponse {
+  code: PaymentErrorCode | string;
+}
+
+/**
+ * Cấu trúc trạng thái lỗi khi gọi `POST /payments` trên Payment UI (API Contract v3.0 Mục 3.2, 3.4 & 9)
+ */
+export interface PaymentSubmissionErrorState {
+  statusCode: number;
+  code: PaymentErrorCode | string;
+  message: string;
+  /** true khi gặp 409 PAYMENT_IN_PROGRESS hoặc timeout/network error — được phép retry CÙNG Idempotency-Key */
+  canRetrySameKey: boolean;
+  /** true khi gặp 409 IDEMPOTENCY_KEY_CONFLICT — cần tạo Idempotency-Key mới cho lần thử mới */
+  shouldGenerateNewKey: boolean;
+  idempotencyKey: string;
+}
+
+/**
+ * Response HTTP 200 của `GET /auth/me` (API Contract v3.0 Mục 8)
+ */
+export interface AuthMeResponseDto {
+  id: string;
+  email: string;
+  fullName: string | null;
+  loyaltyPoints: number;
+}
+
+
+/**
+ * Snapshot Payment đại diện trên từng Order trong `GET /orders/me` (API Contract v3.0 Mục 4.2)
+ */
+export type MyOrderPaymentSummaryDto = OrderPaymentSummaryDto;
+
+/**
+ * Từng Order trả về trong danh sách `GET /orders/me` (API Contract v3.0 Mục 4.2)
+ */
+export type MyOrderDto = OrderHistoryItemDto;
+
+export type MyOrdersMetaDto = OrderHistoryMetaDto;

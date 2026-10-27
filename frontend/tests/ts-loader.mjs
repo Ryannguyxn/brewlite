@@ -34,6 +34,9 @@ export async function resolve(specifier, context, nextResolve) {
     if (resolved) {
       return { url: resolved, shortCircuit: true };
     }
+    if (!specifier.endsWith(".js")) {
+      return nextResolve(`${specifier}.js`, context);
+    }
   }
 
   if (specifier.startsWith("@/")) {

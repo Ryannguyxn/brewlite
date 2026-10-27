@@ -91,11 +91,38 @@ cleanup đơn cũ trước tạo mới, cleanup lỗi, Create Order cạnh tranh
 expiration, Payment FAILED/retry, Payment cạnh tranh với expiration, và retry
 sau lỗi serialization thật mà không nhân đôi stock/Order.
 
-Kết quả kiểm tra ngày 2026-10-27: build, TypeScript và lint pass; 130 unit test,
+Kết quả lần triển khai ban đầu ngày 2026-10-27: build, TypeScript và lint pass; 130 unit test,
 130 E2E test và 100 integration test pass. Trong đó có 9 unit test retry mới và
 25 integration test SCRUM-58. Integration chạy trên PostgreSQL 18 tạm riêng,
 áp dụng 7 migration hiện có và bật `PAYMENT_CONCURRENCY_TESTS=1`. Không thay đổi
 database hoặc `.env` của ứng dụng.
+
+### Bổ sung theo review: rollback khi coupon bị từ chối
+
+`backend/test/inventory-postgres.integration-spec.ts` bổ sung 3 test:
+
+- Hết quota tổng: một Order đã thanh toán dùng hết quota coupon; khách khác
+  tạo Order với hai Product và nhận `409 COUPON_UNAVAILABLE`.
+- Hết quota theo User: quota tổng vẫn còn, nhưng User đã có một redemption
+  CONSUMED và đạt `perUserLimit`; lần tạo tiếp theo nhận cùng lỗi 409.
+- Hết lượt retry: PostgreSQL phát lỗi `40001` sau khi callback đã giữ stock,
+  tăng quota và tạo Order/OrderItem/CouponRedemption trong từng lần thử.
+  Sau đúng 3 lần thử, API trả `500 INTERNAL_ERROR`.
+
+Hai test quota quan sát stock bên trong transaction ngay khi service từ chối
+coupon, trước khi Prisma rollback, để xác nhận cả hai Product đã được trừ stock.
+Sau request, stock, số Order/OrderItem/CouponRedemption và `active_usage_count`
+phải bằng trạng thái trước request. Test retry cũng kiểm tra các bản ghi và quota
+đã được ghi trong từng lần thử, rồi xác nhận không có side effect được lưu lại.
+Wrapper `$transaction` vẫn chạy transaction, SQL và callback thật; case retry
+chủ động dùng `RAISE EXCEPTION ... ERRCODE = '40001'` trong PostgreSQL để gây lỗi
+ổn định, không cần chờ một serialization conflict ngẫu nhiên.
+
+Kết quả sau bổ sung trên branch SCRUM-58 đã cập nhật từ `dev`, ngày 2026-10-27:
+build, TypeScript và lint pass; **109/109 integration test pass**, trong đó
+**28/28 test inventory**. Chạy trên PostgreSQL 18 test riêng với 7 migration và
+`PAYMENT_CONCURRENCY_TESTS=1`. Lần bổ sung này chỉ sửa test và tài liệu;
+unit/E2E không chạy lại.
 
 **Deferred / Future improvement:** lịch chạy Scheduler mỗi phút, batch scan và
 test với Scheduler thực thuộc SCRUM-59; Inventory Movement audit FR-INV-004 là

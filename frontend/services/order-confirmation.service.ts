@@ -7,6 +7,7 @@
 
 import { isValidUuid } from "./api.service";
 import { isTokenExpired } from "./auth.service";
+import { validateMyOrdersResponse } from "./payment.service";
 
 export type OrderStatus =
   | "PENDING"
@@ -190,11 +191,9 @@ export async function fetchMyOrdersApi(token: string): Promise<OrderConfirmation
     throw new Error(`GET /orders/me failed with status ${response.status}`);
   }
 
-  const data: GetMyOrdersResponse = await response.json();
-  if (!data || !Array.isArray(data.items)) {
-    return [];
-  }
-  return data.items;
+  const rawData: unknown = await response.json().catch(() => null);
+  const validated = validateMyOrdersResponse(rawData);
+  return validated.items as unknown as OrderConfirmationData[];
 }
 
 /**

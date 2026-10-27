@@ -1068,6 +1068,20 @@ export default function PaymentPageView({
                               ? "Theo API Contract v3.0 Mục 3.2 & Mục 8, đơn hàng chỉ được giữ tối đa 15 phút từ lúc tạo. Đơn hàng này đã quá hạn (expiresAt), tồn kho và mã giảm giá đã được hoàn trả. Nút thanh toán và form đã bị khóa."
                               : `Theo API Contract v3.0 Mục 3.2, chỉ các đơn hàng đang ở trạng thái PENDING hoặc PAYMENT_FAILED mới được phép thanh toán. Đơn hàng hiện tại đang ở trạng thái ${orderStatus} nên form thanh toán đã bị khóa.`}
                           </p>
+                          <div className="pt-2">
+                            <Link
+                              href={`/order-confirmation?orderId=${activeOrder.id}&status=${orderStatus}`}
+                              id="btnNonPayableOrderConfirmation"
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white hover:bg-[#F5F2EA] text-on-surface text-xs font-semibold border border-[#EFECE6] shadow-xs transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">receipt_long</span>
+                              <span>
+                                {orderStatus === "PAID"
+                                  ? "Xem xác nhận đơn hàng đã thanh toán"
+                                  : "Xem trạng thái xác nhận đơn hàng"}
+                              </span>
+                            </Link>
+                          </div>
                         </div>
                       ) : (
                         <div
@@ -1914,24 +1928,24 @@ export default function PaymentPageView({
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-2 w-full">
-              <button
-                type="button"
-                onClick={() => setIsResultModalOpen(false)}
-                className="flex-1 py-3 rounded-xl bg-[#C67C4E] hover:bg-[#b56e40] text-white font-title-sm text-title-sm font-bold shadow-md transition-colors cursor-pointer"
+            <div className="flex flex-col sm:flex-row gap-2 w-full">
+              <Link
+                href={`/order-confirmation?orderId=${paymentResult.orderId}&status=${paymentResult.orderStatus}`}
+                id="btnGoToOrderConfirmation"
+                className="flex-1 py-3 px-4 rounded-xl bg-[#C67C4E] hover:bg-[#b56e40] text-white font-title-sm text-title-sm font-bold shadow-md transition-colors cursor-pointer text-center"
               >
                 {paymentResult.paymentStatus === "SUCCESS"
-                  ? "Đóng thông báo & Xem đơn hàng"
-                  : "Đóng & Thử lại phương thức khác"}
+                  ? "Xem xác nhận đơn hàng"
+                  : "Chuyển sang trang Thử lại"}
+              </Link>
+              <button
+                type="button"
+                id="btnClosePaymentResultModal"
+                onClick={() => setIsResultModalOpen(false)}
+                className="py-3 px-4 rounded-xl border border-[#EFECE6] bg-[#FAF6EE] hover:bg-[#EFECE6] text-[#1E1510] font-title-sm text-title-sm font-semibold transition-colors cursor-pointer"
+              >
+                Đóng
               </button>
-              {paymentResult.paymentStatus === "SUCCESS" && (
-                <Link
-                  href="/"
-                  className="py-3 px-4 rounded-xl border border-[#EFECE6] bg-[#FAF6EE] hover:bg-[#EFECE6] text-[#1E1510] font-title-sm text-title-sm font-semibold transition-colors flex items-center justify-center"
-                >
-                  Về Thực đơn
-                </Link>
-              )}
             </div>
           </div>
         </div>

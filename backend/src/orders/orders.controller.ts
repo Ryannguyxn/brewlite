@@ -98,7 +98,7 @@ export class OrdersController {
   })
   @ApiUnauthorizedResponse({ description: 'UNAUTHORIZED' })
   @ApiConflictResponse({
-    description: 'INSUFFICIENT_STOCK or PENDING_ORDER_EXISTS',
+    description: 'INSUFFICIENT_STOCK, PENDING_ORDER_EXISTS or COUPON_UNAVAILABLE',
   })
   @ApiInternalServerErrorResponse({
     description: 'Unexpected server error',

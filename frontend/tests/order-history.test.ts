@@ -10,9 +10,11 @@ import {
   type CartContextValue,
 } from "@/context/CartContext";
 import {
+  getMeApi,
   getStoredToken,
   getStoredUser,
   setStoredSession,
+  validateMeResponseData,
 } from "@/services/auth.service";
 import {
   computeOrderStatusCounts,
@@ -395,6 +397,7 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
       }),
       logout: () => {},
       verifySession: () => true,
+      refreshUserProfile: async () => {},
       handleUnauthorizedCheckout: () => {},
       pendingCheckout: false,
       setPendingCheckout: () => {},
@@ -454,7 +457,72 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
     assert.match(html, /id="orderHistoryLoadingState"/);
     assert.match(html, /id="header-order-history-nav"/);
 
-    // Kiểm tra ánh xạ ảnh sản phẩm thực tế cho các món trong đơn hàng
+    // Kiểm tra ánh xạ ảnh sản phẩm thực tế cho 9 món chuẩn Backend seed.ts (a3000000-...)
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000001",
+        "Bạc Xỉu Kem Béo Phin"
+      ),
+      "/images/bac-xiu-kem-beo-phin.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000002",
+        "Cà Phê Đen Đá Cầu Đất"
+      ),
+      "/images/ca-phe-den-da-cau-dat.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000003",
+        "Cà Phê Muối Cố Đô"
+      ),
+      "/images/ca-phe-muoi-co-do.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000004",
+        "Cà phê Sữa Đá Sài Gòn"
+      ),
+      "/images/ca-phe-sua-da-sai-gon.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000005",
+        "Cold Brew Cam Sả Thảo Mộc"
+      ),
+      "/images/cold-brew-cam-sa-thao-moc.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000006",
+        "Cold Brew Vải Hoa Hồng"
+      ),
+      "/images/cold-brew-vai-hoa-hong.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000007",
+        "Espresso Macchiato Caramel"
+      ),
+      "/images/espresso-macchiato-caramel.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000008",
+        "Trà Đào Cam Sả Hoàng Gia"
+      ),
+      "/images/tra-dao-cam-sa-hoang-gia.jpg"
+    );
+    assert.equal(
+      resolveOrderItemImageUrl(
+        "a3000000-0000-4000-8000-000000000009",
+        "Croissant Bơ Pháp Nướng"
+      ),
+      "/images/croissant-bo-phap-nuong.jpg"
+    );
+
+    // Kiểm tra tương thích ngược legacy UUID mapping
     assert.equal(
       resolveOrderItemImageUrl(
         "a1000000-0000-4000-8000-000000000002",
@@ -476,5 +544,70 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
       ),
       "/images/croissant-bo-phap-nuong.jpg"
     );
+  });
+
+  it("7. validateMeResponseData & getMeApi: xử lý đúng DTO GET /auth/me và đồng bộ loyaltyPoints (SCRUM-71)", async () => {
+    // 7a. validateMeResponseData chuẩn
+    const validMe = validateMeResponseData({
+      id: "32bd8c4d-161b-424b-9ea9-879917dbec68",
+      email: "caok5513@gmail.com",
+      fullName: "Cao Nguyễn Quốc Khánh",
+      loyaltyPoints: 125,
+    });
+    assert.equal(validMe.id, "32bd8c4d-161b-424b-9ea9-879917dbec68");
+    assert.equal(validMe.email, "caok5513@gmail.com");
+    assert.equal(validMe.fullName, "Cao Nguyễn Quốc Khánh");
+    assert.equal(validMe.loyaltyPoints, 125);
+
+    // 7b. validateMeResponseData từ chối khi id không phải UUID hoặc loyaltyPoints âm
+    assert.throws(
+      () =>
+        validateMeResponseData({
+          id: "not-a-uuid",
+          email: "test@brewlite.vn",
+          fullName: null,
+          loyaltyPoints: 10,
+        }),
+      (err: unknown) => (err as { code?: string }).code === "INVALID_RESPONSE"
+    );
+
+    assert.throws(
+      () =>
+        validateMeResponseData({
+          id: "32bd8c4d-161b-424b-9ea9-879917dbec68",
+          email: "test@brewlite.vn",
+          fullName: null,
+          loyaltyPoints: -5,
+        }),
+      (err: unknown) => (err as { code?: string }).code === "INVALID_RESPONSE"
+    );
+
+    // 7c. getMeApi 200 OK
+    const token = createValidTestJwt("32bd8c4d-161b-424b-9ea9-879917dbec68");
+    let calledUrl = "";
+    let authHeader = "";
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calledUrl = String(input);
+      const headers = init?.headers as Record<string, string>;
+      authHeader = headers?.Authorization || "";
+      return new Response(
+        JSON.stringify({
+          id: "32bd8c4d-161b-424b-9ea9-879917dbec68",
+          email: "caok5513@gmail.com",
+          fullName: "Cao Nguyễn Quốc Khánh",
+          loyaltyPoints: 125,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }) as typeof fetch;
+
+    const meRes = await getMeApi(token);
+    assert.equal(calledUrl, "/api/backend/auth/me");
+    assert.equal(authHeader, `Bearer ${token}`);
+    assert.equal(meRes.loyaltyPoints, 125);
+    assert.equal(meRes.fullName, "Cao Nguyễn Quốc Khánh");
   });
 });

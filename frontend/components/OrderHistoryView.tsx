@@ -183,8 +183,23 @@ export function resolveOrderItemImageUrl(
   const idLower = (productId || "").trim().toLowerCase();
   const nameLower = (productName || "").trim().toLowerCase();
 
-  // 1. Ánh xạ trực tiếp theo UUID seed.ts của Backend
+  // 1. Ánh xạ trực tiếp theo UUID seed.ts của Backend (9 sản phẩm chuẩn)
   const imageByProductId: Record<string, string> = {
+    "a3000000-0000-4000-8000-000000000001": "/images/bac-xiu-kem-beo-phin.jpg",
+    "a3000000-0000-4000-8000-000000000002": "/images/ca-phe-den-da-cau-dat.jpg",
+    "a3000000-0000-4000-8000-000000000003": "/images/ca-phe-muoi-co-do.jpg",
+    "a3000000-0000-4000-8000-000000000004": "/images/ca-phe-sua-da-sai-gon.jpg",
+    "a3000000-0000-4000-8000-000000000005":
+      "/images/cold-brew-cam-sa-thao-moc.jpg",
+    "a3000000-0000-4000-8000-000000000006":
+      "/images/cold-brew-vai-hoa-hong.jpg",
+    "a3000000-0000-4000-8000-000000000007":
+      "/images/espresso-macchiato-caramel.jpg",
+    "a3000000-0000-4000-8000-000000000008":
+      "/images/tra-dao-cam-sa-hoang-gia.jpg",
+    "a3000000-0000-4000-8000-000000000009":
+      "/images/croissant-bo-phap-nuong.jpg",
+    // Legacy UUID mapping cho bài test cũ
     "a1000000-0000-4000-8000-000000000001": "/images/ca-phe-den-da-cau-dat.jpg",
     "a1000000-0000-4000-8000-000000000002": "/images/ca-phe-sua-da-sai-gon.jpg",
     "a1000000-0000-4000-8000-000000000003": "/images/bac-xiu-kem-beo-phin.jpg",
@@ -355,6 +370,7 @@ export default function OrderHistoryView() {
     isLoading: isAuthLoading,
     verifySession,
     openAuthModal,
+    refreshUserProfile,
   } = useAuth();
   const { openCart, addToCart } = useCart();
 
@@ -558,6 +574,7 @@ export default function OrderHistoryView() {
 
   const handleRetryLoad = () => {
     setSelectedOrderSnapshot(null);
+    void refreshUserProfile();
     setReloadKey((prev) => prev + 1);
   };
 
@@ -574,6 +591,7 @@ export default function OrderHistoryView() {
         basePriceVnd: item.basePriceVnd,
         size: item.size,
         sizeMultiplierPercent: item.sizeMultiplierPercent,
+        sizePolicy: item.size === "ONE_SIZE" ? "ONE_SIZE" : "STANDARD",
         toppings: item.toppings.map((t) => ({
           id: t.id,
           name: t.name,
@@ -607,7 +625,16 @@ export default function OrderHistoryView() {
       ? getDisplayCustomerName(user)
       : MOCK_USER_PROFILE.fullName;
 
-  const freeCoffeeEquivalent = Math.floor(totalConfirmedPoints / 100);
+  // Điểm tích lũy thành viên: Ưu tiên điểm chính thức từ GET /auth/me (SCRUM-71);
+  // nếu chưa tải xong hoặc ở chế độ preview/offline, sử dụng tổng điểm tích lũy từ các đơn hàng đã thanh toán
+  const displayLoyaltyPoints =
+    isAuthenticated &&
+    typeof user?.loyaltyPoints === "number" &&
+    user.loyaltyPoints >= 0
+      ? user.loyaltyPoints
+      : totalConfirmedPoints;
+
+  const freeCoffeeEquivalent = Math.floor(displayLoyaltyPoints / 100);
 
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface">
@@ -701,7 +728,7 @@ export default function OrderHistoryView() {
                       id="memberTotalPointsValue"
                       className="text-primary font-bold"
                     >
-                      {totalConfirmedPoints.toLocaleString("vi-VN")} điểm tích
+                      {displayLoyaltyPoints.toLocaleString("vi-VN")} điểm tích
                       lũy
                     </strong>{" "}
                     (

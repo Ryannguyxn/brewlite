@@ -48,16 +48,22 @@ describe('POST /orders (real guard/controller/service; mocked database)', () => 
   let token: string;
   const tx = {
     user: { findUnique: vi.fn() },
-    order: { findFirst: vi.fn(), create: vi.fn() },
+    order: { findFirst: vi.fn(), findUniqueOrThrow: vi.fn(), create: vi.fn() },
     product: { findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
     topping: { findMany: vi.fn() },
     coupon: { findUnique: vi.fn(), updateMany: vi.fn() },
     couponRedemption: { count: vi.fn() },
+    $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(),
   };
   beforeEach(async () => {
     vi.resetAllMocks();
     tx.user.findUnique.mockResolvedValue({ id: userId });
     tx.order.findFirst.mockResolvedValue(null);
+    tx.order.findUniqueOrThrow.mockResolvedValue({ status: 'PENDING' });
+    tx.$queryRaw.mockResolvedValue([
+      { id: 'existing', now: new Date(), expired: false },
+    ]);
     tx.product.findMany.mockResolvedValue([product]);
     tx.topping.findMany.mockResolvedValue([topping]);
     tx.product.updateMany.mockResolvedValue({ count: 1 });
@@ -235,7 +241,6 @@ describe('POST /orders (real guard/controller/service; mocked database)', () => 
     { ...coupon, expiresAt: new Date(0) },
     { ...coupon, startsAt: new Date('2098-01-01') },
     { ...coupon, minSubtotalVnd: 200000n },
-    { ...coupon, activeUsageCount: 10 },
   ])('rejects unavailable coupon %#', async (value) => {
     tx.coupon.findUnique.mockResolvedValue(value);
     expect(
@@ -244,19 +249,48 @@ describe('POST /orders (real guard/controller/service; mocked database)', () => 
     ).toBe('INVALID_COUPON');
     expect(tx.product.updateMany).not.toHaveBeenCalled();
   });
+  it('rejects exhausted total coupon quota with 409', async () => {
+    tx.coupon.findUnique.mockResolvedValue({ ...coupon, activeUsageCount: 10 });
+    expect(
+      (await post({ items: [item], couponCode: 'WELCOME20' }).expect(409)).body
+        .code,
+    ).toBe('COUPON_UNAVAILABLE');
+  });
   it('rejects per-user coupon limit', async () => {
     tx.couponRedemption.count.mockResolvedValue(1);
     expect(
-      (await post({ items: [item], couponCode: 'WELCOME20' }).expect(400)).body
+      (await post({ items: [item], couponCode: 'WELCOME20' }).expect(409)).body
         .code,
-    ).toBe('INVALID_COUPON');
+    ).toBe('COUPON_UNAVAILABLE');
   });
   it('handles quota consumed since the read', async () => {
     tx.coupon.updateMany.mockResolvedValue({ count: 0 });
     expect(
+      (await post({ items: [item], couponCode: 'WELCOME20' }).expect(409)).body
+        .code,
+    ).toBe('COUPON_UNAVAILABLE');
+  });
+  it('prioritizes insufficient stock over total coupon exhaustion', async () => {
+    tx.coupon.findUnique.mockResolvedValue({ ...coupon, activeUsageCount: 10 });
+    tx.product.updateMany.mockResolvedValue({ count: 0 });
+    tx.product.findUnique.mockResolvedValue({ ...product, stock: 0 });
+    expect(
+      (await post({ items: [item], couponCode: 'WELCOME20' }).expect(409)).body
+        .code,
+    ).toBe('INSUFFICIENT_STOCK');
+    expect(tx.coupon.updateMany).not.toHaveBeenCalled();
+    expect(tx.order.create).not.toHaveBeenCalled();
+  });
+  it('revalidates coupon conditions after acquiring the quota lock', async () => {
+    tx.coupon.findUnique
+      .mockResolvedValueOnce(coupon)
+      .mockResolvedValueOnce({ ...coupon, expiresAt: new Date(0) });
+    expect(
       (await post({ items: [item], couponCode: 'WELCOME20' }).expect(400)).body
         .code,
     ).toBe('INVALID_COUPON');
+    expect(tx.coupon.updateMany).not.toHaveBeenCalled();
+    expect(tx.order.create).not.toHaveBeenCalled();
   });
   it('rejects existing active orders', async () => {
     tx.order.findFirst.mockResolvedValue({ id: 'existing' });

@@ -121,7 +121,7 @@ export async function executePaymentSubmission(
     const nonPayableError = toPaymentSubmissionErrorState(
       {
         statusCode: 409,
-        code: isExpired ? "ORDER_EXPIRED" : "INVALID_TRANSITION",
+        code: "INVALID_TRANSITION",
         message: isExpired
           ? "Đơn hàng đã hết hạn thanh toán (expiresAt). Form và nút thanh toán đã bị khóa; không thể gửi POST /payments."
           : `Đơn hàng đang ở trạng thái ${String(

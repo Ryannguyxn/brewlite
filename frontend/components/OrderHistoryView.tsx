@@ -45,12 +45,18 @@ export const DEFAULT_CLIENT_PAGE_SIZE = 4;
 
 /**
  * Cấu hình cho phép chế độ Mock Preview:
- * - Chỉ bật trong môi trường dev/test hoặc khi cấu hình tường minh qua NEXT_PUBLIC_ENABLE_MOCK_PREVIEW=true.
+ * - Chỉ bật trong môi trường dev/test.
  * - Tuyệt đối không cho phép production mở mock/state giả qua URL query (?state=...) hoặc các nút preview.
+ * - Chặn triệt để trên production: không cho phép override kể cả khi NEXT_PUBLIC_ENABLE_MOCK_PREVIEW=true.
  */
-export const IS_MOCK_PREVIEW_ALLOWED =
-  process.env.NODE_ENV !== "production" ||
-  process.env.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW === "true";
+export function isMockPreviewAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+  return true;
+}
+
+export const IS_MOCK_PREVIEW_ALLOWED = process.env.NODE_ENV !== "production";
 
 export interface OrderHistoryErrorState {
   statusCode: number;
@@ -100,7 +106,9 @@ export async function executeFetchOrderHistory(
     fetchOrdersFn = getMyOrdersApi,
   } = deps;
 
-  if (!useMockData) {
+  const safeUseMockData = Boolean(useMockData && isMockPreviewAllowed());
+
+  if (!safeUseMockData) {
     if (!isAuthenticated || !userId || !accessToken || !verifySession()) {
       setIsLoading(false);
       setOrders([]);
@@ -119,7 +127,7 @@ export async function executeFetchOrderHistory(
       query,
       tokenOverride: accessToken,
       signal,
-      useMockData,
+      useMockData: safeUseMockData,
     });
 
     if (signal?.aborted) {
@@ -129,7 +137,7 @@ export async function executeFetchOrderHistory(
     setOrders(response.items);
     setMeta(response.meta);
     setErrorState(null);
-    setLoadedOwnerUserId(useMockData ? "mock-preview" : userId);
+    setLoadedOwnerUserId(safeUseMockData ? "mock-preview" : userId);
     return response;
   } catch (err: unknown) {
     if (signal?.aborted) {
@@ -453,7 +461,7 @@ export default function OrderHistoryView() {
         : null;
     // Giới hạn query param ?state=... cho môi trường dev/test, ngăn chặn mở state giả trên production
     const rawState = searchParams?.get("state")?.toLowerCase();
-    const stateParam = IS_MOCK_PREVIEW_ALLOWED ? rawState : null;
+    const stateParam = isMockPreviewAllowed() ? rawState : null;
 
     if (stateParam === "loading") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -486,7 +494,7 @@ export default function OrderHistoryView() {
     }
 
     const shouldUseMock =
-      IS_MOCK_PREVIEW_ALLOWED && (stateParam === "mock" || useMockPreview);
+      isMockPreviewAllowed() && (stateParam === "mock" || useMockPreview);
 
     if (!shouldUseMock && (!isAuthenticated || !currentAuthUserId)) {
       setIsLoading(false);
@@ -873,7 +881,7 @@ export default function OrderHistoryView() {
           </div>
 
           {/* Banner thông báo khi đang xem ở chế độ Mock Preview */}
-          {IS_MOCK_PREVIEW_ALLOWED && useMockPreview && (
+          {isMockPreviewAllowed() && useMockPreview && (
             <div
               id="mockPreviewNoticeBanner"
               className="p-3.5 rounded-xl bg-tertiary-fixed/50 border border-tertiary/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
@@ -985,7 +993,7 @@ export default function OrderHistoryView() {
                   </span>
                   <span>Đăng nhập ngay</span>
                 </button>
-                {IS_MOCK_PREVIEW_ALLOWED && (
+                {isMockPreviewAllowed() && (
                   <button
                     type="button"
                     id="orderHistoryMockPreviewBtn"
@@ -1063,7 +1071,7 @@ export default function OrderHistoryView() {
                   </span>
                   <span>Thử tải lại lịch sử</span>
                 </button>
-                {IS_MOCK_PREVIEW_ALLOWED && (
+                {isMockPreviewAllowed() && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1120,7 +1128,7 @@ export default function OrderHistoryView() {
                     </span>
                     <span>Khám phá thực đơn ngay</span>
                   </Link>
-                  {IS_MOCK_PREVIEW_ALLOWED && (
+                  {isMockPreviewAllowed() && (
                     <button
                       type="button"
                       onClick={() => setUseMockPreview(true)}

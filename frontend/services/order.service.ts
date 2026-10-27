@@ -1996,7 +1996,18 @@ export async function getMyOrdersApi(options?: {
   }
 
   // Hỗ trợ chế độ xem dữ liệu mẫu tường minh (?state=mock hoặc test unit)
+  // Hỗ trợ chế độ xem dữ liệu mẫu tường minh (?state=mock hoặc test unit)
+  // Tuyệt đối chặn trong môi trường production, bảo vệ dữ liệu thực và API Contract
   if (options?.useMockData) {
+    if (process.env.NODE_ENV === "production") {
+      throw createOrderError(
+        "Chế độ dữ liệu mẫu (mock data) không được phép trong môi trường production.",
+        403,
+        "FORBIDDEN",
+        undefined,
+        false
+      );
+    }
     return buildMockMyOrdersResponse(options?.query);
   }
 

@@ -25,6 +25,7 @@ import {
 } from "@/services/order.service";
 import OrderHistoryView, {
   executeFetchOrderHistory,
+  isMockPreviewAllowed,
   resolveOrderItemImageUrl,
   type OrderHistoryErrorState,
 } from "@/components/OrderHistoryView";
@@ -646,6 +647,72 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
     const lastNetError = errorStateHolder.current as OrderHistoryErrorState | null;
     assert.equal(lastNetError?.statusCode, 503);
     assert.equal(lastNetError?.code, "NETWORK_ERROR");
+
+    // 7d. 400 VALIDATION_ERROR: executeFetchOrderHistory map lỗi 400 chuẩn API Contract v3.0 §4.1
+    const validationErr: OrderServiceError = {
+      name: "OrderServiceError",
+      message: "Tham số phân trang page và limit không hợp lệ.",
+      statusCode: 400,
+      code: "VALIDATION_ERROR",
+      isOutcomeUncertain: false,
+    };
+
+    await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: "11111111-1111-4111-8111-111111111111",
+      accessToken: "mock-token",
+      verifySession: () => true,
+      setIsLoading: () => {},
+      setOrders: () => {},
+      setMeta: () => {},
+      setErrorState: (err) => {
+        errorStateHolder.current = err;
+      },
+      setLoadedOwnerUserId: () => {},
+      fetchOrdersFn: (async () => {
+        throw validationErr;
+      }) as unknown as typeof getMyOrdersApi,
+    });
+
+    const lastValError = errorStateHolder.current as OrderHistoryErrorState | null;
+    assert.equal(lastValError?.statusCode, 400);
+    assert.equal(lastValError?.code, "VALIDATION_ERROR");
+    assert.equal(lastValError?.title, "Tham số truy vấn lịch sử không hợp lệ");
+    assert.equal(
+      lastValError?.message,
+      "Tham số phân trang page và limit không hợp lệ."
+    );
+
+    // 7e. getMyOrdersApi: xử lý HTTP 400 VALIDATION_ERROR từ Backend
+    const validJwt = createValidTestJwt();
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          statusCode: 400,
+          code: "VALIDATION_ERROR",
+          message: "Tham số page và limit phải đi cùng nhau hoặc cùng bỏ trống.",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    await assert.rejects(
+      () =>
+        getMyOrdersApi({
+          tokenOverride: validJwt,
+        }),
+      (err: unknown) => {
+        const orderErr = err as OrderServiceError;
+        return (
+          orderErr.statusCode === 400 &&
+          orderErr.code === "VALIDATION_ERROR" &&
+          orderErr.message ===
+            "Tham số page và limit phải đi cùng nhau hoặc cùng bỏ trống."
+        );
+      }
+    );
   });
 
   it("8. populated: danh sách đơn hàng populated hiển thị đầy đủ thông tin, nhóm trạng thái và nhãn nút trung thực", () => {
@@ -768,15 +835,23 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
     );
   });
 
-  it("11. production mock guard: chặn mở mock/state giả qua URL hoặc nút preview trong production", () => {
+  it("11. production mock guard: chặn mở mock/state giả qua URL hoặc nút preview trong production (kể cả khi NEXT_PUBLIC_ENABLE_MOCK_PREVIEW=true)", async () => {
     const envObj = process.env as Record<string, string | undefined>;
     const originalEnv = envObj.NODE_ENV;
+    const originalMockFlag = envObj.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW;
+
     try {
-      // Giả lập môi trường production
+      // 11a. Khi ở production không có cờ
       envObj.NODE_ENV = "production";
       delete envObj.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW;
+      assert.equal(isMockPreviewAllowed(), false);
 
-      // Khi ở production, IS_MOCK_PREVIEW_ALLOWED = false, không render nút Xem mẫu giao diện
+      // 11b. Bỏ production override: Khi ở production kể cả khi NEXT_PUBLIC_ENABLE_MOCK_PREVIEW=true
+      // Chặn tuyệt đối dữ liệu giả, không cho phép bật mock
+      envObj.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW = "true";
+      assert.equal(isMockPreviewAllowed(), false);
+
+      // Khi ở production với flag=true, OrderHistoryView tuyệt đối không render nút Xem mẫu giao diện (Mock)
       const mockAuthContext: AuthContextType = {
         user: null,
         accessToken: null,
@@ -839,11 +914,35 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
         )
       );
 
-      // Nút Xem mẫu giao diện (Mock) tuyệt đối không xuất hiện trong production
+      // Nút Xem mẫu giao diện (Mock) tuyệt đối không xuất hiện trong production kể cả khi NEXT_PUBLIC_ENABLE_MOCK_PREVIEW=true
       assert.equal(html.includes("orderHistoryMockPreviewBtn"), false);
       assert.equal(html.includes("mockPreviewNoticeBanner"), false);
+      assert.equal(html.includes("Xem mẫu giao diện"), false);
+
+      // 11c. getMyOrdersApi: chặn hoàn toàn useMockData=true trong production (403 FORBIDDEN)
+      await assert.rejects(
+        () => getMyOrdersApi({ useMockData: true }),
+        (err: unknown) => {
+          const orderErr = err as OrderServiceError;
+          return (
+            orderErr.statusCode === 403 &&
+            orderErr.code === "FORBIDDEN" &&
+            orderErr.message.includes("không được phép trong môi trường production")
+          );
+        }
+      );
+
+      // 11d. Khi ở development / test: cho phép mock preview
+      envObj.NODE_ENV = "test";
+      delete envObj.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW;
+      assert.equal(isMockPreviewAllowed(), true);
     } finally {
       envObj.NODE_ENV = originalEnv;
+      if (originalMockFlag !== undefined) {
+        envObj.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW = originalMockFlag;
+      } else {
+        delete envObj.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW;
+      }
     }
   });
 });

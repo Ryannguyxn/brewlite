@@ -9,7 +9,6 @@ import PaymentPageView, {
 import { AuthContext, type AuthContextType } from "@/context/AuthContext";
 import { CartContext, type CartContextValue } from "@/context/CartContext";
 import type {
-  CreateOrderResponseDto,
   MyOrderDto,
   OrderStatus,
   PaymentResponseDto,
@@ -24,8 +23,10 @@ import {
   buildCreatePaymentPayload,
   fetchMyOrdersApi,
   generateIdempotencyKey,
+  isOrderExpired,
   isOrderPayable,
   isOrderPayableStatus,
+  validateMyOrdersResponse,
   selectTargetOrderFromMyOrders,
   submitPaymentApi,
   toPaymentSubmissionErrorState,
@@ -90,11 +91,15 @@ function createValidMockJwt(
 
 function createSampleOrderSnapshot(
   status: OrderStatus = "PENDING"
-): CreateOrderResponseDto {
+): MyOrderDto {
+  const now = Date.now();
   return {
     id: "550e8400-e29b-41d4-a716-446655440010",
     status,
-    createdAt: "2026-10-27T02:00:00.000Z",
+    createdAt: new Date(now - 60000).toISOString(),
+    expiresAt: new Date(now + 14 * 60 * 1000).toISOString(),
+    pointsEarned: 0,
+    payment: null,
     subtotalVnd: 118000,
     discountVnd: 20000,
     totalVnd: 98000,
@@ -971,5 +976,176 @@ describe("SCRUM-67 Payment UI & Real API Integration (POST /payments & GET /orde
     assert.ok(errorHtml.includes('id="paymentErrorBanner"'));
     assert.ok(errorHtml.includes('id="btnRetrySameIdempotencyKey"'));
     assert.ok(errorHtml.includes("idem-test-12345678"));
+  });
+
+  it("9. blocks payment and POST /payments when Order has expired expiresAt (countdown reached 0)", async () => {
+    const expiredOrder: MyOrderDto = {
+      ...createSampleOrderSnapshot(),
+      id: "550e8400-e29b-41d4-a716-446655440050",
+      status: "PENDING",
+      createdAt: "2026-10-25T01:00:00.000Z",
+      expiresAt: "2026-10-25T01:15:00.000Z", // Quá khứ
+      totalVnd: 50000,
+    };
+
+    const now = new Date("2026-10-25T01:20:00.000Z").getTime();
+    assert.equal(isOrderExpired(expiredOrder, now), true);
+    assert.equal(isOrderPayable(expiredOrder, "PENDING", now), false);
+
+    let apiCallCount = 0;
+    const harness = createSubmissionHarness({
+      activeOrder: expiredOrder,
+      orderStatus: "PENDING",
+      submitPaymentFn: async () => {
+        apiCallCount++;
+        throw new Error("Should not be called");
+      },
+    });
+
+    const result = await executePaymentSubmission(harness.deps);
+
+    assert.equal(result.skipped, false);
+    assert.equal(result.outcome?.type, "error");
+    assert.equal(result.outcome?.error.code, "ORDER_EXPIRED");
+    assert.equal(apiCallCount, 0);
+
+    // Verify rendered HTML shows nonPayableOrderBanner with expired notice
+    const expiredHtml = renderPaymentMarkup({
+      initialOrder: expiredOrder,
+    });
+    assert.ok(expiredHtml.includes('id="nonPayableOrderBanner"'));
+    assert.ok(expiredHtml.includes("EXPIRED"));
+  });
+
+  it("10. supports Order with 0 VND (totalVnd === 0, amountVnd === 0) per API Contract v3.0 §3.2", async () => {
+    const zeroVndOrder: MyOrderDto = {
+      ...createSampleOrderSnapshot(),
+      id: "550e8400-e29b-41d4-a716-446655440051",
+      status: "PENDING",
+      totalVnd: 0,
+      subtotalVnd: 50000,
+      discountVnd: 50000, // 100% coupon discount
+      expiresAt: new Date(Date.now() + 600000).toISOString(),
+    };
+
+    // isOrderPayable must return true for 0 VND (only rejects < 0)
+    assert.equal(isOrderPayable(zeroVndOrder), true);
+
+    const negativeOrder = { ...zeroVndOrder, totalVnd: -1000 };
+    assert.equal(isOrderPayable(negativeOrder), false);
+
+    // validatePaymentResponseData must accept amountVnd: 0 and pointsEarned: 0
+    const rawZeroResponse = {
+      paymentId: "550e8400-e29b-41d4-a716-446655440052",
+      orderId: zeroVndOrder.id,
+      paymentStatus: "SUCCESS",
+      orderStatus: "PAID",
+      amountVnd: 0,
+      method: "CARD",
+      methodLast4: "1234",
+      mockReference: "MOCK-ZERO-0001",
+      pointsEarned: 0,
+      failureReason: null,
+      createdAt: new Date().toISOString(),
+    };
+
+    const validated = validatePaymentResponseData(
+      rawZeroResponse,
+      "idem-zero-key-12345678",
+      {
+        expectedOrderId: zeroVndOrder.id,
+        expectedAmountVnd: 0,
+        expectedMethod: "CARD",
+        expectedMethodLast4: "1234",
+      }
+    );
+    assert.equal(validated.amountVnd, 0);
+    assert.equal(validated.pointsEarned, 0);
+    assert.equal(validated.paymentStatus, "SUCCESS");
+
+    // executePaymentSubmission with 0 VND succeeds
+    let apiCalled = false;
+    const harness = createSubmissionHarness({
+      activeOrder: zeroVndOrder,
+      orderStatus: "PENDING",
+      submitPaymentFn: async (_payload, ikey) => {
+        apiCalled = true;
+        return {
+          response: rawZeroResponse as PaymentResponseDto,
+          replayed: false,
+          idempotencyKey: ikey || "idem-zero-key-12345678",
+        };
+      },
+    });
+
+    const submissionResult = await executePaymentSubmission(harness.deps);
+
+    assert.equal(apiCalled, true);
+    assert.equal(submissionResult.outcome?.type, "success");
+    assert.equal(harness.getState().clearCartCount, 1);
+  });
+
+  it("11. runtime-validates GET /orders/me response fields, throwing 502 on malformed or corrupt snapshots", async () => {
+    const isInternal502 = (err: unknown) => {
+      const e = err as { statusCode?: number; code?: string } | null;
+      return Boolean(e && e.statusCode === 502 && e.code === "INTERNAL_ERROR");
+    };
+
+    // 1. Root items is not an array
+    assert.throws(
+      () => validateMyOrdersResponse({ items: "not-an-array" }),
+      isInternal502
+    );
+
+    // 2. Order missing or invalid UUID id
+    assert.throws(
+      () =>
+        validateMyOrdersResponse({
+          items: [{ ...createSampleOrderSnapshot(), id: "not-a-uuid" }],
+        }),
+      isInternal502
+    );
+
+    // 3. Order with invalid status
+    assert.throws(
+      () =>
+        validateMyOrdersResponse({
+          items: [{ ...createSampleOrderSnapshot(), status: "UNKNOWN_STATUS" }],
+        }),
+      isInternal502
+    );
+
+    // 4. Order with negative totalVnd
+    assert.throws(
+      () =>
+        validateMyOrdersResponse({
+          items: [{ ...createSampleOrderSnapshot(), totalVnd: -5000 }],
+        }),
+      isInternal502
+    );
+
+    // 5. Order with corrupt item (missing productId)
+    assert.throws(
+      () =>
+        validateMyOrdersResponse({
+          items: [
+            {
+              ...createSampleOrderSnapshot(),
+              items: [{ id: "it-1", productId: "invalid", quantity: 1 }],
+            },
+          ],
+        }),
+      isInternal502
+    );
+
+    // 6. Valid response conforms cleanly
+    const validRaw = {
+      items: [createSampleOrderSnapshot()],
+      meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+    };
+    const validatedResult = validateMyOrdersResponse(validRaw);
+    assert.equal(validatedResult.items.length, 1);
+    assert.equal(validatedResult.items[0].id, validRaw.items[0].id);
+    assert.equal(validatedResult.items[0].totalVnd, validRaw.items[0].totalVnd);
   });
 });

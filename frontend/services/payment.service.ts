@@ -4,6 +4,9 @@ import type {
   CreatePaymentRequestDto,
   GetMyOrdersResponseDto,
   MyOrderDto,
+  MyOrdersMetaDto,
+  MyOrderPaymentSummaryDto,
+  OrderItemSnapshotDto,
   OrderStatus,
   PaymentErrorCode,
   PaymentMethod,
@@ -339,13 +342,53 @@ export function isOrderPayableStatus(
 /**
  * Kiểm tra đối tượng Order có hợp lệ và đang ở trạng thái cho phép thanh toán (`PENDING` / `PAYMENT_FAILED`) hay không.
  */
+export function isOrderExpired(
+  order:
+    | {
+        expiresAt?: string | null;
+        createdAt?: string | null;
+        status?: string | null;
+      }
+    | null
+    | undefined,
+  referenceNowMs: number = Date.now()
+): boolean {
+  if (!order || typeof order !== "object") return true;
+  if (order.status === "EXPIRED") return true;
+
+  if (order.expiresAt && typeof order.expiresAt === "string") {
+    const expiresMs = new Date(order.expiresAt).getTime();
+    if (Number.isFinite(expiresMs)) {
+      return referenceNowMs >= expiresMs;
+    }
+  }
+
+  if (order.createdAt && typeof order.createdAt === "string") {
+    const createdMs = new Date(order.createdAt).getTime();
+    if (Number.isFinite(createdMs)) {
+      return referenceNowMs >= createdMs + 15 * 60 * 1000;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Kiểm tra đối tượng Order có hợp lệ và đang ở trạng thái cho phép thanh toán (`PENDING` / `PAYMENT_FAILED`) hay không.
+ * Điều kiện:
+ * 1. Order ID hợp lệ UUID v4.
+ * 2. Trạng thái order là PENDING hoặc PAYMENT_FAILED.
+ * 3. Chưa quá hạn expiresAt (hoặc createdAt + 15 phút).
+ * 4. Tổng tiền totalVnd là số nguyên an toàn >= 0 (Cho phép 0 VND theo API Contract v3.0 Mục 3.2).
+ */
 export function isOrderPayable(
   order:
     | (Pick<CreateOrderResponseDto, "id" | "status" | "totalVnd"> &
-        Partial<Pick<MyOrderDto, "expiresAt">>)
+        Partial<Pick<MyOrderDto, "expiresAt" | "createdAt">>)
     | null
     | undefined,
-  overrideStatus?: OrderStatus | string | null
+  overrideStatus?: OrderStatus | string | null,
+  referenceNowMs: number = Date.now()
 ): boolean {
   if (!order || typeof order !== "object") return false;
   if (typeof order.id !== "string" || !isValidUuid(order.id.trim())) {
@@ -355,11 +398,17 @@ export function isOrderPayable(
   if (!isOrderPayableStatus(effectiveStatus)) {
     return false;
   }
+  // 1. Kiểm tra hết hạn: Order đã hết hạn expiresAt không được phép thanh toán
+  if (isOrderExpired(order, referenceNowMs)) {
+    return false;
+  }
+  // 2. Kiểm tra số tiền: Cho phép 0 VND (API Contract v3.0: Total = 0 VND vẫn đi qua Mock Payment)
+  // Chỉ từ chối giá trị âm hoặc không phải safe integer
   if (
     typeof order.totalVnd !== "number" ||
     !Number.isFinite(order.totalVnd) ||
     !Number.isSafeInteger(order.totalVnd) ||
-    order.totalVnd <= 0
+    order.totalVnd < 0
   ) {
     return false;
   }
@@ -530,7 +579,7 @@ export function validatePaymentResponseData(
     typeof rawAmountVnd !== "number" ||
     !Number.isFinite(rawAmountVnd) ||
     !Number.isSafeInteger(rawAmountVnd) ||
-    rawAmountVnd <= 0
+    rawAmountVnd < 0
   ) {
     throw createPaymentError(
       "Số tiền amountVnd trong phản hồi không hợp lệ.",
@@ -902,6 +951,228 @@ export async function submitPaymentApi(
  * Dùng để tải đúng đơn hàng cần thanh toán (theo `orderId` hoặc đơn `PENDING` / `PAYMENT_FAILED` hiện tại)
  * và hiển thị lại Confirmation từ dữ liệu đã lưu trên Server mà không gọi lại `POST /payments`.
  */
+/**
+ * Runtime validation cho từng OrderItemSnapshot từ `GET /orders/me`:
+ */
+function validateOrderItemSnapshot(raw: unknown): OrderItemSnapshotDto | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id !== "string" || !o.id.trim()) return null;
+  if (typeof o.productId !== "string" || !isValidUuid(o.productId)) return null;
+  if (typeof o.productName !== "string" || !o.productName.trim()) return null;
+  if (typeof o.size !== "string" || !["S", "M", "L", "ONE_SIZE"].includes(o.size)) return null;
+  if (
+    typeof o.quantity !== "number" ||
+    !Number.isSafeInteger(o.quantity) ||
+    o.quantity < 1
+  ) {
+    return null;
+  }
+  if (
+    typeof o.unitPriceVnd !== "number" ||
+    !Number.isSafeInteger(o.unitPriceVnd) ||
+    o.unitPriceVnd < 0
+  ) {
+    return null;
+  }
+  if (
+    typeof o.lineTotalVnd !== "number" ||
+    !Number.isSafeInteger(o.lineTotalVnd) ||
+    o.lineTotalVnd < 0
+  ) {
+    return null;
+  }
+
+  const toppings = Array.isArray(o.toppings)
+    ? o.toppings
+        .filter((t): t is Record<string, unknown> => Boolean(t && typeof t === "object"))
+        .map((t) => ({
+          id: String(t.id || ""),
+          name: String(t.name || ""),
+          priceVnd: typeof t.priceVnd === "number" && t.priceVnd >= 0 ? t.priceVnd : 0,
+        }))
+    : [];
+
+  return {
+    id: o.id.trim(),
+    productId: o.productId.trim(),
+    productName: o.productName.trim(),
+    size: o.size as OrderItemSnapshotDto["size"],
+    sizeMultiplierPercent:
+      typeof o.sizeMultiplierPercent === "number" ? o.sizeMultiplierPercent : 100,
+    basePriceVnd:
+      typeof o.basePriceVnd === "number" && o.basePriceVnd >= 0 ? o.basePriceVnd : 0,
+    quantity: o.quantity,
+    unitPriceVnd: o.unitPriceVnd,
+    lineTotalVnd: o.lineTotalVnd,
+    toppings,
+  };
+}
+
+/**
+ * Runtime validation cho PaymentSnapshot từ `GET /orders/me`:
+ */
+function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Record<string, unknown>;
+  if (typeof p.id !== "string" || !isValidUuid(p.id)) return null;
+  if (p.status !== "SUCCESS" && p.status !== "FAILED") return null;
+  if (typeof p.amountVnd !== "number" || !Number.isSafeInteger(p.amountVnd) || p.amountVnd < 0) return null;
+  const createdAtMs = typeof p.createdAt === "string" ? Date.parse(p.createdAt) : NaN;
+  if (!Number.isFinite(createdAtMs)) return null;
+
+  return {
+    id: p.id.trim(),
+    status: p.status,
+    method: typeof p.method === "string" ? (p.method as PaymentMethod) : "CARD",
+    methodLast4: typeof p.methodLast4 === "string" && /^[0-9]{4}$/.test(p.methodLast4) ? p.methodLast4 : null,
+    amountVnd: p.amountVnd,
+    mockReference: typeof p.mockReference === "string" ? p.mockReference : null,
+    failureReason: p.failureReason === "PAYMENT_DECLINED" ? "PAYMENT_DECLINED" : null,
+    createdAt: new Date(createdAtMs).toISOString(),
+  };
+}
+
+/**
+ * Runtime validation cho từng Order từ `GET /orders/me`:
+ */
+export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+
+  if (typeof o.id !== "string" || !isValidUuid(o.id)) return null;
+
+  const validStatuses = [
+    "PENDING",
+    "PAYMENT_FAILED",
+    "PAID",
+    "PREPARING",
+    "READY",
+    "COMPLETED",
+    "CANCELLED",
+  ];
+  if (typeof o.status !== "string" || !validStatuses.includes(o.status)) return null;
+
+  const createdMs = typeof o.createdAt === "string" ? Date.parse(o.createdAt) : NaN;
+  if (!Number.isFinite(createdMs)) return null;
+
+  let expiresAtIso: string;
+  if (typeof o.expiresAt === "string" && Number.isFinite(Date.parse(o.expiresAt))) {
+    expiresAtIso = new Date(Date.parse(o.expiresAt)).toISOString();
+  } else {
+    expiresAtIso = new Date(createdMs + 15 * 60 * 1000).toISOString();
+  }
+
+  if (
+    typeof o.subtotalVnd !== "number" ||
+    !Number.isSafeInteger(o.subtotalVnd) ||
+    o.subtotalVnd < 0 ||
+    typeof o.discountVnd !== "number" ||
+    !Number.isSafeInteger(o.discountVnd) ||
+    o.discountVnd < 0 ||
+    typeof o.totalVnd !== "number" ||
+    !Number.isSafeInteger(o.totalVnd) ||
+    o.totalVnd < 0
+  ) {
+    return null;
+  }
+
+  if (!Array.isArray(o.items)) return null;
+  const validItems: OrderItemSnapshotDto[] = [];
+  for (const it of o.items) {
+    const validIt = validateOrderItemSnapshot(it);
+    if (!validIt) return null;
+    validItems.push(validIt);
+  }
+
+  const payment = o.payment ? validatePaymentSnapshot(o.payment) : null;
+
+  return {
+    id: o.id.trim(),
+    status: o.status as OrderStatus,
+    createdAt: new Date(createdMs).toISOString(),
+    expiresAt: expiresAtIso,
+    subtotalVnd: o.subtotalVnd,
+    discountVnd: o.discountVnd,
+    totalVnd: o.totalVnd,
+    couponCode: typeof o.couponCode === "string" && o.couponCode.trim() ? o.couponCode.trim() : null,
+    pointsEarned: typeof o.pointsEarned === "number" && o.pointsEarned >= 0 ? o.pointsEarned : 0,
+    items: validItems,
+    payment,
+  };
+}
+
+/**
+ * Runtime validation cho toàn bộ phản hồi `GET /orders/me`:
+ * Đảm bảo phản hồi 200 nhưng malformed (ví dụ items bị null, id sai UUID, totals âm/NaN)
+ * sẽ bị phát hiện và báo lỗi ngay, không làm trang web crash hoặc sử dụng dữ liệu sai.
+ */
+export function validateMyOrdersResponse(raw: unknown): GetMyOrdersResponseDto {
+  if (!raw || typeof raw !== "object") {
+    throw createPaymentError(
+      "Phản hồi GET /orders/me không phải là một đối tượng JSON hợp lệ.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const root = raw as Record<string, unknown>;
+  if (!Array.isArray(root.items)) {
+    throw createPaymentError(
+      "Phản hồi GET /orders/me thiếu danh sách items hoặc items không phải là mảng.",
+      502,
+      "INTERNAL_ERROR",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  const validatedOrders: MyOrderDto[] = [];
+  for (const rawOrder of root.items) {
+    const validated = validateMyOrderSnapshot(rawOrder);
+    if (!validated) {
+      throw createPaymentError(
+        "Phản hồi GET /orders/me chứa dữ liệu đơn hàng bị sai lệch hoặc thiếu trường bắt buộc (malformed order snapshot).",
+        502,
+        "INTERNAL_ERROR",
+        "",
+        { canRetrySameKey: false }
+      );
+    }
+    validatedOrders.push(validated);
+  }
+
+  const rawMeta =
+    root.meta && typeof root.meta === "object"
+      ? (root.meta as Record<string, unknown>)
+      : null;
+
+  const meta: MyOrdersMetaDto = rawMeta
+    ? {
+        page: typeof rawMeta.page === "number" ? rawMeta.page : null,
+        limit: typeof rawMeta.limit === "number" ? rawMeta.limit : null,
+        total:
+          typeof rawMeta.total === "number"
+            ? rawMeta.total
+            : validatedOrders.length,
+        totalPages:
+          typeof rawMeta.totalPages === "number" ? rawMeta.totalPages : null,
+      }
+    : {
+        page: null,
+        limit: null,
+        total: validatedOrders.length,
+        totalPages: null,
+      };
+
+  return {
+    items: validatedOrders,
+    meta,
+  };
+}
+
 export async function fetchMyOrdersApi(
   accessToken?: string | null
 ): Promise<GetMyOrdersResponseDto> {
@@ -956,9 +1227,9 @@ export async function fetchMyOrdersApi(
     );
   }
 
-  let data: GetMyOrdersResponseDto;
+  let rawData: unknown;
   try {
-    data = (await res.json()) as GetMyOrdersResponseDto;
+    rawData = await res.json();
   } catch {
     throw createPaymentError(
       "Phản hồi danh sách đơn hàng từ máy chủ không phải JSON hợp lệ.",
@@ -969,15 +1240,7 @@ export async function fetchMyOrdersApi(
     );
   }
 
-  return {
-    items: Array.isArray(data?.items) ? data.items : [],
-    meta: data?.meta ?? {
-      page: null,
-      limit: null,
-      total: 0,
-      totalPages: null,
-    },
-  };
+  return validateMyOrdersResponse(rawData);
 }
 
 /**

@@ -34,6 +34,7 @@ import {
   fetchAuthMeProfile,
   fetchMyOrdersApi,
   generateIdempotencyKey,
+  isOrderExpired,
   isOrderPayable,
   selectTargetOrderFromMyOrders,
   submitPaymentApi,
@@ -113,13 +114,19 @@ export async function executePaymentSubmission(
     : deps.idempotencyKey || generateIdempotencyKey("idem");
 
   if (!isOrderPayable(deps.activeOrder, effectiveStatus)) {
+    const isExpired =
+      effectiveStatus !== "CANCELLED" &&
+      effectiveStatus !== "PAID" &&
+      isOrderExpired(deps.activeOrder);
     const nonPayableError = toPaymentSubmissionErrorState(
       {
         statusCode: 409,
-        code: "INVALID_TRANSITION",
-        message: `Đơn hàng đang ở trạng thái ${String(
-          effectiveStatus
-        )} (không còn ở PENDING hoặc PAYMENT_FAILED) nên không thể thực hiện thanh toán.`,
+        code: isExpired ? "ORDER_EXPIRED" : "INVALID_TRANSITION",
+        message: isExpired
+          ? "Đơn hàng đã hết hạn thanh toán (expiresAt). Form và nút thanh toán đã bị khóa; không thể gửi POST /payments."
+          : `Đơn hàng đang ở trạng thái ${String(
+              effectiveStatus
+            )} (không còn ở PENDING hoặc PAYMENT_FAILED) nên không thể thực hiện thanh toán.`,
         canRetrySameKey: false,
         shouldGenerateNewKey: false,
         idempotencyKey: keyToUse,
@@ -402,11 +409,7 @@ export default function PaymentPageView({
     activeOrder?.status ??
     "PENDING";
 
-  const isPayableOrder = useMemo<boolean>(() => {
-    if (!activeOrder) return false;
-    if (paymentResult?.paymentStatus === "SUCCESS") return false;
-    return isOrderPayable(activeOrder, orderStatus);
-  }, [activeOrder, orderStatus, paymentResult?.paymentStatus]);
+
 
   // Tải danh sách ảnh sản phẩm thật từ GET /products
   useEffect(() => {
@@ -607,6 +610,21 @@ export default function PaymentPageView({
       minute: "2-digit",
     });
   }, [expiresAtDate]);
+
+  const isExpiredOrder = useMemo<boolean>(() => {
+    if (!activeOrder) return false;
+    if (orderStatus === "CANCELLED" || orderStatus === "PAID") return false;
+    if (isOrderExpired(activeOrder)) return true;
+    if (remainingSeconds <= 0 && Boolean(expiresAtDate)) return true;
+    return false;
+  }, [activeOrder, orderStatus, remainingSeconds, expiresAtDate]);
+
+  const isPayableOrder = useMemo<boolean>(() => {
+    if (!activeOrder) return false;
+    if (paymentResult?.paymentStatus === "SUCCESS") return false;
+    if (isExpiredOrder) return false;
+    return isOrderPayable(activeOrder, orderStatus);
+  }, [activeOrder, orderStatus, paymentResult?.paymentStatus, isExpiredOrder]);
 
   // Payload chuẩn API Contract v3.0 §3.1 được tạo từ form hiện tại
   const currentPaymentPayload = useMemo<CreatePaymentRequestDto>(() => {
@@ -1033,17 +1051,21 @@ export default function PaymentPageView({
                         >
                           <div className="flex items-center gap-2 font-title-sm text-title-sm font-bold">
                             <span className="material-symbols-outlined text-[20px]">
-                              {orderStatus === "PAID" ? "verified" : "block"}
+                              {orderStatus === "PAID" ? "verified" : isExpiredOrder ? "schedule" : "block"}
                             </span>
-                            <span>
+                            <span id="nonPayableOrderTitle">
                               {orderStatus === "PAID"
                                 ? "Đơn hàng đã hoàn tất thanh toán (PAID)"
+                                : isExpiredOrder
+                                ? "Đơn hàng đã hết hạn thanh toán (EXPIRED)"
                                 : `Không thể thanh toán đơn hàng ở trạng thái ${orderStatus}`}
                             </span>
                           </div>
-                          <p className="font-body-sm text-body-sm text-[#1E1510] leading-relaxed">
+                          <p id="nonPayableOrderMessage" className="font-body-sm text-body-sm text-[#1E1510] leading-relaxed">
                             {orderStatus === "PAID"
                               ? "Đơn hàng này đã được ghi nhận thanh toán thành công trên máy chủ. Form nhập thẻ/ví điện tử đã được khóa để ngăn gửi trùng yêu cầu POST /payments."
+                              : isExpiredOrder
+                              ? "Theo API Contract v3.0 Mục 3.2 & Mục 8, đơn hàng chỉ được giữ tối đa 15 phút từ lúc tạo. Đơn hàng này đã quá hạn (expiresAt), tồn kho và mã giảm giá đã được hoàn trả. Nút thanh toán và form đã bị khóa."
                               : `Theo API Contract v3.0 Mục 3.2, chỉ các đơn hàng đang ở trạng thái PENDING hoặc PAYMENT_FAILED mới được phép thanh toán. Đơn hàng hiện tại đang ở trạng thái ${orderStatus} nên form thanh toán đã bị khóa.`}
                           </p>
                         </div>
@@ -1707,7 +1729,9 @@ export default function PaymentPageView({
                                 activeOrder.totalVnd
                               )}`
                             : !isPayableOrder
-                            ? `Không thể thanh toán (${orderStatus})`
+                            ? isExpiredOrder
+                              ? "Đơn hàng đã hết hạn (EXPIRED)"
+                              : `Không thể thanh toán (${orderStatus})`
                             : orderStatus === "PAYMENT_FAILED"
                             ? `Thử thanh toán lại • ${formatVnd(
                                 activeOrder.totalVnd

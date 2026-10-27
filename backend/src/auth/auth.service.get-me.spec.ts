@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  InternalServerErrorException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { JwtService } from '@nestjs/jwt';

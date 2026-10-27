@@ -362,6 +362,41 @@ describe('SCRUM-59 real Order–Payment–Scheduler lifecycle', () => {
     expect(paid.user.loyaltyPoints).toBe(0);
   });
 
+  it.each(['PREPARING', 'READY'] as const)(
+    'preserves expired %s Order, stock, coupon and points across Scheduler sweeps',
+    async (status) => {
+      const f = await fixture();
+      await pay(f).expect(200);
+      expect((await advance(f, 'PAID').expect(200)).body.status).toBe(
+        'PREPARING',
+      );
+      if (status === 'READY') {
+        expect((await advance(f, 'PREPARING').expect(200)).body.status).toBe(
+          'READY',
+        );
+      }
+      await markExpired(f.orderId);
+      const [clock] = await prisma.$queryRaw<{ expired: boolean }[]>`
+        SELECT expires_at <= clock_timestamp() AS expired
+        FROM orders WHERE id = ${f.orderId}::uuid`;
+      expect(clock.expired).toBe(true);
+
+      const before = await snapshot(f);
+      expect(before.order.status).toBe(status);
+      expect(before.order.cancelledAt).toBeNull();
+      expect(before.product.stock).toBe(3);
+      expect(before.coupon.activeUsageCount).toBe(1);
+      expect(before.order.couponRedemption?.status).toBe('CONSUMED');
+      expect(before.user.loyaltyPoints).toBe(9);
+      expect(before.order.pointsEarned).toBe(9);
+
+      await scheduler.runOnce();
+      expect(await snapshot(f)).toEqual(before);
+      await scheduler.runOnce();
+      expect(await snapshot(f)).toEqual(before);
+    },
+  );
+
   it('processes multiple batches and two instances without double release, preserving fresh/paid orders', async () => {
     const expired = await Promise.all([fixture(), fixture(), fixture()]);
     const fresh = await fixture();

@@ -3,10 +3,13 @@ import { AuthModule } from '../auth/auth.module.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
 import { OrdersController } from './orders.controller.js';
 import { OrdersService } from './orders.service.js';
+import { InternalOrdersController } from './internal-orders.controller.js';
+import { InternalKeyGuard } from './internal-key.guard.js';
+import { OrderStateService } from './order-state.service.js';
 
 @Module({
   imports: [AuthModule, PrismaModule],
-  controllers: [OrdersController],
-  providers: [OrdersService],
+  controllers: [OrdersController, InternalOrdersController],
+  providers: [OrdersService, OrderStateService, InternalKeyGuard],
 })
 export class OrdersModule {}

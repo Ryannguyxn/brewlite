@@ -2,14 +2,13 @@ import {
   type AuthUser,
   type LoginRequestDto,
   type LoginResponseDto,
-  type MeResponseDto,
   type RegisterRequestDto,
   type RegisterResponseDto,
   findMockUserByEmail,
   mockLogin,
   mockRegister,
 } from "@/mock-data";
-import { API_BASE_URL, isValidUuid } from "./api.service";
+import { API_BASE_URL } from "./api.service";
 
 // ============================================================================
 // AUTH SERVICE — SPRINT 2 & 3 (SCRUM-41, SCRUM-43, SCRUM-44)
@@ -236,12 +235,6 @@ export function getStoredUser(): AuthUser | null {
       id: parsed.id,
       email: parsed.email,
       fullName: parsed.fullName ?? null,
-      loyaltyPoints:
-        typeof parsed.loyaltyPoints === "number" &&
-        Number.isSafeInteger(parsed.loyaltyPoints) &&
-        parsed.loyaltyPoints >= 0
-          ? parsed.loyaltyPoints
-          : undefined,
     };
   } catch {
     return null;
@@ -262,12 +255,6 @@ export function setStoredSession(token: string, user: AuthUser): void {
       id: user.id,
       email: user.email,
       fullName: user.fullName ?? null,
-      loyaltyPoints:
-        typeof user.loyaltyPoints === "number" &&
-        Number.isSafeInteger(user.loyaltyPoints) &&
-        user.loyaltyPoints >= 0
-          ? user.loyaltyPoints
-          : undefined,
     };
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(safeUser));
 
@@ -533,144 +520,4 @@ export function getDisplayCustomerName(user: AuthUser | null): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
 
   return words.length > 0 ? words.join(" ") : user.email;
-}
-
-/**
- * Validate dữ liệu nhận về từ `GET /auth/me` theo API Contract v3.0 §6 (SCRUM-71)
- * Bắt buộc:
- * - id: UUID v4 hợp lệ
- * - email: chuỗi không rỗng
- * - fullName: string hoặc null
- * - loyaltyPoints: số nguyên >= 0
- */
-export function validateMeResponseData(data: unknown): MeResponseDto {
-  if (!data || typeof data !== "object") {
-    const error: Error & { code?: string } = new Error(
-      "Dữ liệu thông tin tài khoản không hợp lệ: phản hồi không phải object."
-    );
-    error.code = "INVALID_RESPONSE";
-    throw error;
-  }
-
-  const raw = data as Record<string, unknown>;
-
-  if (typeof raw.id !== "string" || !isValidUuid(raw.id.trim())) {
-    const error: Error & { code?: string } = new Error(
-      "Dữ liệu thông tin tài khoản không hợp lệ: id không phải UUID."
-    );
-    error.code = "INVALID_RESPONSE";
-    throw error;
-  }
-
-  if (typeof raw.email !== "string" || !raw.email.trim()) {
-    const error: Error & { code?: string } = new Error(
-      "Dữ liệu thông tin tài khoản không hợp lệ: email trống."
-    );
-    error.code = "INVALID_RESPONSE";
-    throw error;
-  }
-
-  const fullName =
-    typeof raw.fullName === "string" && raw.fullName.trim()
-      ? raw.fullName.trim()
-      : null;
-
-  if (
-    typeof raw.loyaltyPoints !== "number" ||
-    !Number.isSafeInteger(raw.loyaltyPoints) ||
-    raw.loyaltyPoints < 0
-  ) {
-    const error: Error & { code?: string } = new Error(
-      "Dữ liệu thông tin tài khoản không hợp lệ: loyaltyPoints phải là số nguyên >= 0."
-    );
-    error.code = "INVALID_RESPONSE";
-    throw error;
-  }
-
-  return {
-    id: raw.id.trim(),
-    email: raw.email.trim().toLowerCase(),
-    fullName,
-    loyaltyPoints: raw.loyaltyPoints,
-  };
-}
-
-/**
- * Gọi API `GET /auth/me` để lấy thông tin người dùng và điểm tích lũy thành viên (SCRUM-71)
- * - Yêu cầu xác thực JWT Bearer
- * - Trả về MeResponseDto { id, email, fullName, loyaltyPoints }
- */
-export async function getMeApi(
-  tokenOverride?: string | null,
-  signal?: AbortSignal
-): Promise<MeResponseDto> {
-  const token = tokenOverride || getStoredToken();
-  if (!token) {
-    const err: Error & { statusCode?: number; code?: string } = new Error(
-      "Phiên đăng nhập đã hết hạn hoặc chưa đăng nhập. Vui lòng đăng nhập lại."
-    );
-    err.statusCode = 401;
-    err.code = "UNAUTHORIZED";
-    throw err;
-  }
-
-  if (AUTH_MODE === "mock") {
-    const user = getStoredUser();
-    return {
-      id: user?.id || "mock-preview-user-id",
-      email: user?.email || "customer@brewlite.local",
-      fullName: user?.fullName || "Nguyễn Văn BrewLite",
-      loyaltyPoints: user?.loyaltyPoints ?? 125,
-    };
-  }
-
-  const endpoint =
-    typeof window !== "undefined"
-      ? "/api/backend/auth/me"
-      : `${API_BASE_URL}/auth/me`;
-
-  let res: Response;
-  try {
-    res = await fetch(endpoint, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-      signal,
-    });
-  } catch (err: unknown) {
-    if (signal?.aborted) throw err;
-    const netErr: Error & { statusCode?: number; code?: string } = new Error(
-      "Không thể kết nối đến máy chủ Backend (GET /auth/me). Vui lòng thử lại sau."
-    );
-    netErr.statusCode = 503;
-    netErr.code = "NETWORK_ERROR";
-    throw netErr;
-  }
-
-  if (res.ok) {
-    const json = await res.json();
-    return validateMeResponseData(json);
-  }
-
-  const errorData = await res.json().catch(() => null);
-  const rawMessage = Array.isArray(errorData?.message)
-    ? errorData.message.join(", ")
-    : typeof errorData?.message === "string"
-    ? errorData.message
-    : null;
-
-  const err: Error & { statusCode?: number; code?: string; details?: unknown } =
-    new Error(
-      rawMessage ||
-        (res.status === 401
-          ? "Phiên đăng nhập không hợp lệ hoặc đã hết hạn."
-          : "Không thể lấy thông tin người dùng.")
-    );
-  err.statusCode = res.status;
-  err.code =
-    errorData?.code || (res.status === 401 ? "UNAUTHORIZED" : "SERVER_ERROR");
-  err.details = errorData;
-  throw err;
 }

@@ -43,6 +43,15 @@ import {
 
 export const DEFAULT_CLIENT_PAGE_SIZE = 4;
 
+/**
+ * Cấu hình cho phép chế độ Mock Preview:
+ * - Chỉ bật trong môi trường dev/test hoặc khi cấu hình tường minh qua NEXT_PUBLIC_ENABLE_MOCK_PREVIEW=true.
+ * - Tuyệt đối không cho phép production mở mock/state giả qua URL query (?state=...) hoặc các nút preview.
+ */
+export const IS_MOCK_PREVIEW_ALLOWED =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW === "true";
+
 export interface OrderHistoryErrorState {
   statusCode: number;
   code: string;
@@ -370,7 +379,6 @@ export default function OrderHistoryView() {
     isLoading: isAuthLoading,
     verifySession,
     openAuthModal,
-    refreshUserProfile,
   } = useAuth();
   const { openCart, addToCart } = useCart();
 
@@ -443,7 +451,9 @@ export default function OrderHistoryView() {
       typeof window !== "undefined"
         ? new URLSearchParams(window.location.search)
         : null;
-    const stateParam = searchParams?.get("state")?.toLowerCase();
+    // Giới hạn query param ?state=... cho môi trường dev/test, ngăn chặn mở state giả trên production
+    const rawState = searchParams?.get("state")?.toLowerCase();
+    const stateParam = IS_MOCK_PREVIEW_ALLOWED ? rawState : null;
 
     if (stateParam === "loading") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -475,7 +485,8 @@ export default function OrderHistoryView() {
       return;
     }
 
-    const shouldUseMock = stateParam === "mock" || useMockPreview;
+    const shouldUseMock =
+      IS_MOCK_PREVIEW_ALLOWED && (stateParam === "mock" || useMockPreview);
 
     if (!shouldUseMock && (!isAuthenticated || !currentAuthUserId)) {
       setIsLoading(false);
@@ -574,7 +585,6 @@ export default function OrderHistoryView() {
 
   const handleRetryLoad = () => {
     setSelectedOrderSnapshot(null);
-    void refreshUserProfile();
     setReloadKey((prev) => prev + 1);
   };
 
@@ -625,16 +635,7 @@ export default function OrderHistoryView() {
       ? getDisplayCustomerName(user)
       : MOCK_USER_PROFILE.fullName;
 
-  // Điểm tích lũy thành viên: Ưu tiên điểm chính thức từ GET /auth/me (SCRUM-71);
-  // nếu chưa tải xong hoặc ở chế độ preview/offline, sử dụng tổng điểm tích lũy từ các đơn hàng đã thanh toán
-  const displayLoyaltyPoints =
-    isAuthenticated &&
-    typeof user?.loyaltyPoints === "number" &&
-    user.loyaltyPoints >= 0
-      ? user.loyaltyPoints
-      : totalConfirmedPoints;
-
-  const freeCoffeeEquivalent = Math.floor(displayLoyaltyPoints / 100);
+  const freeCoffeeEquivalent = Math.floor(totalConfirmedPoints / 100);
 
   return (
     <div className="min-h-screen flex flex-col bg-background font-body-md text-on-surface">
@@ -728,7 +729,7 @@ export default function OrderHistoryView() {
                       id="memberTotalPointsValue"
                       className="text-primary font-bold"
                     >
-                      {displayLoyaltyPoints.toLocaleString("vi-VN")} điểm tích
+                      {totalConfirmedPoints.toLocaleString("vi-VN")} điểm tích
                       lũy
                     </strong>{" "}
                     (
@@ -872,7 +873,7 @@ export default function OrderHistoryView() {
           </div>
 
           {/* Banner thông báo khi đang xem ở chế độ Mock Preview */}
-          {useMockPreview && (
+          {IS_MOCK_PREVIEW_ALLOWED && useMockPreview && (
             <div
               id="mockPreviewNoticeBanner"
               className="p-3.5 rounded-xl bg-tertiary-fixed/50 border border-tertiary/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
@@ -984,17 +985,19 @@ export default function OrderHistoryView() {
                   </span>
                   <span>Đăng nhập ngay</span>
                 </button>
-                <button
-                  type="button"
-                  id="orderHistoryMockPreviewBtn"
-                  onClick={() => setUseMockPreview(true)}
-                  className="px-5 py-2.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-lg text-label-lg transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px] text-primary">
-                    visibility
-                  </span>
-                  <span>Xem mẫu giao diện (4 đơn mẫu)</span>
-                </button>
+                {IS_MOCK_PREVIEW_ALLOWED && (
+                  <button
+                    type="button"
+                    id="orderHistoryMockPreviewBtn"
+                    onClick={() => setUseMockPreview(true)}
+                    className="px-5 py-2.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-lg text-label-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[18px] text-primary">
+                      visibility
+                    </span>
+                    <span>Xem mẫu giao diện (4 đơn mẫu)</span>
+                  </button>
+                )}
                 <Link
                   href="/"
                   className="px-5 py-2.5 rounded-lg border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low font-label-lg text-label-lg transition-colors flex items-center gap-1.5"
@@ -1060,16 +1063,18 @@ export default function OrderHistoryView() {
                   </span>
                   <span>Thử tải lại lịch sử</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setErrorState(null);
-                    setUseMockPreview(true);
-                  }}
-                  className="px-5 py-2.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-lg text-label-lg transition-colors cursor-pointer"
-                >
-                  Xem mẫu giao diện (Mock)
-                </button>
+                {IS_MOCK_PREVIEW_ALLOWED && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorState(null);
+                      setUseMockPreview(true);
+                    }}
+                    className="px-5 py-2.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-lg text-label-lg transition-colors cursor-pointer"
+                  >
+                    Xem mẫu giao diện (Mock)
+                  </button>
+                )}
                 <Link
                   href="/"
                   className="px-5 py-2.5 rounded-lg border border-outline-variant text-on-surface-variant hover:text-on-surface font-label-lg text-label-lg transition-colors"
@@ -1115,16 +1120,18 @@ export default function OrderHistoryView() {
                     </span>
                     <span>Khám phá thực đơn ngay</span>
                   </Link>
-                  <button
-                    type="button"
-                    onClick={() => setUseMockPreview(true)}
-                    className="px-5 py-2.5 bg-surface-container hover:bg-surface-container-high text-on-surface rounded-lg font-label-lg text-label-lg transition-colors flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-[18px] text-primary">
-                      visibility
-                    </span>
-                    <span>Xem mẫu giao diện (4 đơn mẫu)</span>
-                  </button>
+                  {IS_MOCK_PREVIEW_ALLOWED && (
+                    <button
+                      type="button"
+                      onClick={() => setUseMockPreview(true)}
+                      className="px-5 py-2.5 bg-surface-container hover:bg-surface-container-high text-on-surface rounded-lg font-label-lg text-label-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[18px] text-primary">
+                        visibility
+                      </span>
+                      <span>Xem mẫu giao diện (4 đơn mẫu)</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleRetryLoad}
@@ -1421,25 +1428,25 @@ export default function OrderHistoryView() {
                               <button
                                 type="button"
                                 onClick={() => setSelectedOrderSnapshot(order)}
-                                className="px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary-container font-label-md text-label-md shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md text-label-md shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                               >
                                 <span className="material-symbols-outlined text-[16px]">
-                                  payment
+                                  receipt_long
                                 </span>
                                 <span>
-                                  Thanh toán ({formatVnd(order.totalVnd)})
+                                  Chi tiết đơn chờ ({formatVnd(order.totalVnd)})
                                 </span>
                               </button>
                             ) : order.status === "PAYMENT_FAILED" ? (
                               <button
                                 type="button"
                                 onClick={() => setSelectedOrderSnapshot(order)}
-                                className="px-4 py-2 rounded-lg bg-secondary text-on-secondary hover:bg-on-secondary-fixed-variant font-label-md text-label-md shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                className="px-4 py-2 rounded-lg bg-error-container/40 text-on-error-container hover:bg-error-container/60 font-label-md text-label-md shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                               >
                                 <span className="material-symbols-outlined text-[16px]">
-                                  refresh
+                                  info
                                 </span>
-                                <span>Thử thanh toán lại</span>
+                                <span>Xem lý do thất bại</span>
                               </button>
                             ) : (
                               <>

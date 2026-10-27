@@ -177,18 +177,6 @@ export interface AuthUser {
   id: string;
   email: string;
   fullName: string | null;
-  /** Điểm tích luỹ thành viên lấy từ GET /auth/me (SCRUM-71) */
-  loyaltyPoints?: number;
-}
-
-/**
- * Response 200 OK của `GET /auth/me` (API Contract v3.0 §6 — SCRUM-71)
- */
-export interface MeResponseDto {
-  id: string;
-  email: string;
-  fullName: string | null;
-  loyaltyPoints: number;
 }
 
 /** Payload gửi lên khi đăng ký (API Contract v2.1 Mục 6.2) */

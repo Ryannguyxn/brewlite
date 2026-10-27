@@ -208,7 +208,6 @@ function renderCartDrawerMarkup(options: {
     }),
     logout: () => {},
     verifySession: () => isAuthenticated,
-    refreshUserProfile: async () => {},
     handleUnauthorizedCheckout: () => {},
     pendingCheckout: false,
     setPendingCheckout: () => {},

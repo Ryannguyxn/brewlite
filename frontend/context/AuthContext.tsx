@@ -16,7 +16,6 @@ import type {
 } from "@/mock-data";
 import {
   clearStoredSession,
-  getMeApi,
   getStoredToken,
   getStoredUser,
   isTokenExpired,
@@ -53,8 +52,6 @@ export interface AuthContextType {
   logout: () => void;
   /** Kiểm tra đồng bộ token hiện tại còn hạn và hợp lệ không; nếu hết hạn tự động dọn session (giữ Cart) */
   verifySession: () => boolean;
-  /** Tải lại thông tin người dùng và điểm tích lũy từ GET /auth/me (SCRUM-71) */
-  refreshUserProfile: () => Promise<void>;
   /** Xử lý khi gặp 401 UNAUTHORIZED lúc Checkout: xóa phiên hết hạn, giữ Cart và mở modal Login */
   handleUnauthorizedCheckout: (reasonMessage?: string) => void;
 
@@ -120,18 +117,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           setAccessToken(savedToken);
           setUser(savedUser);
-          // Đồng bộ ngầm profile mới nhất từ GET /auth/me (SCRUM-71)
-          void getMeApi(savedToken)
-            .then((me) => {
-              const updatedUser: AuthUser = {
-                ...savedUser,
-                fullName: me.fullName,
-                loyaltyPoints: me.loyaltyPoints,
-              };
-              setUser(updatedUser);
-              setStoredSession(savedToken, updatedUser);
-            })
-            .catch(() => {});
         }
       } else {
         clearStoredSession();
@@ -175,25 +160,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const refreshUserProfile = useCallback(async (): Promise<void> => {
-    try {
-      const currentToken = getStoredToken();
-      if (!currentToken || isTokenExpired(currentToken)) return;
-      const me = await getMeApi(currentToken);
-      const currentUser = getStoredUser();
-      const updatedUser: AuthUser = {
-        id: me.id,
-        email: me.email,
-        fullName: me.fullName,
-        loyaltyPoints: me.loyaltyPoints,
-      };
-      setUser(updatedUser);
-      setStoredSession(currentToken, updatedUser);
-    } catch {
-      // Giữ session hiện tại nếu không thể kết nối tới /auth/me
-    }
-  }, []);
-
   const login = useCallback(async (dto: LoginRequestDto): Promise<void> => {
     const res = await loginApi(dto);
     // Validate JWT (cấu trúc 3 phần, sub chuỗi không rỗng, exp chưa hết hạn).
@@ -204,20 +170,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(resolvedUser);
     setStoredSession(res.accessToken, resolvedUser);
     setAuthModalMessage(null);
-
-    // Đồng bộ profile và loyaltyPoints chính thức từ GET /auth/me (SCRUM-71)
-    try {
-      const me = await getMeApi(res.accessToken);
-      const updatedUser: AuthUser = {
-        ...resolvedUser,
-        fullName: me.fullName,
-        loyaltyPoints: me.loyaltyPoints,
-      };
-      setUser(updatedUser);
-      setStoredSession(res.accessToken, updatedUser);
-    } catch {
-      // Giữ resolvedUser cơ bản nếu API me tạm thời lỗi
-    }
   }, []);
 
   const register = useCallback(
@@ -285,7 +237,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       register,
       logout,
       verifySession,
-      refreshUserProfile,
       handleUnauthorizedCheckout,
       pendingCheckout,
       setPendingCheckout,
@@ -303,7 +254,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       register,
       logout,
       verifySession,
-      refreshUserProfile,
       handleUnauthorizedCheckout,
       pendingCheckout,
       setPendingCheckout,

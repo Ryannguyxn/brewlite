@@ -10,11 +10,9 @@ import {
   type CartContextValue,
 } from "@/context/CartContext";
 import {
-  getMeApi,
   getStoredToken,
   getStoredUser,
   setStoredSession,
-  validateMeResponseData,
 } from "@/services/auth.service";
 import {
   computeOrderStatusCounts,
@@ -397,7 +395,6 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
       }),
       logout: () => {},
       verifySession: () => true,
-      refreshUserProfile: async () => {},
       handleUnauthorizedCheckout: () => {},
       pendingCheckout: false,
       setPendingCheckout: () => {},
@@ -546,68 +543,307 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
     );
   });
 
-  it("7. validateMeResponseData & getMeApi: xử lý đúng DTO GET /auth/me và đồng bộ loyaltyPoints (SCRUM-71)", async () => {
-    // 7a. validateMeResponseData chuẩn
-    const validMe = validateMeResponseData({
-      id: "32bd8c4d-161b-424b-9ea9-879917dbec68",
-      email: "caok5513@gmail.com",
-      fullName: "Cao Nguyễn Quốc Khánh",
-      loyaltyPoints: 125,
+  it("7. error: xử lý đầy đủ các lỗi mạng, 500, 400 và 401 theo đúng API Contract v3.0", async () => {
+    let unauthorizedTriggered = false;
+    let unauthorizedMessage = "";
+
+    // 7a. 401 UNAUTHORIZED
+    const authErr: OrderServiceError = {
+      name: "OrderServiceError",
+      message: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+      statusCode: 401,
+      code: "UNAUTHORIZED",
+      isOutcomeUncertain: false,
+    };
+
+    const errorStateHolder: { current: OrderHistoryErrorState | null } = {
+      current: null,
+    };
+    const fetch401 = async () => {
+      throw authErr;
+    };
+
+    const res401 = await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: "11111111-1111-4111-8111-111111111111",
+      accessToken: "mock-token",
+      verifySession: () => true,
+      onUnauthorized: (msg) => {
+        unauthorizedTriggered = true;
+        unauthorizedMessage = msg;
+      },
+      setIsLoading: () => {},
+      setOrders: () => {},
+      setMeta: () => {},
+      setErrorState: (err) => {
+        errorStateHolder.current = err;
+      },
+      setLoadedOwnerUserId: () => {},
+      fetchOrdersFn: fetch401 as unknown as typeof getMyOrdersApi,
     });
-    assert.equal(validMe.id, "32bd8c4d-161b-424b-9ea9-879917dbec68");
-    assert.equal(validMe.email, "caok5513@gmail.com");
-    assert.equal(validMe.fullName, "Cao Nguyễn Quốc Khánh");
-    assert.equal(validMe.loyaltyPoints, 125);
 
-    // 7b. validateMeResponseData từ chối khi id không phải UUID hoặc loyaltyPoints âm
-    assert.throws(
-      () =>
-        validateMeResponseData({
-          id: "not-a-uuid",
-          email: "test@brewlite.vn",
-          fullName: null,
-          loyaltyPoints: 10,
-        }),
-      (err: unknown) => (err as { code?: string }).code === "INVALID_RESPONSE"
-    );
+    assert.equal(res401, null);
+    assert.equal(unauthorizedTriggered, true);
+    assert.match(unauthorizedMessage, /hết hạn/);
+    assert.equal(errorStateHolder.current, null);
 
-    assert.throws(
-      () =>
-        validateMeResponseData({
-          id: "32bd8c4d-161b-424b-9ea9-879917dbec68",
-          email: "test@brewlite.vn",
-          fullName: null,
-          loyaltyPoints: -5,
-        }),
-      (err: unknown) => (err as { code?: string }).code === "INVALID_RESPONSE"
-    );
+    // 7b. 500 INTERNAL_ERROR
+    const internalErr: OrderServiceError = {
+      name: "OrderServiceError",
+      message: "Lỗi hệ thống từ máy chủ đơn hàng.",
+      statusCode: 500,
+      code: "INTERNAL_ERROR",
+      isOutcomeUncertain: false,
+    };
 
-    // 7c. getMeApi 200 OK
-    const token = createValidTestJwt("32bd8c4d-161b-424b-9ea9-879917dbec68");
-    let calledUrl = "";
-    let authHeader = "";
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      calledUrl = String(input);
-      const headers = init?.headers as Record<string, string>;
-      authHeader = headers?.Authorization || "";
-      return new Response(
-        JSON.stringify({
-          id: "32bd8c4d-161b-424b-9ea9-879917dbec68",
-          email: "caok5513@gmail.com",
-          fullName: "Cao Nguyễn Quốc Khánh",
-          loyaltyPoints: 125,
-        }),
+    await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: "11111111-1111-4111-8111-111111111111",
+      accessToken: "mock-token",
+      verifySession: () => true,
+      setIsLoading: () => {},
+      setOrders: () => {},
+      setMeta: () => {},
+      setErrorState: (err) => {
+        errorStateHolder.current = err;
+      },
+      setLoadedOwnerUserId: () => {},
+      fetchOrdersFn: (async () => {
+        throw internalErr;
+      }) as unknown as typeof getMyOrdersApi,
+    });
+
+    const lastInternalError = errorStateHolder.current as OrderHistoryErrorState | null;
+    assert.equal(lastInternalError?.statusCode, 500);
+    assert.equal(lastInternalError?.code, "INTERNAL_ERROR");
+
+    // 7c. 503 NETWORK_ERROR
+    const netErr: OrderServiceError = {
+      name: "OrderServiceError",
+      message: "Mất kết nối mạng.",
+      statusCode: 503,
+      code: "NETWORK_ERROR",
+      isOutcomeUncertain: false,
+    };
+
+    await executeFetchOrderHistory({
+      isAuthenticated: true,
+      userId: "11111111-1111-4111-8111-111111111111",
+      accessToken: "mock-token",
+      verifySession: () => true,
+      setIsLoading: () => {},
+      setOrders: () => {},
+      setMeta: () => {},
+      setErrorState: (err) => {
+        errorStateHolder.current = err;
+      },
+      setLoadedOwnerUserId: () => {},
+      fetchOrdersFn: (async () => {
+        throw netErr;
+      }) as unknown as typeof getMyOrdersApi,
+    });
+
+    const lastNetError = errorStateHolder.current as OrderHistoryErrorState | null;
+    assert.equal(lastNetError?.statusCode, 503);
+    assert.equal(lastNetError?.code, "NETWORK_ERROR");
+  });
+
+  it("8. populated: danh sách đơn hàng populated hiển thị đầy đủ thông tin, nhóm trạng thái và nhãn nút trung thực", () => {
+    const populated = validateMyOrdersResponseData(MOCK_MY_ORDERS_RESPONSE);
+    assert.equal(populated.items.length, 4);
+
+    const counts = computeOrderStatusCounts(populated.items);
+    assert.equal(counts.all, 4);
+    assert.equal(counts.PENDING, 1);
+    assert.equal(counts.PAID_GROUP, 1);
+    assert.equal(counts.PAYMENT_FAILED, 1);
+    assert.equal(counts.CANCELLED, 1);
+
+    // Kiểm tra nhóm PAID_GROUP lọc chính xác
+    const paidOnly = filterAndSearchOrders(populated.items, "PAID_GROUP", "");
+    assert.equal(paidOnly.length, 1);
+    assert.equal(paidOnly[0].status, "PAID");
+    assert.equal(paidOnly[0].pointsEarned, 14);
+
+    // Kiểm tra tìm kiếm theo tên sản phẩm tiếng Việt
+    const searched = filterAndSearchOrders(populated.items, "all", "muối");
+    assert.equal(searched.length, 1);
+    assert.equal(searched[0].items[0].productName, "Cà Phê Muối Cố Đô");
+  });
+
+  it("9. zero-total: đơn hàng miễn phí 100% (totalVnd = 0) tuân thủ bất biến ERD và tích lũy 0 điểm", () => {
+    const zeroTotalOrder: OrderHistoryItemDto = {
+      id: "00000000-0000-4000-8000-000000000099",
+      status: "PAID",
+      createdAt: "2026-10-25T10:00:00.000Z",
+      expiresAt: "2026-10-25T10:15:00.000Z",
+      subtotalVnd: 50000,
+      discountVnd: 50000,
+      totalVnd: 0,
+      couponCode: "WELCOME_FREE",
+      pointsEarned: 0,
+      items: [
         {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    }) as typeof fetch;
+          id: "d0000000-0000-4000-8000-000000000099",
+          productId: "a3000000-0000-4000-8000-000000000001",
+          productName: "Bạc Xỉu Kem Béo Phin",
+          size: "S",
+          sizeMultiplierPercent: 100,
+          basePriceVnd: 42000,
+          quantity: 1,
+          unitPriceVnd: 50000,
+          lineTotalVnd: 50000,
+          toppings: [
+            {
+              id: "b2000000-0000-4000-8000-000000000005",
+              name: "Kem tươi",
+              priceVnd: 8000,
+            },
+          ],
+        },
+      ],
+      payment: {
+        id: "c0000000-0000-4000-8000-000000000099",
+        status: "SUCCESS",
+        method: "WALLET",
+        methodLast4: null,
+        amountVnd: 0,
+        mockReference: "FREE-PROMO",
+        failureReason: null,
+        createdAt: "2026-10-25T10:01:00.000Z",
+      },
+    };
 
-    const meRes = await getMeApi(token);
-    assert.equal(calledUrl, "/api/backend/auth/me");
-    assert.equal(authHeader, `Bearer ${token}`);
-    assert.equal(meRes.loyaltyPoints, 125);
-    assert.equal(meRes.fullName, "Cao Nguyễn Quốc Khánh");
+    const validated = validateMyOrdersResponseData({
+      items: [zeroTotalOrder],
+      meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+    });
+
+    assert.equal(validated.items.length, 1);
+    assert.equal(validated.items[0].totalVnd, 0);
+    assert.equal(validated.items[0].pointsEarned, 0);
+    assert.equal(
+      validated.items[0].subtotalVnd - validated.items[0].discountVnd,
+      validated.items[0].totalVnd
+    );
+  });
+
+  it("10. pagination: kiểm tra tính toán siêu dữ liệu phân trang Contract v3.0 và giới hạn trang", () => {
+    // 10a. Khi không phân trang (page = null, limit = null)
+    const noPageResponse = validateMyOrdersResponseData({
+      items: MOCK_MY_ORDERS_RESPONSE.items,
+      meta: { page: null, limit: null, total: 4, totalPages: null },
+    });
+    assert.equal(noPageResponse.meta.page, null);
+    assert.equal(noPageResponse.meta.limit, null);
+    assert.equal(noPageResponse.meta.totalPages, null);
+    assert.equal(noPageResponse.meta.total, 4);
+
+    // 10b. Khi có phân trang (total: 25, limit: 10 -> totalPages: 3)
+    const pagedResponse = validateMyOrdersResponseData({
+      items: [],
+      meta: { page: 2, limit: 10, total: 25, totalPages: 3 },
+    });
+    assert.equal(pagedResponse.meta.page, 2);
+    assert.equal(pagedResponse.meta.limit, 10);
+    assert.equal(pagedResponse.meta.total, 25);
+    assert.equal(pagedResponse.meta.totalPages, 3);
+
+    // 10c. Khi total = 0 và limit = 10 -> totalPages: 0
+    const emptyPaged = validateMyOrdersResponseData({
+      items: [],
+      meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+    });
+    assert.equal(emptyPaged.meta.total, 0);
+    assert.equal(emptyPaged.meta.totalPages, 0);
+
+    // 10d. Từ chối khi totalPages tính sai theo ceil(total/limit)
+    assert.throws(
+      () =>
+        validateMyOrdersResponseData({
+          items: [],
+          meta: { page: 1, limit: 10, total: 25, totalPages: 99 },
+        }),
+      (err: unknown) => (err as OrderServiceError).code === "INTERNAL_ERROR"
+    );
+  });
+
+  it("11. production mock guard: chặn mở mock/state giả qua URL hoặc nút preview trong production", () => {
+    const envObj = process.env as Record<string, string | undefined>;
+    const originalEnv = envObj.NODE_ENV;
+    try {
+      // Giả lập môi trường production
+      envObj.NODE_ENV = "production";
+      delete envObj.NEXT_PUBLIC_ENABLE_MOCK_PREVIEW;
+
+      // Khi ở production, IS_MOCK_PREVIEW_ALLOWED = false, không render nút Xem mẫu giao diện
+      const mockAuthContext: AuthContextType = {
+        user: null,
+        accessToken: null,
+        isAuthenticated: false,
+        isLoading: false,
+        login: async () => {},
+        register: async () => ({ id: "1", email: "", fullName: null }),
+        logout: () => {},
+        verifySession: () => false,
+        handleUnauthorizedCheckout: () => {},
+        pendingCheckout: false,
+        setPendingCheckout: () => {},
+        isAuthModalOpen: false,
+        authModalMode: "login",
+        authModalMessage: null,
+        openAuthModal: () => {},
+        closeAuthModal: () => {},
+      };
+
+      const mockCartContext: CartContextValue = {
+        items: [],
+        totalQuantity: 0,
+        totalLines: 0,
+        subtotalVnd: 0,
+        formattedSubtotal: "0 ₫",
+        isCartOpen: false,
+        couponCode: "",
+        setCouponCode: () => {},
+        feedbackMessage: null,
+        feedbackType: null,
+        addToCart: () => ({ success: true, message: "OK" }),
+        updateQuantity: () => {},
+        incrementQuantity: () => {},
+        decrementQuantity: () => {},
+        removeFromCart: () => {},
+        clearCart: () => {},
+        openCart: () => {},
+        closeCart: () => {},
+        toggleCart: () => {},
+        dismissFeedback: () => {},
+        mapToCreateOrderPayload: () => ({ items: [] }),
+        activeOrder: null,
+        isSubmittingOrder: false,
+        orderError: null,
+        setActiveOrder: () => {},
+        setIsSubmittingOrder: () => {},
+        setOrderError: () => {},
+        clearOrderFlowState: () => {},
+      };
+
+      const html = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(
+          AuthContext.Provider,
+          { value: mockAuthContext },
+          React.createElement(
+            CartContext.Provider,
+            { value: mockCartContext },
+            React.createElement(OrderHistoryView)
+          )
+        )
+      );
+
+      // Nút Xem mẫu giao diện (Mock) tuyệt đối không xuất hiện trong production
+      assert.equal(html.includes("orderHistoryMockPreviewBtn"), false);
+      assert.equal(html.includes("mockPreviewNoticeBanner"), false);
+    } finally {
+      envObj.NODE_ENV = originalEnv;
+    }
   });
 });

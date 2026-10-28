@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
-import React from "react";
+import React, { act } from "react";
 import ReactDOMServer from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { JSDOM } from "jsdom";
 import { MOCK_MY_ORDERS_RESPONSE, type OrderHistoryItemDto } from "@/mock-data";
 import { AuthContext, type AuthContextType } from "@/context/AuthContext";
 import {
@@ -1515,6 +1517,90 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
           false,
           "Sau khi gọi cleanup, callback không được phép kích hoạt (không gây memory leak)"
         );
+      } finally {
+        mock.timers.reset();
+      }
+    });
+
+    it("13j. mounted component test: mount OrderSnapshotModal thật trên DOM, xác nhận CTA tự biến mất sau expiresAt mà KHÔNG remount component", async () => {
+      mock.timers.enable({ apis: ["setTimeout", "Date"] });
+      try {
+        const now = 1770000000000;
+        mock.timers.setTime(now);
+
+        const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', { url: "http://localhost" });
+        const originalWindow = globalThis.window;
+        const originalDocument = globalThis.document;
+        const originalSelf = globalThis.self;
+        const globalTarget = globalThis as unknown as {
+          window: unknown;
+          document: unknown;
+          self: unknown;
+          IS_REACT_ACT_ENVIRONMENT?: boolean;
+        };
+        const originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
+
+        globalTarget.window = dom.window;
+        globalTarget.document = dom.window.document;
+        globalTarget.self = dom.window;
+        globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
+
+        const container = dom.window.document.getElementById("root");
+        const root = createRoot(container!);
+
+        const orderExpiringIn5s = createTestOrderSnapshot({
+          id: "550e8400-e29b-41d4-a716-446655440055",
+          status: "PENDING",
+          createdAt: new Date(now - 60000).toISOString(),
+          expiresAt: new Date(now + 5000).toISOString(), // Còn đúng 5 giây
+          totalVnd: 75000,
+        });
+
+        // 1. Mount component thật vào DOM bằng React 19 createRoot + act
+        await act(async () => {
+          root.render(
+            React.createElement(OrderSnapshotModal, {
+              order: orderExpiringIn5s,
+              onClose: () => {},
+              onReorder: () => {},
+            })
+          );
+        });
+
+        // 2. Ban đầu: CTA thanh toán phải tồn tại trong DOM thực tế
+        const ctaBefore = container!.querySelector("#order-snapshot-pay-cta");
+        assert.ok(ctaBefore !== null, "CTA thanh toán phải hiển thị khi component vừa mount vào DOM");
+        assert.equal(ctaBefore.getAttribute("data-order-id"), orderExpiringIn5s.id);
+
+        // 3. Tiến thời gian 4999ms (vẫn còn 1ms trước khi hết hạn)
+        await act(async () => {
+          mock.timers.tick(4999);
+        });
+        const ctaDuring = container!.querySelector("#order-snapshot-pay-cta");
+        assert.ok(ctaDuring !== null, "CTA thanh toán vẫn phải tồn tại ở mốc 4999ms khi chưa vượt qua expiresAt");
+
+        // 4. Tiến thêm 1ms (chạm mốc 5000ms = đúng expiresAt)
+        // Timer trong useEffect kích hoạt setState(hasExpiredLive = true), component re-render tự động mà không remount
+        await act(async () => {
+          mock.timers.tick(1);
+        });
+        const ctaAfter = container!.querySelector("#order-snapshot-pay-cta");
+        assert.equal(
+          ctaAfter,
+          null,
+          "CTA thanh toán phải tự động biến mất khỏi DOM sau expiresAt mà KHÔNG cần remount component"
+        );
+
+        // 5. Cleanup DOM and restore globals
+        await act(async () => {
+          root.unmount();
+        });
+        dom.window.close();
+
+        globalTarget.window = originalWindow;
+        globalTarget.document = originalDocument;
+        globalTarget.self = originalSelf;
+        globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
       } finally {
         mock.timers.reset();
       }

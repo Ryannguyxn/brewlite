@@ -7,7 +7,6 @@ import { useAuth } from "@/context/AuthContext";
 import { getStoredToken } from "@/services/auth.service";
 import {
   type OrderConfirmationData,
-  type PaymentApiResponse,
   fetchMyOrdersApi,
   findOrderForConfirmation,
   fetchAuthMeProfile,
@@ -32,6 +31,14 @@ function OrderConfirmationContent() {
 
     async function loadConfirmationOrder() {
       if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      // Khi URL thiếu orderId: TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất!
+      // Báo lỗi rõ ràng để yêu cầu người dùng cung cấp orderId.
+      if (!orderIdParam || typeof orderIdParam !== "string" || orderIdParam.trim() === "") {
+        setError("Vui lòng cung cấp mã đơn hàng (orderId) trên đường dẫn URL.");
         setLoading(false);
         return;
       }
@@ -79,25 +86,31 @@ function OrderConfirmationContent() {
     };
   }, [token, orderIdParam]);
 
-  // Handler khi retry payment thành công
-  const handleRetrySuccess = (result: PaymentApiResponse) => {
-    if (order) {
-      setOrder({
-        ...order,
-        status: "PAID",
-        pointsEarned: result.pointsEarned,
-        payment: {
-          id: result.paymentId,
-          status: "SUCCESS",
-          method: result.method,
-          methodLast4: result.methodLast4,
-          amountVnd: result.amountVnd,
-          mockReference: result.mockReference,
-          failureReason: null,
-          createdAt: result.createdAt,
-        },
-      });
-      setUserLoyaltyPoints((prev) => prev + result.pointsEarned);
+  // Handler khi retry payment thành công:
+  // TUYỆT ĐỐI KHÔNG tự đổi Order sang PAID bằng local state!
+  // Phải tải lại server truth từ GET /orders/me và GET /auth/me để đảm bảo trạng thái từ máy chủ.
+  const handleRetrySuccess = async () => {
+    if (!token || !orderIdParam) return;
+    try {
+      setLoading(true);
+      const [orders, profile] = await Promise.all([
+        fetchMyOrdersApi(token),
+        fetchAuthMeProfile(token),
+      ]);
+      if (profile?.loyaltyPoints !== undefined) {
+        setUserLoyaltyPoints(profile.loyaltyPoints);
+      }
+      const updatedOrder = findOrderForConfirmation(orders, orderIdParam);
+      if (updatedOrder) {
+        setOrder(updatedOrder);
+      } else {
+        setError("Không tìm thấy thông tin đơn hàng sau khi cập nhật từ máy chủ.");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Không thể làm mới trạng thái đơn hàng sau thanh toán: ${msg}`);
+    } finally {
+      setLoading(false);
     }
   };
 

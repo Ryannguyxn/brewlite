@@ -199,18 +199,18 @@ export function findOrderForConfirmation(
 ): OrderConfirmationData | null {
   if (!orders || orders.length === 0) return null;
 
-  // Nếu người dùng/URL truyền targetOrderId cụ thể:
-  // Bắt buộc phải tìm đúng đơn hàng đó. Nếu không tìm thấy hoặc UUID không hợp lệ,
-  // trả về null để giao diện báo lỗi - TUYỆT ĐỐI không fallback sang orders[0] để tránh mở nhầm đơn!
-  if (targetOrderId !== undefined && targetOrderId !== null && targetOrderId.trim() !== "") {
-    const cleanId = targetOrderId.trim();
-    if (!isValidUuid(cleanId)) return null;
-    const match = orders.find((o) => o.id === cleanId);
-    return match || null;
+  // Khi URL thiếu orderId (undefined, null, hoặc chuỗi rỗng):
+  // TUYỆT ĐỐI KHÔNG tự ý chọn order mới nhất! Phải trả về null để giao diện yêu cầu cung cấp mã đơn.
+  if (!targetOrderId || typeof targetOrderId !== "string" || targetOrderId.trim() === "") {
+    return null;
   }
 
-  // Chỉ khi không cung cấp targetOrderId mới fallback về đơn hàng mới nhất của người dùng
-  return orders[0] || null;
+  const cleanId = targetOrderId.trim();
+  if (!isValidUuid(cleanId)) return null;
+
+  // Tìm chính xác đơn hàng theo UUID: nếu không thấy, trả về null, KHÔNG mở nhầm đơn khác
+  const match = orders.find((o) => o.id === cleanId);
+  return match || null;
 }
 
 /**
@@ -290,31 +290,76 @@ export async function submitRetryPaymentApi(params: {
   return validated as unknown as PaymentApiResponse;
 }
 
-/**
- * Lấy thông tin tài khoản và điểm tích lũy hiện tại từ GET /auth/me (SCRUM-71).
- */
-export async function fetchAuthMeProfile(token: string): Promise<{
+export interface AuthMeProfile {
   id: string;
   email: string;
   fullName: string;
   loyaltyPoints: number;
-} | null> {
-  if (!token || isTokenExpired(token)) return null;
+}
 
-  try {
-    const endpoint = resolveBackendEndpoint("/auth/me");
-    const response = await fetch(endpoint, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
+/**
+ * Runtime validation chặt chẽ cho dữ liệu trả về từ GET /auth/me (SCRUM-71 / API Contract v3.0 Mục 9).
+ */
+export function validateAuthMeResponse(raw: unknown): AuthMeProfile {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Dữ liệu phản hồi từ GET /auth/me phải là một đối tượng JSON hợp lệ.");
   }
+  const obj = raw as Record<string, unknown>;
+
+  if (typeof obj.id !== "string" || !isValidUuid(obj.id.trim())) {
+    throw new Error("Trường 'id' từ GET /auth/me phải là chuỗi UUID hợp lệ.");
+  }
+  if (typeof obj.email !== "string" || !obj.email.includes("@")) {
+    throw new Error("Trường 'email' từ GET /auth/me không hợp lệ.");
+  }
+  if (typeof obj.fullName !== "string" || obj.fullName.trim() === "") {
+    throw new Error("Trường 'fullName' từ GET /auth/me không được để trống.");
+  }
+  if (
+    typeof obj.loyaltyPoints !== "number" ||
+    !Number.isSafeInteger(obj.loyaltyPoints) ||
+    obj.loyaltyPoints < 0
+  ) {
+    throw new Error("Trường 'loyaltyPoints' từ GET /auth/me phải là số nguyên an toàn không âm.");
+  }
+
+  return {
+    id: obj.id.trim(),
+    email: obj.email.trim(),
+    fullName: obj.fullName.trim(),
+    loyaltyPoints: obj.loyaltyPoints,
+  };
+}
+
+/**
+ * Lấy thông tin tài khoản và điểm tích lũy hiện tại từ GET /auth/me (SCRUM-71).
+ * Siết chặt runtime validation để không dùng dữ liệu hỏng/malformed.
+ */
+export async function fetchAuthMeProfile(token: string): Promise<AuthMeProfile | null> {
+  if (!token || isTokenExpired(token)) {
+    throw new Error("UNAUTHORIZED");
+  }
+
+  const endpoint = resolveBackendEndpoint("/auth/me");
+  const response = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (response.status === 401) {
+    const unauthErr = new Error("UNAUTHORIZED");
+    (unauthErr as unknown as { statusCode: number }).statusCode = 401;
+    throw unauthErr;
+  }
+
+  if (!response.ok) {
+    throw new Error(`GET /auth/me failed with status ${response.status}`);
+  }
+
+  const raw: unknown = await response.json().catch(() => null);
+  return validateAuthMeResponse(raw);
 }
 

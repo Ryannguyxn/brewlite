@@ -9,6 +9,8 @@ import {
   fetchMyOrdersApi,
   submitRetryPaymentApi,
   generateIdempotencyKey,
+  validateAuthMeResponse,
+  fetchAuthMeProfile,
 } from "../services/order-confirmation.service";
 
 function createValidMockJwt(
@@ -175,18 +177,18 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.equal(result, null);
     });
 
-    it("should fallback to the most recent order ONLY when targetOrderId is not passed or empty", () => {
+    it("should return null when targetOrderId is not passed or empty (TUYỆT ĐỐI không mở nhầm đơn mới nhất)", () => {
       const result1 = findOrderForConfirmation(orderList);
-      assert.notEqual(result1, null);
-      assert.equal(result1?.id, mockOrderFailed.id);
+      assert.equal(result1, null);
 
       const result2 = findOrderForConfirmation(orderList, "");
-      assert.notEqual(result2, null);
-      assert.equal(result2?.id, mockOrderFailed.id);
+      assert.equal(result2, null);
 
-      const result3 = findOrderForConfirmation(orderList, null);
-      assert.notEqual(result3, null);
-      assert.equal(result3?.id, mockOrderFailed.id);
+      const result3 = findOrderForConfirmation(orderList, "   ");
+      assert.equal(result3, null);
+
+      const result4 = findOrderForConfirmation(orderList, null);
+      assert.equal(result4, null);
     });
 
     it("should return null when orderList is empty", () => {
@@ -453,6 +455,164 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
         (err: unknown) => {
           const e = err as { statusCode?: number; message?: string };
           return e.statusCode === 401 || e.message === "UNAUTHORIZED";
+        }
+      );
+    });
+  });
+
+  describe("5. Strict Runtime Validation for GET /auth/me & GET /orders/me", () => {
+    it("should validate and return a valid AuthMeProfile from validateAuthMeResponse", () => {
+      const validRaw = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "khachhang@brewlite.vn",
+        fullName: "Nguyen Van A",
+        loyaltyPoints: 120,
+      };
+      const result = validateAuthMeResponse(validRaw);
+      assert.equal(result.id, "550e8400-e29b-41d4-a716-446655440001");
+      assert.equal(result.email, "khachhang@brewlite.vn");
+      assert.equal(result.fullName, "Nguyen Van A");
+      assert.equal(result.loyaltyPoints, 120);
+    });
+
+    it("should reject malformed or non-object payload in validateAuthMeResponse", () => {
+      assert.throws(() => validateAuthMeResponse(null), /đối tượng JSON hợp lệ/);
+      assert.throws(() => validateAuthMeResponse([]), /đối tượng JSON hợp lệ/);
+      assert.throws(() => validateAuthMeResponse("string"), /đối tượng JSON hợp lệ/);
+    });
+
+    it("should reject invalid UUID, missing email, or empty fullName in validateAuthMeResponse", () => {
+      // Invalid UUID
+      assert.throws(
+        () =>
+          validateAuthMeResponse({
+            id: "not-a-uuid",
+            email: "user@test.com",
+            fullName: "User",
+            loyaltyPoints: 10,
+          }),
+        /UUID hợp lệ/
+      );
+
+      // Invalid email
+      assert.throws(
+        () =>
+          validateAuthMeResponse({
+            id: "550e8400-e29b-41d4-a716-446655440001",
+            email: "invalid-email-no-at",
+            fullName: "User",
+            loyaltyPoints: 10,
+          }),
+        /email/
+      );
+
+      // Empty fullName
+      assert.throws(
+        () =>
+          validateAuthMeResponse({
+            id: "550e8400-e29b-41d4-a716-446655440001",
+            email: "user@test.com",
+            fullName: "   ",
+            loyaltyPoints: 10,
+          }),
+        /fullName/
+      );
+    });
+
+    it("should reject negative or non-integer loyaltyPoints in validateAuthMeResponse", () => {
+      // Negative points
+      assert.throws(
+        () =>
+          validateAuthMeResponse({
+            id: "550e8400-e29b-41d4-a716-446655440001",
+            email: "user@test.com",
+            fullName: "User",
+            loyaltyPoints: -5,
+          }),
+        /số nguyên an toàn không âm/
+      );
+
+      // Floating points
+      assert.throws(
+        () =>
+          validateAuthMeResponse({
+            id: "550e8400-e29b-41d4-a716-446655440001",
+            email: "user@test.com",
+            fullName: "User",
+            loyaltyPoints: 12.5,
+          }),
+        /số nguyên an toàn không âm/
+      );
+    });
+
+    it("should fetch and validate profile in fetchAuthMeProfile", async () => {
+      const validToken = createValidMockJwt();
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "550e8400-e29b-41d4-a716-446655440001",
+          email: "customer@brewlite.vn",
+          fullName: "Tran Thi B",
+          loyaltyPoints: 50,
+        }),
+      })) as unknown as typeof fetch;
+
+      const profile = await fetchAuthMeProfile(validToken);
+      assert.notEqual(profile, null);
+      assert.equal(profile?.loyaltyPoints, 50);
+      assert.equal(profile?.fullName, "Tran Thi B");
+    });
+
+    it("should throw UNAUTHORIZED on 401 response in fetchAuthMeProfile", async () => {
+      const validToken = createValidMockJwt();
+      global.fetch = (async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({ message: "Unauthorized" }),
+      })) as unknown as typeof fetch;
+
+      await assert.rejects(
+        async () => {
+          await fetchAuthMeProfile(validToken);
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number; message?: string };
+          return e.statusCode === 401 || e.message === "UNAUTHORIZED";
+        }
+      );
+    });
+
+    it("should throw error when GET /orders/me returns malformed order snapshot (missing or invalid expiresAt)", async () => {
+      const validToken = createValidMockJwt();
+      // Server returns order with null expiresAt (malformed order snapshot)
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          items: [
+            {
+              id: "550e8400-e29b-41d4-a716-446655440010",
+              status: "PENDING",
+              createdAt: "2026-10-25T01:50:00.000Z",
+              expiresAt: null, // Thiếu expiresAt từ backend
+              subtotalVnd: 50000,
+              discountVnd: 0,
+              totalVnd: 50000,
+              items: [],
+            },
+          ],
+          meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+        }),
+      })) as unknown as typeof fetch;
+
+      await assert.rejects(
+        async () => {
+          await fetchMyOrdersApi(validToken);
+        },
+        (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          return msg.includes("malformed order snapshot") || msg.includes("sai lệch");
         }
       );
     });

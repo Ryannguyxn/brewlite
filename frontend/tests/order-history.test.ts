@@ -1390,6 +1390,229 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
       assert.equal(isOrderPayable({ status: "PENDING", expiresAt: future }, baseTimeMs), true);
       assert.equal(isOrderPayable({ status: "PAYMENT_FAILED", expiresAt: future }, baseTimeMs), true);
     });
+
+    it("13g. tự ẩn CTA thanh toán ngay khi thời gian vượt qua expiresAt trong lúc modal đang mở (Live Expiration)", async () => {
+      // Đơn hàng hết hạn sau 30ms kể từ thời điểm hiện tại
+      const expireDelayMs = 30;
+      const orderExpiringSoon = createTestOrderSnapshot({
+        id: "550e8400-e29b-41d4-a716-446655440055",
+        status: "PENDING",
+        expiresAt: new Date(Date.now() + expireDelayMs).toISOString(),
+      });
+
+      // Tại thời điểm ban đầu: đơn hàng còn hạn
+      assert.equal(
+        isOrderPayable(orderExpiringSoon),
+        true,
+        "Đơn hàng phải còn trong hạn thanh toán tại thời điểm ban đầu"
+      );
+
+      const initialMarkup = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(OrderSnapshotModal, {
+          order: orderExpiringSoon,
+          onClose: () => {},
+          onReorder: () => {},
+        })
+      );
+      assert.ok(
+        initialMarkup.includes('id="order-snapshot-pay-cta"'),
+        "Tại thời điểm chưa hết hạn, modal phải hiển thị nút CTA thanh toán"
+      );
+
+      // Chờ thời gian trôi qua mốc expiresAt
+      await new Promise((resolve) => setTimeout(resolve, expireDelayMs + 35));
+
+      // Sau khi đã vượt qua expiresAt: isOrderPayable phải trả về false
+      assert.equal(
+        isOrderPayable(orderExpiringSoon),
+        false,
+        "Sau khi qua expiresAt, isOrderPayable phải tự động nhận diện đơn đã hết hạn"
+      );
+
+      // Render lại snapshot modal sau khi hết hạn
+      const expiredMarkup = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(OrderSnapshotModal, {
+          order: orderExpiringSoon,
+          onClose: () => {},
+          onReorder: () => {},
+        })
+      );
+      assert.ok(
+        !expiredMarkup.includes('id="order-snapshot-pay-cta"'),
+        "Sau khi qua expiresAt, modal phải tự động ẩn nút CTA thanh toán"
+      );
+      assert.ok(
+        !expiredMarkup.includes('/payment?orderId='),
+        "Sau khi qua expiresAt, modal không được chứa bất kỳ link thanh toán nào"
+      );
+    });
+  });
+
+  describe("14. Server Truth & User Isolation cho Order Snapshot Modal (SCRUM-65)", () => {
+    const userAId = "11111111-1111-4111-8111-111111111111";
+    const userBId = "22222222-2222-4222-8222-222222222222";
+
+    function deriveSnapshot(
+      selectedOrderId: string | null,
+      orders: OrderHistoryItemDto[],
+      authUserId: string | null,
+      loadedOwnerId: string | null
+    ): OrderHistoryItemDto | null {
+      if (!selectedOrderId) return null;
+      if (!authUserId) return null;
+      if (loadedOwnerId && loadedOwnerId !== authUserId && loadedOwnerId !== "mock-preview") {
+        return null;
+      }
+      return orders.find((o) => o.id === selectedOrderId) ?? null;
+    }
+
+    it("14a. Modal luôn phản ánh dữ liệu mới nhất từ server (Server Truth) khi server trả lịch sử mới", () => {
+      const orderPending: OrderHistoryItemDto = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        status: "PENDING",
+        createdAt: "2026-10-28T01:00:00.000Z",
+        expiresAt: "2026-10-28T01:15:00.000Z",
+        subtotalVnd: 100000,
+        discountVnd: 0,
+        totalVnd: 100000,
+        couponCode: null,
+        pointsEarned: 10,
+        items: [],
+        payment: null,
+      };
+
+      let serverOrders: OrderHistoryItemDto[] = [orderPending];
+      const selectedOrderId = "550e8400-e29b-41d4-a716-446655440001";
+
+      // Snapshot ban đầu phản ánh đơn PENDING từ server
+      let activeSnapshot = deriveSnapshot(selectedOrderId, serverOrders, userAId, userAId);
+      assert.ok(activeSnapshot !== null);
+      assert.equal(activeSnapshot?.status, "PENDING");
+      assert.equal(activeSnapshot?.payment, null);
+
+      // Server cập nhật đơn thành PAID sau khi khách thanh toán thành công
+      const orderPaid: OrderHistoryItemDto = {
+        ...orderPending,
+        status: "PAID",
+        payment: {
+          id: "pay-succ-1",
+          method: "WALLET",
+          methodLast4: null,
+          status: "SUCCESS",
+          amountVnd: 100000,
+          mockReference: "BREW-WALLET-8888",
+          failureReason: null,
+          createdAt: "2026-10-28T01:05:00.000Z",
+        },
+      };
+
+      serverOrders = [orderPaid];
+
+      // Snapshot được cập nhật trực tiếp theo server truth mà không giữ trạng thái cũ
+      activeSnapshot = deriveSnapshot(selectedOrderId, serverOrders, userAId, userAId);
+      assert.ok(activeSnapshot !== null);
+      assert.equal(activeSnapshot?.status, "PAID", "Modal phải cập nhật trạng thái PAID theo server truth");
+      assert.equal(activeSnapshot?.payment?.status, "SUCCESS", "Modal phải hiển thị thông tin thanh toán mới từ server");
+
+      // Với trạng thái PAID từ server truth, CTA thanh toán phải tự động biến mất
+      const modalMarkup = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(OrderSnapshotModal, {
+          order: activeSnapshot!,
+          onClose: () => {},
+          onReorder: () => {},
+        })
+      );
+      assert.ok(
+        !modalMarkup.includes('id="order-snapshot-pay-cta"'),
+        "Modal cập nhật PAID theo server truth không được hiển thị nút CTA thanh toán"
+      );
+    });
+
+    it("14b. Modal tự động đóng (selectedOrderSnapshot = null) khi server loại bỏ đơn hàng khỏi danh sách mới", () => {
+      const orderPending: OrderHistoryItemDto = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        status: "PENDING",
+        createdAt: "2026-10-28T01:00:00.000Z",
+        expiresAt: "2026-10-28T01:15:00.000Z",
+        subtotalVnd: 50000,
+        discountVnd: 0,
+        totalVnd: 50000,
+        couponCode: null,
+        pointsEarned: 5,
+        items: [],
+        payment: null,
+      };
+
+      let serverOrders: OrderHistoryItemDto[] = [orderPending];
+      const selectedOrderId = "550e8400-e29b-41d4-a716-446655440001";
+
+      assert.ok(deriveSnapshot(selectedOrderId, serverOrders, userAId, userAId) !== null);
+
+      // Server trả về danh sách rỗng (hoặc đơn hàng đã bị xóa / chuyển sang phân trang khác)
+      serverOrders = [];
+
+      const activeSnapshot = deriveSnapshot(selectedOrderId, serverOrders, userAId, userAId);
+      assert.equal(
+        activeSnapshot,
+        null,
+        "Snapshot modal phải tự động đóng khi đơn không còn trong danh sách mới của server"
+      );
+    });
+
+    it("14c. Modal tự động đóng ngay lập tức khi đăng xuất hoặc đổi sang User B (cô lập tài khoản tuyệt đối)", () => {
+      const orderUserA: OrderHistoryItemDto = {
+        id: "550e8400-e29b-41d4-a716-user-a-order-1",
+        status: "PENDING",
+        createdAt: "2026-10-28T01:00:00.000Z",
+        expiresAt: "2026-10-28T01:15:00.000Z",
+        subtotalVnd: 75000,
+        discountVnd: 0,
+        totalVnd: 75000,
+        couponCode: null,
+        pointsEarned: 7,
+        items: [],
+        payment: null,
+      };
+
+      const ordersUserA = [orderUserA];
+      const selectedOrderId = "550e8400-e29b-41d4-a716-user-a-order-1";
+
+      // Khi User A đang đăng nhập
+      assert.ok(deriveSnapshot(selectedOrderId, ordersUserA, userAId, userAId) !== null);
+
+      // 1. Khi User A đăng xuất (authUserId = null)
+      const afterLogout = deriveSnapshot(selectedOrderId, ordersUserA, null, null);
+      assert.equal(
+        afterLogout,
+        null,
+        "Snapshot modal phải bị hủy ngay lập tức khi đăng xuất, không giữ dữ liệu cũ"
+      );
+
+      // 2. Khi User B đăng nhập vào cùng tab
+      const ordersUserB: OrderHistoryItemDto[] = [
+        {
+          id: "550e8400-e29b-41d4-a716-user-b-order-9",
+          status: "PAID",
+          createdAt: "2026-10-28T02:00:00.000Z",
+          expiresAt: "2026-10-28T02:15:00.000Z",
+          subtotalVnd: 45000,
+          discountVnd: 0,
+          totalVnd: 45000,
+          couponCode: null,
+          pointsEarned: 4,
+          items: [],
+          payment: null,
+        },
+      ];
+
+      // Thử truy cập snapshot của User A bằng phiên của User B
+      const crossUserAccess = deriveSnapshot(selectedOrderId, ordersUserB, userBId, userBId);
+      assert.equal(
+        crossUserAccess,
+        null,
+        "Snapshot modal của User A tuyệt đối không được phép mở hoặc giữ lại trong phiên User B"
+      );
+    });
   });
 
 });

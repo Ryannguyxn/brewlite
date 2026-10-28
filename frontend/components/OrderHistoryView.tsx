@@ -385,7 +385,7 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
  */
 export function isOrderPayable(
   order: Pick<OrderHistoryItemDto, "status" | "expiresAt"> | null | undefined,
-  referenceTimestampMs = Date.now()
+  referenceTimestampMs?: number
 ): boolean {
   if (!order) return false;
   if (order.status !== "PENDING" && order.status !== "PAYMENT_FAILED") {
@@ -394,14 +394,18 @@ export function isOrderPayable(
   const expiresMs = Number.isFinite(Date.parse(order.expiresAt))
     ? new Date(order.expiresAt).getTime()
     : 0;
-  return expiresMs > referenceTimestampMs;
+  if (expiresMs <= 0) {
+    return false;
+  }
+  const now = referenceTimestampMs ?? Date.now();
+  return expiresMs > now;
 }
 
 export interface OrderSnapshotModalProps {
   order: OrderHistoryItemDto;
   onClose: () => void;
   onReorder: (order: OrderHistoryItemDto) => void;
-  /** Thời điểm tham chiếu (ms) để xác định đơn còn hạn hay đã hết hạn. Mặc định là Date.now() */
+  /** Thời điểm tham chiếu (ms) để xác định đơn còn hạn hay đã hết hạn. */
   referenceTimestampMs?: number;
 }
 
@@ -411,13 +415,40 @@ export function OrderSnapshotModal({
   onReorder,
   referenceTimestampMs,
 }: OrderSnapshotModalProps) {
-  const [isPayable, setIsPayable] = useState<boolean>(() =>
-    isOrderPayable(order, referenceTimestampMs ?? Date.now())
-  );
+  // Trạng thái live countdown: tự động chuyển thành true khi thời gian hiện tại vượt qua expiresAt
+  const [hasExpiredLive, setHasExpiredLive] = useState<boolean>(false);
 
   useEffect(() => {
-    setIsPayable(isOrderPayable(order, referenceTimestampMs ?? Date.now()));
-  }, [order, referenceTimestampMs]);
+    // 1. Chế độ test / SSR truyền referenceTimestampMs cố định: không kích hoạt live timer
+    if (referenceTimestampMs !== undefined) {
+      return;
+    }
+
+    const expiresMs = Number.isFinite(Date.parse(order.expiresAt))
+      ? new Date(order.expiresAt).getTime()
+      : 0;
+
+    const remainingMs = expiresMs - Date.now();
+    if (remainingMs <= 0) {
+      return;
+    }
+
+    // 2. Chế độ runtime: đặt timer tự động ẩn CTA ngay khi qua expiresAt
+    const timer = setTimeout(() => {
+      setHasExpiredLive(true);
+    }, remainingMs);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [order.id, order.status, order.expiresAt, referenceTimestampMs]);
+
+  // CTA chỉ hiển thị khi:
+  // - Trạng thái là PENDING hoặc PAYMENT_FAILED
+  // - Chưa bị hết hạn trong live timer (!hasExpiredLive)
+  // - Còn trong hạn tại thời điểm tham chiếu (isOrderPayable)
+  const isPayable =
+    !hasExpiredLive && isOrderPayable(order, referenceTimestampMs);
 
   const modalStatus = getStitchStatusBadgeConfig(order.status);
 
@@ -713,8 +744,34 @@ export default function OrderHistoryView() {
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Modal xem chi tiết Snapshot hoặc Hóa đơn điện tử (e-Invoice) của đơn hàng
-  const [selectedOrderSnapshot, setSelectedOrderSnapshot] =
-    useState<OrderHistoryItemDto | null>(null);
+  // Quản lý theo Server Truth: lưu selectedOrderId, derive selectedOrderSnapshot từ danh sách orders mới nhất của server
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+
+  const selectedOrderSnapshot = useMemo(() => {
+    if (!selectedOrderId) return null;
+    if (!isAuthenticated || !currentAuthUserId) return null;
+    if (
+      loadedOwnerUserId &&
+      loadedOwnerUserId !== currentAuthUserId &&
+      loadedOwnerUserId !== "mock-preview"
+    ) {
+      return null;
+    }
+    return orders.find((o) => o.id === selectedOrderId) ?? null;
+  }, [
+    selectedOrderId,
+    orders,
+    isAuthenticated,
+    currentAuthUserId,
+    loadedOwnerUserId,
+  ]);
+
+  const setSelectedOrderSnapshot = useCallback(
+    (orderOrNull: OrderHistoryItemDto | null) => {
+      setSelectedOrderId(orderOrNull ? orderOrNull.id : null);
+    },
+    []
+  );
 
   // Toast thông báo thao tác trên màn hình Lịch sử đơn hàng (vị trí top-right chuẩn Stitch)
   const [toastMessage, setToastMessage] = useState<string>("");
@@ -841,6 +898,7 @@ export default function OrderHistoryView() {
     reloadKey,
     verifySession,
     openAuthModal,
+    setSelectedOrderSnapshot,
   ]);
 
   const statusCounts = useMemo(

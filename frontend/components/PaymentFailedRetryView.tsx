@@ -85,7 +85,7 @@ export function PaymentFailedRetryView({
   // Xử lý submit thanh toán lại
   const handleRetrySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submittingRef.current || isSubmitting || isExpiredState) return;
+    if (submittingRef.current || isSubmitting || isExpiredState || order.status === "CANCELLED") return;
 
     if (!token) {
       setSubmitError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.");
@@ -162,6 +162,36 @@ export function PaymentFailedRetryView({
       } else if (msg === "UNAUTHORIZED" || (err as { statusCode?: number })?.statusCode === 401) {
         setIsNetworkUncertain(false);
         setSubmitError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.");
+      } else if (
+        msg.includes("INVALID_TRANSITION") ||
+        (err as { code?: string })?.code === "INVALID_TRANSITION" ||
+        (err as { statusCode?: number })?.statusCode === 409
+      ) {
+        setIsNetworkUncertain(false);
+        // Khi backend trả 409 INVALID_TRANSITION do order đã đổi state (PAID, CANCELLED,...):
+        // Lập tức refetch GET /orders/me từ server truth và khóa/chuyển UI theo state server mới
+        let newStatus: string | undefined;
+        if (onRetryFailure) {
+          const reloaded = await onRetryFailure({} as PaymentApiResponse);
+          if (reloaded) {
+            newStatus = reloaded.status;
+            const isSuccess =
+              reloaded.status === "PAID" ||
+              reloaded.status === "PREPARING" ||
+              reloaded.status === "READY" ||
+              reloaded.status === "COMPLETED";
+            if (isSuccess && onRetrySuccess) {
+              await onRetrySuccess({} as PaymentApiResponse);
+            }
+          }
+        }
+        setSubmitError(
+          newStatus === "CANCELLED"
+            ? "Đơn hàng đã bị hủy trên hệ thống (INVALID_TRANSITION). Không thể tiếp tục thanh toán."
+            : newStatus === "PAID" || newStatus === "PREPARING" || newStatus === "READY" || newStatus === "COMPLETED"
+            ? "Đơn hàng đã được thanh toán thành công trước đó (INVALID_TRANSITION). Đang chuyển hướng..."
+            : "Trạng thái đơn hàng đã thay đổi trên máy chủ (INVALID_TRANSITION). Đã đồng bộ lại dữ liệu mới nhất."
+        );
       } else {
         setIsNetworkUncertain(false);
         if (msg.includes("IDEMPOTENCY_KEY_CONFLICT")) {
@@ -467,7 +497,7 @@ export function PaymentFailedRetryView({
                 </span>
               </div>
 
-              {isExpiredState ? (
+              {isExpiredState || order.status === "CANCELLED" ? (
                 <div className="text-center py-8 space-y-3">
                   <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mx-auto text-on-surface-variant">
                     <span className="material-symbols-outlined text-[32px]">block</span>

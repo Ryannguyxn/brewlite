@@ -312,8 +312,13 @@ export function validateAuthMeResponse(raw: unknown): AuthMeProfile {
   if (typeof obj.email !== "string" || !obj.email.includes("@")) {
     throw new Error("Trường 'email' từ GET /auth/me không hợp lệ.");
   }
+  // Bắt buộc phải có trường 'fullName' trong JSON payload (chấp nhận null hoặc chuỗi, từ chối nếu thiếu hẳn)
+  if (!("fullName" in obj) || obj.fullName === undefined) {
+    throw new Error("Phản hồi từ GET /auth/me thiếu trường bắt buộc 'fullName'.");
+  }
+
   let fullName: string | null = null;
-  if (obj.fullName !== null && obj.fullName !== undefined) {
+  if (obj.fullName !== null) {
     if (typeof obj.fullName !== "string") {
       throw new Error("Trường 'fullName' từ GET /auth/me phải là chuỗi hoặc null.");
     }

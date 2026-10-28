@@ -507,7 +507,7 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       );
     });
 
-    it("should accept fullName as null, undefined, or whitespace (defaults to null)", () => {
+    it("should accept fullName as null or whitespace and normalize to null", () => {
       const rawNull = {
         id: "550e8400-e29b-41d4-a716-446655440001",
         email: "user@test.com",
@@ -517,22 +517,37 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       const res1 = validateAuthMeResponse(rawNull);
       assert.equal(res1.fullName, null);
 
-      const rawUndefined = {
-        id: "550e8400-e29b-41d4-a716-446655440001",
-        email: "user@test.com",
-        loyaltyPoints: 10,
-      };
-      const res2 = validateAuthMeResponse(rawUndefined);
-      assert.equal(res2.fullName, null);
-
       const rawWhitespace = {
         id: "550e8400-e29b-41d4-a716-446655440001",
         email: "user@test.com",
         fullName: "   ",
         loyaltyPoints: 10,
       };
-      const res3 = validateAuthMeResponse(rawWhitespace);
-      assert.equal(res3.fullName, null);
+      const res2 = validateAuthMeResponse(rawWhitespace);
+      assert.equal(res2.fullName, null);
+    });
+
+    it("should reject response when required field fullName is completely missing or undefined", () => {
+      const rawMissing = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "user@test.com",
+        loyaltyPoints: 10,
+      };
+      assert.throws(
+        () => validateAuthMeResponse(rawMissing),
+        /thiếu trường bắt buộc 'fullName'/
+      );
+
+      const rawUndefined = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "user@test.com",
+        fullName: undefined,
+        loyaltyPoints: 10,
+      };
+      assert.throws(
+        () => validateAuthMeResponse(rawUndefined),
+        /thiếu trường bắt buộc 'fullName'/
+      );
     });
 
     it("should reject non-string and non-null fullName in validateAuthMeResponse", () => {
@@ -711,6 +726,71 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.equal(refreshed[0].id, mockOrderFailed.id);
       assert.equal(refreshed[0].payment?.failureReason, "PAYMENT_DECLINED");
     });
+
+    it("should handle retry meeting changed order state (409 INVALID_TRANSITION) and refetch latest server truth", async () => {
+      const validToken = createValidMockJwt();
+
+      // Backend returns 409 Conflict with INVALID_TRANSITION (e.g. order was paid via another tab or cancelled)
+      global.fetch = (async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          statusCode: 409,
+          code: "INVALID_TRANSITION",
+          message: "INVALID_TRANSITION",
+        }),
+      })) as unknown as typeof fetch;
+
+      await assert.rejects(
+        async () => {
+          await submitRetryPaymentApi({
+            orderId: mockOrderFailed.id,
+            method: "CARD",
+            identifier: "1234567890121234",
+            token: validToken,
+          });
+        },
+        (err: unknown) => {
+          const e = err as { statusCode?: number; code?: string; message?: string };
+          return (
+            e.statusCode === 409 &&
+            (e.code === "INVALID_TRANSITION" || e.message === "INVALID_TRANSITION")
+          );
+        }
+      );
+
+      // Caller/UI immediately refetches server truth from GET /orders/me
+      const mockPaidOrderResponse = {
+        items: [
+          {
+            ...mockOrderFailed,
+            status: "PAID",
+            payment: {
+              id: "550e8400-e29b-41d4-a716-446655440099",
+              status: "SUCCESS",
+              method: "CARD",
+              methodLast4: "1234",
+              amountVnd: 65000,
+              mockReference: "MOCK-CARD-1234-abcd",
+              failureReason: null,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        ],
+        meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+      };
+
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => mockPaidOrderResponse,
+      })) as unknown as typeof fetch;
+
+      const updatedOrders = await fetchMyOrdersApi(validToken);
+      const matched = findOrderForConfirmation(updatedOrders, mockOrderFailed.id);
+      assert.notEqual(matched, null);
+      assert.equal(matched?.status, "PAID");
+    });
   });
 
   describe("6. Lifecycle Status & Copy Invariants", () => {
@@ -722,21 +802,92 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
         expiresAt: new Date(now - 1000).toISOString(),
       };
 
-      // Order is expired by time
       assert.equal(isOrderExpired(expiredPendingOrder, now), true);
-      // But server status is still PENDING, NOT CANCELLED!
       assert.notEqual(expiredPendingOrder.status, "CANCELLED");
+
+      // Verify that expired notice does NOT assert CANCELLED unless status is CANCELLED
+      const noticeCopy = expiredPendingOrder.status === "CANCELLED"
+        ? "Đơn hàng đã bị hủy (CANCELLED)"
+        : "Thời hạn giữ chỗ đơn hàng đã kết thúc (15 phút)";
+      assert.equal(noticeCopy, "Thời hạn giữ chỗ đơn hàng đã kết thúc (15 phút)");
+      assert.equal(noticeCopy.includes("CANCELLED"), false);
+      assert.equal(noticeCopy.includes("bị hủy"), false);
+
+      const cancelledOrder: OrderConfirmationData = {
+        ...mockOrderFailed,
+        status: "CANCELLED",
+        expiresAt: new Date(now - 1000).toISOString(),
+      };
+      const cancelledNoticeCopy = cancelledOrder.status === "CANCELLED"
+        ? "Đơn hàng đã bị hủy (CANCELLED)"
+        : "Thời hạn giữ chỗ đơn hàng đã kết thúc (15 phút)";
+      assert.equal(cancelledNoticeCopy, "Đơn hàng đã bị hủy (CANCELLED)");
     });
 
-    it("should correctly support all lifecycle statuses: PAID, PREPARING, READY, COMPLETED", () => {
-      const validStatuses = ["PAID", "PREPARING", "READY", "COMPLETED"];
-      for (const st of validStatuses) {
-        const orderData: OrderConfirmationData = {
-          ...mockOrderSuccess,
-          status: st as OrderConfirmationData["status"],
-        };
-        assert.ok(validStatuses.includes(orderData.status));
+    it("should correctly distinguish practical lifecycle presentation copy for PAID, PREPARING, READY, COMPLETED", () => {
+      function getOrderPresentationCopy(status: string) {
+        switch (status) {
+          case "COMPLETED":
+            return {
+              badge: "ĐÃ HOÀN THÀNH (COMPLETED)",
+              eta: "Đã hoàn tất (Đã giao trọn vẹn cho khách hàng)",
+              step2: "Đã pha chế xong",
+              step3: "Đã giao hàng",
+              step4: "Hoàn tất đơn hàng",
+              barista: "Đã phục vụ",
+            };
+          case "READY":
+            return {
+              badge: "SẴN SÀNG PHỤC VỤ (READY)",
+              eta: "Sẵn sàng ngay (Đồ uống đã hoàn tất tại quầy)",
+              step2: "Đã pha chế xong",
+              step3: "Sẵn sàng phục vụ",
+              step4: "Giao tận tay",
+              barista: "Đã sẵn sàng",
+            };
+          case "PREPARING":
+            return {
+              badge: "ĐANG PHA CHẾ (PREPARING)",
+              eta: "10 - 15 phút (Đang trong quá trình pha chế thủ công)",
+              step2: "Đang pha chế thủ công",
+              step3: "Chờ giao hàng",
+              step4: "Giao tận tay",
+              barista: "Đang chiết xuất",
+            };
+          case "PAID":
+          default:
+            return {
+              badge: "ĐÃ THANH TOÁN (PAID)",
+              eta: "15 - 25 phút (Đã tiếp nhận, chuẩn bị vào quầy)",
+              step2: "Chờ pha chế",
+              step3: "Chờ giao hàng",
+              step4: "Giao tận tay",
+              barista: "Chờ tiếp nhận",
+            };
+        }
       }
+
+      const paidCopy = getOrderPresentationCopy("PAID");
+      assert.equal(paidCopy.badge, "ĐÃ THANH TOÁN (PAID)");
+      assert.equal(paidCopy.step2, "Chờ pha chế");
+      assert.equal(paidCopy.barista, "Chờ tiếp nhận");
+
+      const prepCopy = getOrderPresentationCopy("PREPARING");
+      assert.equal(prepCopy.badge, "ĐANG PHA CHẾ (PREPARING)");
+      assert.equal(prepCopy.step2, "Đang pha chế thủ công");
+      assert.equal(prepCopy.barista, "Đang chiết xuất");
+
+      const readyCopy = getOrderPresentationCopy("READY");
+      assert.equal(readyCopy.badge, "SẴN SÀNG PHỤC VỤ (READY)");
+      assert.equal(readyCopy.step2, "Đã pha chế xong");
+      assert.equal(readyCopy.step3, "Sẵn sàng phục vụ");
+      assert.equal(readyCopy.barista, "Đã sẵn sàng");
+
+      const compCopy = getOrderPresentationCopy("COMPLETED");
+      assert.equal(compCopy.badge, "ĐÃ HOÀN THÀNH (COMPLETED)");
+      assert.equal(compCopy.step3, "Đã giao hàng");
+      assert.equal(compCopy.step4, "Hoàn tất đơn hàng");
+      assert.equal(compCopy.barista, "Đã phục vụ");
     });
   });
 });

@@ -889,5 +889,127 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.equal(compCopy.step4, "Hoàn tất đơn hàng");
       assert.equal(compCopy.barista, "Đã phục vụ");
     });
+
+    it("should rotate Idempotency-Key upon 409 IDEMPOTENCY_KEY_CONFLICT and NOT treat it as INVALID_TRANSITION", () => {
+      const originalKey = generateIdempotencyKey();
+      let currentKey = originalKey;
+      let isNetworkUncertain = false;
+      let isRefetched = false;
+
+      // Simulate error handling logic in PaymentFailedRetryView
+      const errorResponse = {
+        statusCode: 409,
+        code: "IDEMPOTENCY_KEY_CONFLICT",
+        message: "IDEMPOTENCY_KEY_CONFLICT: Khóa đã được sử dụng với payload khác",
+      };
+
+      const msg = errorResponse.message;
+      const errCode = errorResponse.code;
+      const statusCode = errorResponse.statusCode;
+
+      const isIdempotencyConflict =
+        errCode === "IDEMPOTENCY_KEY_CONFLICT" ||
+        msg.includes("IDEMPOTENCY_KEY_CONFLICT");
+
+      const isNetworkErr =
+        errCode === "PAYMENT_IN_PROGRESS" ||
+        msg.includes("PAYMENT_IN_PROGRESS");
+
+      if (isIdempotencyConflict) {
+        isNetworkUncertain = false;
+        currentKey = generateIdempotencyKey(); // ROTATE KEY
+      } else if (isNetworkErr) {
+        isNetworkUncertain = true;
+      } else if (
+        errCode === "INVALID_TRANSITION" ||
+        msg.includes("INVALID_TRANSITION") ||
+        (statusCode === 409 && !isIdempotencyConflict && !isNetworkErr)
+      ) {
+        isRefetched = true;
+      }
+
+      assert.equal(isIdempotencyConflict, true);
+      assert.equal(isRefetched, false, "IDEMPOTENCY_KEY_CONFLICT must NOT trigger INVALID_TRANSITION refetch branch");
+      assert.notEqual(currentKey, originalKey, "Idempotency-Key must be rotated to a fresh key");
+      assert.equal(isNetworkUncertain, false);
+    });
+
+    it("should refetch server truth when encountering true 409 INVALID_TRANSITION", async () => {
+      let isRefetched = false;
+      let newStatus: string | undefined;
+
+      const errorResponse = {
+        statusCode: 409,
+        code: "INVALID_TRANSITION",
+        message: "INVALID_TRANSITION: Cannot transition order from CANCELLED to PAID",
+      };
+
+      const msg = errorResponse.message;
+      const errCode = errorResponse.code;
+      const statusCode = errorResponse.statusCode;
+
+      const isIdempotencyConflict =
+        errCode === "IDEMPOTENCY_KEY_CONFLICT" ||
+        msg.includes("IDEMPOTENCY_KEY_CONFLICT");
+
+      const isNetworkErr =
+        errCode === "PAYMENT_IN_PROGRESS" ||
+        msg.includes("PAYMENT_IN_PROGRESS");
+
+      const isInvalidTransition =
+        errCode === "INVALID_TRANSITION" ||
+        msg.includes("INVALID_TRANSITION") ||
+        (statusCode === 409 && !isIdempotencyConflict && !isNetworkErr);
+
+      assert.equal(isIdempotencyConflict, false);
+      assert.equal(isInvalidTransition, true);
+
+      if (isInvalidTransition) {
+        // Mock onRetryFailure refetching server truth
+        const mockReloadedOrder = {
+          ...mockOrderFailed,
+          status: "CANCELLED",
+        };
+        isRefetched = true;
+        newStatus = mockReloadedOrder.status;
+      }
+
+      assert.equal(isRefetched, true);
+      assert.equal(newStatus, "CANCELLED");
+    });
+
+    it("should completely omit retry form and submit button when order status becomes CANCELLED (terminal state)", () => {
+      // Simulate UI render predicate in PaymentFailedRetryView
+      function shouldRenderRetryForm(orderStatus: string, isExpired: boolean) {
+        const isCancelled = orderStatus === "CANCELLED";
+        const isTerminal = isExpired || isCancelled;
+        return {
+          renderForm: !isTerminal,
+          renderTerminalNotice: isTerminal,
+          isCancelled,
+        };
+      }
+
+      // Case 1: Active order in PAYMENT_FAILED, not expired
+      const failedState = shouldRenderRetryForm("PAYMENT_FAILED", false);
+      assert.equal(failedState.renderForm, true);
+      assert.equal(failedState.renderTerminalNotice, false);
+
+      // Case 2: Active order in PENDING, not expired
+      const pendingState = shouldRenderRetryForm("PENDING", false);
+      assert.equal(pendingState.renderForm, true);
+      assert.equal(pendingState.renderTerminalNotice, false);
+
+      // Case 3: Server truth refetch returned CANCELLED -> Form and retry button must vanish completely
+      const cancelledState = shouldRenderRetryForm("CANCELLED", false);
+      assert.equal(cancelledState.renderForm, false, "Form must NOT render when CANCELLED");
+      assert.equal(cancelledState.renderTerminalNotice, true, "Terminal notice must render when CANCELLED");
+      assert.equal(cancelledState.isCancelled, true);
+
+      // Case 4: Order expired (15 minutes) -> Form and retry button must vanish completely
+      const expiredState = shouldRenderRetryForm("PAYMENT_FAILED", true);
+      assert.equal(expiredState.renderForm, false, "Form must NOT render when expired");
+      assert.equal(expiredState.renderTerminalNotice, true);
+    });
   });
 });

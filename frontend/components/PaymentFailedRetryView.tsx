@@ -29,23 +29,38 @@ export function PaymentFailedRetryView({
   onRetryFailure,
 }: PaymentFailedRetryViewProps) {
   const router = useRouter();
+
+  // State lưu trữ dữ liệu order thực tế trên UI (cập nhật ngay khi prop đổi hoặc khi refetch server truth)
+  const [currentOrder, setCurrentOrder] = useState<OrderConfirmationData>(order);
+  const [prevOrderProp, setPrevOrderProp] = useState<OrderConfirmationData>(order);
+  if (order !== prevOrderProp) {
+    setPrevOrderProp(order);
+    setCurrentOrder(order);
+  }
+
+  const activeOrder = currentOrder || order;
+  const isCancelled = activeOrder.status === "CANCELLED";
+
   // Trạng thái đếm ngược 15 phút
   const [remainingSeconds, setRemainingSeconds] = useState<number>(() =>
-    computeOrderRemainingSeconds(order.expiresAt)
+    computeOrderRemainingSeconds(activeOrder.expiresAt)
   );
   const [isExpiredState, setIsExpiredState] = useState<boolean>(() =>
-    isOrderExpired(order)
+    isOrderExpired(activeOrder)
   );
 
-  // Đồng bộ state trực tiếp khi order prop thay đổi (React Pattern: adjust state during render)
-  const [prevOrderId, setPrevOrderId] = useState<string>(order.id);
-  const [prevExpiresAt, setPrevExpiresAt] = useState<string>(order.expiresAt);
-  if (order.id !== prevOrderId || order.expiresAt !== prevExpiresAt) {
-    setPrevOrderId(order.id);
-    setPrevExpiresAt(order.expiresAt);
-    setRemainingSeconds(computeOrderRemainingSeconds(order.expiresAt));
-    setIsExpiredState(isOrderExpired(order));
+  // Đồng bộ đếm ngược khi activeOrder thay đổi id hoặc expiresAt
+  const [prevOrderId, setPrevOrderId] = useState<string>(activeOrder.id);
+  const [prevExpiresAt, setPrevExpiresAt] = useState<string>(activeOrder.expiresAt);
+  if (activeOrder.id !== prevOrderId || activeOrder.expiresAt !== prevExpiresAt) {
+    setPrevOrderId(activeOrder.id);
+    setPrevExpiresAt(activeOrder.expiresAt);
+    setRemainingSeconds(computeOrderRemainingSeconds(activeOrder.expiresAt));
+    setIsExpiredState(isOrderExpired(activeOrder));
   }
+
+  // Terminal state: Quá hạn 15 phút hoặc đơn hàng đã bị CANCELLED từ máy chủ
+  const isTerminal = isExpiredState || isCancelled;
 
   // Form thử lại
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodType>("CARD");
@@ -66,7 +81,7 @@ export function PaymentFailedRetryView({
     if (isExpiredState) return;
 
     const interval = setInterval(() => {
-      const remaining = computeOrderRemainingSeconds(order.expiresAt);
+      const remaining = computeOrderRemainingSeconds(activeOrder.expiresAt);
       setRemainingSeconds(remaining);
       if (remaining <= 0) {
         setIsExpiredState(true);
@@ -75,9 +90,9 @@ export function PaymentFailedRetryView({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [order.expiresAt, isExpiredState]);
+  }, [activeOrder.expiresAt, isExpiredState]);
 
-  const formattedOrderId = `#BL-${order.id.slice(0, 8).toUpperCase()}`;
+  const formattedOrderId = `#BL-${activeOrder.id.slice(0, 8).toUpperCase()}`;
 
   // Tỷ lệ % thời gian còn lại (trên tổng 15 phút = 900s)
   const percentLeft = Math.max(0, Math.min(100, Math.round((remainingSeconds / 900) * 100)));
@@ -85,7 +100,7 @@ export function PaymentFailedRetryView({
   // Xử lý submit thanh toán lại
   const handleRetrySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submittingRef.current || isSubmitting || isExpiredState || order.status === "CANCELLED") return;
+    if (submittingRef.current || isSubmitting || isTerminal) return;
 
     if (!token) {
       setSubmitError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.");
@@ -110,12 +125,12 @@ export function PaymentFailedRetryView({
 
     try {
       const result = await submitRetryPaymentApi({
-        orderId: order.id,
+        orderId: activeOrder.id,
         method: selectedMethod,
         identifier: cleanNumber,
         token,
         idempotencyKey: currentIdempotencyKey,
-        expectedAmountVnd: order.totalVnd,
+        expectedAmountVnd: activeOrder.totalVnd,
       });
 
       if (result.paymentStatus === "SUCCESS") {
@@ -124,48 +139,71 @@ export function PaymentFailedRetryView({
           await onRetrySuccess(result);
         } else {
           // Chuyển hướng sang OrderSuccessView
-          router.push(`/order-confirmation?orderId=${order.id}`);
+          router.push(`/order-confirmation?orderId=${activeOrder.id}`);
         }
       } else {
         // Giao dịch FAILED dứt khoát từ server (PAYMENT_DECLINED)
         setIsNetworkUncertain(false);
+        // Mỗi lần backend reject dứt khoát thì tạo key mới cho lần thử kế tiếp
         setCurrentIdempotencyKey(generateIdempotencyKey());
 
         // Tải lại server truth từ GET /orders/me trước khi quyết định trạng thái tiếp theo
-        let latestOrder = order;
+        let latestOrder = activeOrder;
         if (onRetryFailure) {
           const reloaded = await onRetryFailure(result);
           if (reloaded) {
+            setCurrentOrder(reloaded);
             latestOrder = reloaded;
           }
         }
 
         setSubmitError(
-          `Giao dịch vẫn bị từ chối (${result.failureReason || latestOrder.payment?.failureReason || "PAYMENT_DECLINED"}). Vui lòng thử phương thức khác.`
+          latestOrder.status === "CANCELLED"
+            ? "Đơn hàng đã bị hủy trên hệ thống. Không thể tiếp tục thanh toán."
+            : `Giao dịch vẫn bị từ chối (${result.failureReason || latestOrder.payment?.failureReason || "PAYMENT_DECLINED"}). Vui lòng thử phương thức khác.`
         );
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      const errObj = typeof err === "object" && err !== null ? (err as Record<string, unknown>) : {};
+      const errCode = (errObj.code || "") as string;
+      const statusCode = (errObj.statusCode || 0) as number;
+
+      // 1. Phân loại IDEMPOTENCY_KEY_CONFLICT trước tiên (kể cả khi HTTP 409):
+      // Tuyệt đối không coi là INVALID_TRANSITION. Phải xoay (rotate) Idempotency-Key mới ngay lập tức
+      // để tránh việc người dùng bị kẹt retry mãi với key cũ bị xung đột.
+      const isIdempotencyConflict =
+        errCode === "IDEMPOTENCY_KEY_CONFLICT" ||
+        msg.includes("IDEMPOTENCY_KEY_CONFLICT");
+
+      // 2. Lỗi mạng hoặc 409 PAYMENT_IN_PROGRESS: Bảo lưu Idempotency-Key để retry an toàn
       const isNetworkErr =
         err instanceof TypeError ||
         msg.includes("fetch") ||
         msg.includes("Network") ||
         msg.includes("Failed to fetch") ||
+        errCode === "PAYMENT_IN_PROGRESS" ||
         msg.includes("PAYMENT_IN_PROGRESS");
 
-      if (isNetworkErr) {
-        // Lỗi mạng hoặc 409 PAYMENT_IN_PROGRESS: BẢO LƯU Idempotency-Key để retry an toàn
+      if (isIdempotencyConflict) {
+        setIsNetworkUncertain(false);
+        const nextKey = generateIdempotencyKey();
+        setCurrentIdempotencyKey(nextKey);
+        setSubmitError(
+          "Xung đột khóa giao dịch (IDEMPOTENCY_KEY_CONFLICT). Hệ thống đã tự động tạo mã giao dịch mới, vui lòng bấm thử lại."
+        );
+      } else if (isNetworkErr) {
         setIsNetworkUncertain(true);
         setSubmitError(
           "Không thể kết nối đến máy chủ hoặc giao dịch đang xử lý. Idempotency-Key đã được giữ nguyên để bạn có thể thử lại an toàn."
         );
-      } else if (msg === "UNAUTHORIZED" || (err as { statusCode?: number })?.statusCode === 401) {
+      } else if (msg === "UNAUTHORIZED" || statusCode === 401) {
         setIsNetworkUncertain(false);
         setSubmitError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.");
       } else if (
+        errCode === "INVALID_TRANSITION" ||
         msg.includes("INVALID_TRANSITION") ||
-        (err as { code?: string })?.code === "INVALID_TRANSITION" ||
-        (err as { statusCode?: number })?.statusCode === 409
+        (statusCode === 409 && !isIdempotencyConflict && !msg.includes("PAYMENT_IN_PROGRESS"))
       ) {
         setIsNetworkUncertain(false);
         // Khi backend trả 409 INVALID_TRANSITION do order đã đổi state (PAID, CANCELLED,...):
@@ -174,6 +212,7 @@ export function PaymentFailedRetryView({
         if (onRetryFailure) {
           const reloaded = await onRetryFailure({} as PaymentApiResponse);
           if (reloaded) {
+            setCurrentOrder(reloaded);
             newStatus = reloaded.status;
             const isSuccess =
               reloaded.status === "PAID" ||
@@ -194,9 +233,6 @@ export function PaymentFailedRetryView({
         );
       } else {
         setIsNetworkUncertain(false);
-        if (msg.includes("IDEMPOTENCY_KEY_CONFLICT")) {
-          setCurrentIdempotencyKey(generateIdempotencyKey());
-        }
         setSubmitError(`Lỗi thanh toán: ${msg}`);
       }
     } finally {
@@ -230,9 +266,9 @@ export function PaymentFailedRetryView({
       {/* Hero Notification Banner */}
       <section
         className={`w-full border-b border-[#EFECE6] py-8 ${
-          isExpiredState || order.status === "CANCELLED"
+          isTerminal
             ? "bg-surface-container"
-            : order.status === "PENDING"
+            : activeOrder.status === "PENDING"
             ? "bg-[#FFFBEB]"
             : "bg-[#FEF2F2]"
         }`}
@@ -242,19 +278,19 @@ export function PaymentFailedRetryView({
             <div className="flex items-start gap-4">
               <div
                 className={`w-14 h-14 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm border ${
-                  isExpiredState || order.status === "CANCELLED"
+                  isTerminal
                     ? "bg-surface-container-highest text-on-surface-variant border-outline-variant"
-                    : order.status === "PENDING"
+                    : activeOrder.status === "PENDING"
                     ? "bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]"
                     : "bg-[#FEE2E2] text-[#DC2626] border-[#FECACA]"
                 }`}
               >
                 <span className="material-symbols-outlined text-[32px]">
-                  {isExpiredState
-                    ? "schedule"
-                    : order.status === "CANCELLED"
+                  {isCancelled
                     ? "cancel"
-                    : order.status === "PENDING"
+                    : isExpiredState
+                    ? "schedule"
+                    : activeOrder.status === "PENDING"
                     ? "hourglass_top"
                     : "error"}
                 </span>
@@ -262,51 +298,49 @@ export function PaymentFailedRetryView({
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-3">
                   <h1 className="font-headline-md text-2xl md:text-3xl font-bold text-on-surface">
-                    {isExpiredState
-                      ? "Đơn hàng đã hết hạn thanh toán"
-                      : order.status === "PENDING"
-                      ? "Đơn hàng đang chờ thanh toán"
-                      : order.status === "CANCELLED"
+                    {isCancelled
                       ? "Đơn hàng đã bị hủy"
+                      : isExpiredState
+                      ? "Đơn hàng đã hết hạn thanh toán"
+                      : activeOrder.status === "PENDING"
+                      ? "Đơn hàng đang chờ thanh toán"
                       : "Thanh toán thất bại & Thử lại"}
                   </h1>
                   <span
                     id="orderStatusBadge"
                     className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
-                      isExpiredState || order.status === "CANCELLED"
+                      isTerminal
                         ? "bg-surface-container-highest text-on-surface-variant border-outline-variant"
-                        : order.status === "PENDING"
+                        : activeOrder.status === "PENDING"
                         ? "bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]"
                         : "bg-[#FEE2E2] text-[#DC2626] border-[#FECACA]"
                     }`}
                   >
                     <span
                       className={`w-2 h-2 rounded-full ${
-                        isExpiredState || order.status === "CANCELLED"
+                        isTerminal
                           ? "bg-on-surface-variant"
-                          : order.status === "PENDING"
+                          : activeOrder.status === "PENDING"
                           ? "bg-[#D97706]"
                           : "bg-[#DC2626]"
                       }`}
                     ></span>
                     {/* Hiển thị chính xác trạng thái từ server, không tự ý gán ép CANCELLED/EXPIRED */}
-                    {isExpiredState
-                      ? order.status === "CANCELLED"
-                        ? "CANCELLED (ĐÃ HỦY)"
-                        : `${order.status} (QUÁ HẠN 15 PHÚT)`
-                      : order.status === "PENDING"
-                      ? "PENDING (CHỜ THANH TOÁN)"
-                      : order.status === "CANCELLED"
+                    {isCancelled
                       ? "CANCELLED (ĐÃ HỦY)"
+                      : isExpiredState
+                      ? `${activeOrder.status} (QUÁ HẠN 15 PHÚT)`
+                      : activeOrder.status === "PENDING"
+                      ? "PENDING (CHỜ THANH TOÁN)"
                       : "PAYMENT_FAILED (BỊ TỪ CHỐI)"}
                   </span>
                 </div>
                 <p className="text-sm text-on-surface-variant max-w-2xl leading-relaxed">
-                  {order.status === "CANCELLED"
+                  {isCancelled
                     ? "Đơn hàng này đã bị hủy trên hệ thống và tồn kho đã được hoàn trả."
                     : isExpiredState
                     ? "Thời gian giữ chỗ tồn kho (15 phút) đã kết thúc. Bạn không thể tiếp tục thực hiện thanh toán cho đơn hàng này."
-                    : order.status === "PENDING"
+                    : activeOrder.status === "PENDING"
                     ? "Đơn hàng của bạn đang ở trạng thái chờ thanh toán. Vui lòng chọn phương thức Thẻ hoặc Ví để hoàn tất trong thời hạn 15 phút."
                     : "Giao dịch thanh toán chưa thể hoàn tất. Đơn hàng của bạn đang được bảo lưu tạm thời, bạn có thể đổi phương thức và thử lại ngay."}
                 </p>
@@ -333,10 +367,10 @@ export function PaymentFailedRetryView({
                 <span
                   id="countdown-timer"
                   className={`font-mono text-sm font-bold ${
-                    isExpiredState ? "text-error" : "text-primary"
+                    isTerminal ? "text-error" : "text-primary"
                   }`}
                 >
-                  {formatRemainingTime(remainingSeconds)}
+                  {isCancelled ? "00:00" : formatRemainingTime(remainingSeconds)}
                 </span>
               </div>
               <div className="px-3">
@@ -344,7 +378,7 @@ export function PaymentFailedRetryView({
                   Tổng tiền
                 </span>
                 <span className="text-sm font-bold text-primary">
-                  {formatVnd(order.totalVnd)}
+                  {formatVnd(activeOrder.totalVnd)}
                 </span>
               </div>
             </div>
@@ -362,24 +396,32 @@ export function PaymentFailedRetryView({
           <div className="flex items-center gap-3.5 w-full sm:w-auto">
             <div
               className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                isExpiredState
+                isTerminal
                   ? "bg-error-container text-on-error-container"
                   : "bg-tertiary-fixed text-tertiary"
               }`}
             >
-              <span className="material-symbols-outlined text-[24px]">timer</span>
+              <span className="material-symbols-outlined text-[24px]">
+                {isCancelled ? "cancel" : "timer"}
+              </span>
             </div>
             <div>
               <span className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold block">
-                {isExpiredState ? "Đơn hàng đã hết hiệu lực" : "Thời gian giữ chỗ còn lại"}
+                {isCancelled
+                  ? "Đơn hàng đã kết thúc"
+                  : isExpiredState
+                  ? "Đơn hàng đã hết hiệu lực"
+                  : "Thời gian giữ chỗ còn lại"}
               </span>
               <div className="flex items-center gap-2">
                 <span className="text-lg font-bold text-on-surface">
-                  {isExpiredState
+                  {isCancelled
+                    ? "Đã bị hủy từ máy chủ"
+                    : isExpiredState
                     ? "Đã quá hạn 15 phút"
                     : `Còn ${formatRemainingTime(remainingSeconds)}`}
                 </span>
-                {!isExpiredState && (
+                {!isTerminal && (
                   <span className="text-xs text-tertiary font-medium">
                     (Coupon &amp; tồn kho đang được giữ)
                   </span>
@@ -388,7 +430,7 @@ export function PaymentFailedRetryView({
             </div>
           </div>
 
-          {!isExpiredState && (
+          {!isTerminal && (
             <div className="w-full sm:w-64 space-y-1">
               <div className="flex justify-between text-[11px] text-on-surface-variant">
                 <span>Tiến trình giữ đơn</span>
@@ -408,32 +450,32 @@ export function PaymentFailedRetryView({
         <div
           id="orderNoticeBanner"
           className={`p-4 rounded-xl border flex items-start gap-3 ${
-            isExpiredState || order.status === "CANCELLED"
+            isTerminal
               ? "bg-surface-container-high border-outline-variant/40 text-on-surface"
-              : order.status === "PENDING"
+              : activeOrder.status === "PENDING"
               ? "bg-[#FFFBEB] border-[#FDE68A] text-[#92400E]"
               : "bg-[#FEF2F2] border-[#FECACA] text-[#991B1B]"
           }`}
         >
           <span
             className={`material-symbols-outlined text-[22px] flex-shrink-0 mt-0.5 ${
-              isExpiredState || order.status === "CANCELLED"
+              isTerminal
                 ? "text-on-surface-variant"
-                : order.status === "PENDING"
+                : activeOrder.status === "PENDING"
                 ? "text-[#D97706]"
                 : "text-[#DC2626]"
             }`}
           >
-            {isExpiredState
-              ? "timer_off"
-              : order.status === "CANCELLED"
+            {isCancelled
               ? "block"
-              : order.status === "PENDING"
+              : isExpiredState
+              ? "timer_off"
+              : activeOrder.status === "PENDING"
               ? "info"
               : "warning"}
           </span>
           <div className="space-y-0.5 text-xs">
-            {order.status === "CANCELLED" ? (
+            {isCancelled ? (
               <>
                 <p className="font-bold">
                   Đơn hàng đã bị hủy (CANCELLED)
@@ -451,7 +493,7 @@ export function PaymentFailedRetryView({
                   Theo quy định của hệ thống, đơn hàng chỉ được giữ tối đa 15 phút kể từ lúc tạo. Vui lòng quay về thực đơn để tạo đơn hàng mới.
                 </p>
               </>
-            ) : order.status === "PENDING" ? (
+            ) : activeOrder.status === "PENDING" ? (
               <>
                 <p className="font-bold">
                   Đơn hàng đang chờ thanh toán (PENDING)
@@ -465,7 +507,7 @@ export function PaymentFailedRetryView({
                 <p className="font-bold">
                   Lý do thanh toán thất bại:{" "}
                   <span className="font-mono">
-                    {order.payment?.failureReason || "PAYMENT_DECLINED (Thẻ bị từ chối)"}
+                    {activeOrder.payment?.failureReason || "PAYMENT_DECLINED (Thẻ bị từ chối)"}
                   </span>
                 </p>
                 <p className="leading-relaxed">
@@ -476,37 +518,50 @@ export function PaymentFailedRetryView({
           </div>
         </div>
 
-        {/* Main Grid: Left (7 cols - Retry Form), Right (5 cols - Summary) */}
+        {/* Main Grid: Left (7 cols - Retry Form hoặc Terminal State View), Right (5 cols - Summary) */}
         <div className="grid grid-cols-12 gap-8 items-start">
-          {/* Left: Retry Form */}
+          {/* Left: Retry Form hoặc Khối thông báo kết thúc */}
           <section className="col-span-12 lg:col-span-7 space-y-6">
             <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm border border-[#EFECE6] space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-[#EFECE6]">
                 <div className="flex items-center gap-2.5">
                   <span className="material-symbols-outlined text-primary text-[24px]">
-                    payments
+                    {isTerminal ? "info" : "payments"}
                   </span>
                   <h2 className="text-lg font-bold text-on-surface">
-                    {order.status === "PENDING"
+                    {isCancelled
+                      ? "Đơn hàng đã kết thúc"
+                      : isExpiredState
+                      ? "Đơn hàng đã hết hiệu lực"
+                      : activeOrder.status === "PENDING"
                       ? "Chọn phương thức thanh toán"
                       : "Chọn phương thức thanh toán thử lại"}
                   </h2>
                 </div>
-                <span className="text-[11px] font-semibold text-tertiary bg-tertiary-fixed/60 px-2.5 py-1 rounded-full">
-                  POST /payments
+                <span
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${
+                    isTerminal
+                      ? "bg-surface-container-high text-on-surface-variant"
+                      : "text-tertiary bg-tertiary-fixed/60"
+                  }`}
+                >
+                  {isTerminal ? "TRẠNG THÁI CUỐI" : "POST /payments"}
                 </span>
               </div>
 
-              {isExpiredState || order.status === "CANCELLED" ? (
-                <div className="text-center py-8 space-y-3">
+              {/* Khi đơn hàng đã CANCELLED hoặc EXPIRED: form và nút retry biến mất hoàn toàn khỏi DOM */}
+              {isTerminal ? (
+                <div id="orderTerminalStateNotice" className="text-center py-8 space-y-3">
                   <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mx-auto text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[32px]">block</span>
+                    <span className="material-symbols-outlined text-[32px]">
+                      {isCancelled ? "cancel" : "block"}
+                    </span>
                   </div>
                   <h3 className="text-base font-bold text-on-surface">
-                    Không thể thử lại cho đơn hàng này
+                    {isCancelled ? "Đơn hàng đã bị hủy" : "Không thể thử lại cho đơn hàng này"}
                   </h3>
                   <p className="text-xs text-on-surface-variant max-w-md mx-auto leading-relaxed">
-                    {order.status === "CANCELLED"
+                    {isCancelled
                       ? "Đơn hàng này đã bị hủy trên hệ thống. Tồn kho và ưu đãi đã được hoàn trả để đảm bảo công bằng cho các khách hàng khác."
                       : "Thời gian giữ chỗ đơn hàng đã kết thúc (15 phút). Bạn không thể tiếp tục thử lại thanh toán cho đơn hàng này nữa."}
                   </p>
@@ -698,20 +753,20 @@ export function PaymentFailedRetryView({
                     <button
                       type="submit"
                       id="btnSubmitRetryPayment"
-                      disabled={isSubmitting || isExpiredState}
+                      disabled={isSubmitting}
                       className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-[#70370e] text-on-primary font-bold text-sm shadow transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <span className="material-symbols-outlined text-[20px]">
-                        {isSubmitting ? "sync" : order.status === "PENDING" ? "lock" : "refresh"}
+                        {isSubmitting ? "sync" : activeOrder.status === "PENDING" ? "lock" : "refresh"}
                       </span>
                       <span>
                         {isSubmitting
-                          ? order.status === "PENDING"
+                          ? activeOrder.status === "PENDING"
                             ? "Đang xử lý thanh toán..."
                             : "Đang xử lý thanh toán lại..."
-                          : order.status === "PENDING"
-                          ? `Thanh toán ngay (${formatVnd(order.totalVnd)})`
-                          : `Thanh toán lại ngay (${formatVnd(order.totalVnd)})`}
+                          : activeOrder.status === "PENDING"
+                          ? `Thanh toán ngay (${formatVnd(activeOrder.totalVnd)})`
+                          : `Thanh toán lại ngay (${formatVnd(activeOrder.totalVnd)})`}
                       </span>
                     </button>
                   </div>
@@ -728,14 +783,14 @@ export function PaymentFailedRetryView({
                   <span className="material-symbols-outlined text-primary text-[20px]">
                     receipt_long
                   </span>
-                  Tóm tắt đơn hàng ({order.items.length} món)
+                  Tóm tắt đơn hàng ({activeOrder.items.length} món)
                 </h3>
                 <span className="text-xs text-on-surface-variant">Bao gồm VAT</span>
               </div>
 
               {/* Items List */}
               <div className="divide-y divide-[#EFECE6]/80 max-h-72 overflow-y-auto pr-1">
-                {order.items.map((item) => (
+                {activeOrder.items.map((item) => (
                   <div key={item.id} className="py-3 flex gap-3 items-start">
                     <div className="w-12 h-12 rounded-lg bg-surface-container overflow-hidden flex-shrink-0 flex items-center justify-center">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -769,42 +824,42 @@ export function PaymentFailedRetryView({
                 <div className="flex justify-between text-on-surface-variant">
                   <span>Tạm tính (subtotalVnd)</span>
                   <span className="font-semibold text-on-surface">
-                    {formatVnd(order.subtotalVnd)}
+                    {formatVnd(activeOrder.subtotalVnd)}
                   </span>
                 </div>
-                {order.discountVnd > 0 && (
+                {activeOrder.discountVnd > 0 && (
                   <div className="flex justify-between text-tertiary font-semibold">
                     <span>
-                      Giảm giá ({order.couponCode} -{" "}
+                      Giảm giá ({activeOrder.couponCode} -{" "}
                       <span className="px-1 py-0.2 rounded bg-tertiary-fixed text-on-tertiary-fixed text-[10px]">
                         HELD
                       </span>
                       )
                     </span>
-                    <span>-{formatVnd(order.discountVnd)}</span>
+                    <span>-{formatVnd(activeOrder.discountVnd)}</span>
                   </div>
                 )}
                 <div className="pt-3 border-t border-[#EFECE6] flex justify-between items-baseline">
                   <span className="text-sm font-bold text-on-surface">Tổng thanh toán</span>
                   <div className="text-right">
                     <span className="text-lg font-bold text-primary">
-                      {formatVnd(order.totalVnd)}
+                      {formatVnd(activeOrder.totalVnd)}
                     </span>
                     <span className="block text-[11px] text-tertiary font-medium">
-                      Điểm nhận: 0 (sẽ +{Math.floor(order.totalVnd / 10000)} điểm khi SUCCESS)
+                      Điểm nhận: 0 (sẽ +{Math.floor(activeOrder.totalVnd / 10000)} điểm khi SUCCESS)
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* Coupon Held Notice */}
-              {order.couponCode && !isExpiredState && (
+              {activeOrder.couponCode && !isTerminal && (
                 <div className="p-3 rounded-lg bg-surface-container flex items-start gap-2 text-xs text-on-surface-variant leading-relaxed">
                   <span className="material-symbols-outlined text-secondary text-[18px] flex-shrink-0">
                     info
                   </span>
                   <span>
-                    Mã ưu đãi <strong className="font-mono text-on-surface">{order.couponCode}</strong>{" "}
+                    Mã ưu đãi <strong className="font-mono text-on-surface">{activeOrder.couponCode}</strong>{" "}
                     đang ở trạng thái <strong className="text-tertiary">HELD</strong> bảo lưu cho đơn hàng.
                     Nếu quá 15 phút chưa thanh toán, mã sẽ tự động nhả lại vào tài khoản.
                   </span>

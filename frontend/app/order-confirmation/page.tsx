@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
+import { useCart, clearStoredActiveOrder } from "@/context/CartContext";
 import { getStoredToken } from "@/services/auth.service";
 import {
   type OrderConfirmationData,
@@ -19,6 +20,7 @@ function OrderConfirmationContent() {
   const orderIdParam = searchParams.get("orderId");
 
   const { accessToken, user, isAuthenticated } = useAuth();
+  const { clearCart } = useCart();
   const token = accessToken || (typeof window !== "undefined" ? getStoredToken() : null);
 
   const [loading, setLoading] = useState<boolean>(true);
@@ -124,6 +126,9 @@ function OrderConfirmationContent() {
   };
 
   const handleRetrySuccess = async () => {
+    // API Contract v3.0 §3.2 & §9: Clear Cart đúng một lần khi Payment SUCCESS được xác nhận
+    clearCart();
+    clearStoredActiveOrder();
     await handleReloadOrder(true);
   };
 
@@ -164,7 +169,7 @@ function OrderConfirmationContent() {
         <div className="text-center space-y-3">
           <div className="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
           <p className="text-sm font-medium text-on-surface-variant">
-            Đang tải dữ liệu xác nhận đơn hàng...
+            Đang xác thực thông tin đơn hàng từ máy chủ...
           </p>
         </div>
       </div>

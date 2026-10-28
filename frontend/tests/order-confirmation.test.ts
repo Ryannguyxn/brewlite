@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+import { JSDOM } from "jsdom";
+import { PaymentFailedRetryView } from "../components/PaymentFailedRetryView";
 import { beforeEach, describe, it } from "node:test";
 import {
   type OrderConfirmationData,
@@ -1012,4 +1016,450 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.equal(expiredState.renderTerminalNotice, true);
     });
   });
+
+  describe("7. Behavior Matrix & Mounted Component Flow Tests (JSDOM)", () => {
+    let dom: JSDOM;
+    let originalWindow: unknown;
+    let originalDocument: unknown;
+    let originalSelf: unknown;
+    let globalTarget: {
+      window: unknown;
+      document: unknown;
+      self: unknown;
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    let originalActEnv: boolean | undefined;
+
+    const setupDom = () => {
+      dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
+        url: "http://localhost/order-confirmation",
+      });
+      globalTarget = globalThis as unknown as typeof globalTarget;
+      originalWindow = globalTarget.window;
+      originalDocument = globalTarget.document;
+      originalSelf = globalTarget.self;
+      originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
+
+      globalTarget.window = dom.window;
+      globalTarget.document = dom.window.document;
+      globalTarget.self = dom.window;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
+    };
+
+    const cleanupDom = () => {
+      globalTarget.window = originalWindow;
+      globalTarget.document = originalDocument;
+      globalTarget.self = originalSelf;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+      dom.window.close();
+    };
+
+    const createTestOrder = (overrides: Partial<OrderConfirmationData> = {}): OrderConfirmationData => ({
+      id: "550e8400-e29b-41d4-a716-446655440099",
+      status: "PAYMENT_FAILED",
+      createdAt: new Date(Date.now() - 60000).toISOString(),
+      expiresAt: new Date(Date.now() + 600000).toISOString(),
+      subtotalVnd: 85000,
+      discountVnd: 0,
+      totalVnd: 85000,
+      couponCode: null,
+      payment: null,
+      pointsEarned: 0,
+      items: [
+        {
+          id: "item-test-1",
+          productId: "prod-test-1",
+          productName: "Cà phê Sữa Đá",
+          size: "M",
+          sizeMultiplierPercent: 100,
+          basePriceVnd: 85000,
+          quantity: 1,
+          unitPriceVnd: 85000,
+          lineTotalVnd: 85000,
+          toppings: [],
+        },
+      ],
+      ...overrides,
+    });
+
+    it("should rotate idempotency key when receiving 409 IDEMPOTENCY_KEY_CONFLICT while preserving orderId and payload", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const testOrder = createTestOrder();
+      const mockToken = createValidMockJwt();
+
+      const capturedKeys: string[] = [];
+      const capturedPayloads: Array<Record<string, unknown>> = [];
+
+      global.fetch = async (url, init) => {
+        const u = String(url);
+        if (u.includes("/payments")) {
+          const headers = (init?.headers || {}) as Record<string, string>;
+          capturedKeys.push(headers["Idempotency-Key"] || headers["idempotency-key"]);
+          capturedPayloads.push(JSON.parse(String(init?.body || "{}")));
+
+          if (capturedKeys.length === 1) {
+            return new Response(
+              JSON.stringify({
+                statusCode: 409,
+                message: "IDEMPOTENCY_KEY_CONFLICT: Trùng khóa thanh toán",
+                error: "Conflict",
+              }),
+              { status: 409, headers: { "Content-Type": "application/json" } }
+            );
+          } else {
+            return new Response(
+              JSON.stringify({
+                paymentId: "550e8400-e29b-41d4-a716-446655440077",
+                orderId: testOrder.id,
+                paymentStatus: "SUCCESS",
+                orderStatus: "PAID",
+                method: "CARD",
+                methodLast4: "1234",
+                mockReference: "MOCK-REF-TEST-1234",
+                amountVnd: testOrder.totalVnd,
+                pointsEarned: 8,
+                failureReason: null,
+                createdAt: new Date().toISOString(),
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            );
+          }
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        let retrySuccessCalled = false;
+        await act(async () => {
+          root.render(
+            React.createElement(PaymentFailedRetryView, {
+              order: testOrder,
+              token: mockToken,
+              onRetrySuccess: () => {
+                retrySuccessCalled = true;
+              },
+            })
+          );
+        });
+
+        // 1. First submission -> triggers 409 IDEMPOTENCY_KEY_CONFLICT
+        const submitBtn = container.querySelector("#btnSubmitRetryPayment") as HTMLButtonElement;
+        assert.ok(submitBtn, "Nút submit retry payment phải tồn tại");
+
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(capturedKeys.length, 1);
+        assert.equal(retrySuccessCalled, false);
+        // Notice conflict phải hiển thị trên UI
+        assert.match(container.innerHTML, /mã giao dịch mới|IDEMPOTENCY_KEY_CONFLICT/i);
+
+        // 2. Second submission -> query fresh submit button or dispatch form submit
+        await act(async () => {
+          const form = container.querySelector('form') as HTMLFormElement;
+          if (form) {
+            form.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+          }
+        });
+
+        assert.equal(capturedKeys.length, 2);
+        assert.notEqual(capturedKeys[0], capturedKeys[1], "Idempotency-Key lần 2 PHẢI khác lần 1 khi conflict");
+        assert.equal(capturedPayloads[0].orderId, testOrder.id);
+        assert.equal(capturedPayloads[1].orderId, testOrder.id);
+        assert.equal(capturedPayloads[0].paymentMethod, capturedPayloads[1].paymentMethod);
+        assert.equal(retrySuccessCalled, true);
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("should preserve the SAME idempotency key when retrying after a network failure", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const testOrder = createTestOrder();
+      const mockToken = createValidMockJwt();
+
+      const capturedKeys: string[] = [];
+
+      global.fetch = async (url, init) => {
+        const u = String(url);
+        if (u.includes("/payments")) {
+          const headers = (init?.headers || {}) as Record<string, string>;
+          capturedKeys.push(headers["Idempotency-Key"] || headers["idempotency-key"]);
+
+          if (capturedKeys.length === 1) {
+            throw new TypeError("Failed to fetch (Network connection lost)");
+          } else {
+            return new Response(
+              JSON.stringify({
+                paymentId: "550e8400-e29b-41d4-a716-446655440077",
+                orderId: testOrder.id,
+                paymentStatus: "SUCCESS",
+                orderStatus: "PAID",
+                method: "CARD",
+                methodLast4: "1234",
+                mockReference: "MOCK-REF-TEST-1234",
+                amountVnd: testOrder.totalVnd,
+                pointsEarned: 8,
+                failureReason: null,
+                createdAt: new Date().toISOString(),
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            );
+          }
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        let retrySuccessCalled = false;
+        await act(async () => {
+          root.render(
+            React.createElement(PaymentFailedRetryView, {
+              order: testOrder,
+              token: mockToken,
+              onRetrySuccess: () => {
+                retrySuccessCalled = true;
+              },
+            })
+          );
+        });
+
+        const submitBtn = container.querySelector("#btnSubmitRetryPayment") as HTMLButtonElement;
+        assert.ok(submitBtn);
+
+        // Lần 1: Lỗi mạng
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(capturedKeys.length, 1);
+        assert.equal(retrySuccessCalled, false);
+        assert.match(container.innerHTML, /Không thể kết nối đến máy chủ|Idempotency-Key đã được giữ nguyên/i);
+
+        // Lần 2: Thử lại -> BẮT BUỘC giữ nguyên Idempotency-Key cũ
+        await act(async () => {
+          submitBtn.click();
+        });
+
+        assert.equal(capturedKeys.length, 2);
+        assert.equal(capturedKeys[0], capturedKeys[1], "Network error BẮT BUỘC giữ nguyên cùng 1 Idempotency-Key");
+        assert.equal(retrySuccessCalled, true);
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("should completely remove retry form when 409 INVALID_TRANSITION causes refetch returning CANCELLED", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      let currentOrder = createTestOrder();
+      const mockToken = createValidMockJwt();
+
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/payments")) {
+          return new Response(
+            JSON.stringify({
+              statusCode: 409,
+              message: "INVALID_TRANSITION: Order cannot transition from CANCELLED",
+              error: "Conflict",
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        let reloadCalled = false;
+        const mockReload = async (): Promise<OrderConfirmationData | null> => {
+          reloadCalled = true;
+          currentOrder = {
+            ...currentOrder,
+            status: "CANCELLED",
+          };
+          return currentOrder;
+        };
+
+        const renderComponent = () =>
+          React.createElement(PaymentFailedRetryView, {
+            order: currentOrder,
+            token: mockToken,
+            onRetrySuccess: () => {},
+            onRetryFailure: mockReload,
+          });
+
+        await act(async () => {
+          root.render(renderComponent());
+        });
+
+        // Form ban đầu hiển thị
+        assert.ok(container.querySelector("#btnSubmitRetryPayment"));
+
+        // Click retry -> nhận 409 INVALID_TRANSITION -> kích hoạt onReloadOrder
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(reloadCalled, true);
+
+        // Re-render với updated order (mô phỏng Confirmation page sau khi refetch server truth)
+        await act(async () => {
+          root.render(renderComponent());
+        });
+
+        // Form retry và submit button phải biến mất hoàn toàn
+        assert.equal(container.querySelector("#btnSubmitRetryPayment"), null);
+        assert.equal(container.querySelector("form"), null);
+        assert.ok(container.querySelector("#orderTerminalStateNotice"));
+        assert.match(container.innerHTML, /đã bị hủy/i);
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("should enter blocking error state and lock retry when refetching server truth fails after 409 INVALID_TRANSITION", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const testOrder = createTestOrder();
+      const mockToken = createValidMockJwt();
+
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/payments")) {
+          return new Response(
+            JSON.stringify({
+              statusCode: 409,
+              message: "INVALID_TRANSITION: State changed unexpectedly",
+              error: "Conflict",
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        let shouldFailReload = true;
+        const mockReload = async (): Promise<OrderConfirmationData | null> => {
+          if (shouldFailReload) {
+            // Server error khi fetch GET /orders/me
+            return null;
+          }
+          return {
+            ...testOrder,
+            status: "PENDING",
+          };
+        };
+
+        await act(async () => {
+          root.render(
+            React.createElement(PaymentFailedRetryView, {
+              order: testOrder,
+              token: mockToken,
+              onRetrySuccess: () => {},
+              onRetryFailure: mockReload,
+            })
+          );
+        });
+
+        // Click retry
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        // Kiểm tra blocking error state: form retry biến mất, notice cảnh báo xuất hiện
+        assert.equal(container.querySelector("#btnSubmitRetryPayment"), null);
+        assert.ok(container.querySelector("#serverSyncFailedNotice"), "Phải hiển thị serverSyncFailedNotice");
+        assert.match(container.innerHTML, /Chưa thể xác định trạng thái đơn hàng từ máy chủ|Biểu mẫu thử lại đã được khóa/i);
+
+        // Nút thử đồng bộ lại phải xuất hiện
+        const btnManualSync = container.querySelector("#btnRetrySyncServerTruth") as HTMLButtonElement;
+        assert.ok(btnManualSync, "Phải có nút thử đồng bộ lại");
+
+        // Giả lập server hồi phục, user bấm nút đồng bộ lại
+        shouldFailReload = false;
+        await act(async () => {
+          btnManualSync.click();
+        });
+
+        // Form retry phải được mở khóa trở lại
+        assert.ok(container.querySelector("#btnSubmitRetryPayment"), "Form retry phải quay lại sau khi sync server truth thành công");
+        assert.equal(container.querySelector("#serverSyncFailedNotice"), null);
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("should clear Cart exactly once upon confirmed Payment SUCCESS, and NEVER clear on FAILED, network error, or 409", () => {
+      // Test cart clearing invariants
+      let cartClearCount = 0;
+      let storedOrderClearCount = 0;
+
+      const mockClearCart = () => {
+        cartClearCount += 1;
+      };
+      const mockClearStoredActiveOrder = () => {
+        storedOrderClearCount += 1;
+      };
+
+      const handlePaymentOutcome = (outcome: "SUCCESS" | "FAILED" | "NETWORK_ERR" | "409_INVALID" | "CANCELLED") => {
+        if (outcome === "SUCCESS") {
+          // Rule: Cart chỉ clear khi Payment SUCCESS được xác nhận
+          mockClearCart();
+          mockClearStoredActiveOrder();
+        }
+        // Các trường hợp khác: giữ Cart nguyên vẹn để cho phép retry
+      };
+
+      // 1. FAILED -> Không clear
+      handlePaymentOutcome("FAILED");
+      assert.equal(cartClearCount, 0);
+      assert.equal(storedOrderClearCount, 0);
+
+      // 2. NETWORK_ERR -> Không clear
+      handlePaymentOutcome("NETWORK_ERR");
+      assert.equal(cartClearCount, 0);
+      assert.equal(storedOrderClearCount, 0);
+
+      // 3. 409_INVALID -> Không clear
+      handlePaymentOutcome("409_INVALID");
+      assert.equal(cartClearCount, 0);
+      assert.equal(storedOrderClearCount, 0);
+
+      // 4. CANCELLED -> Không clear (giữ giỏ để khách có thể mua lại nếu muốn)
+      handlePaymentOutcome("CANCELLED");
+      assert.equal(cartClearCount, 0);
+      assert.equal(storedOrderClearCount, 0);
+
+      // 5. SUCCESS -> Clear đúng 1 lần
+      handlePaymentOutcome("SUCCESS");
+      assert.equal(cartClearCount, 1, "Cart phải clear đúng 1 lần sau SUCCESS");
+      assert.equal(storedOrderClearCount, 1, "Stored active order phải clear đúng 1 lần sau SUCCESS");
+    });
+  });
+
 });

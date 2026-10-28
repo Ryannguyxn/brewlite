@@ -15,11 +15,27 @@ import {
   submitRetryPaymentApi,
 } from "@/services/order-confirmation.service";
 
+function useSafeAppRouter() {
+  try {
+    return useRouter();
+  } catch {
+    return {
+      push: () => {},
+      replace: () => {},
+      prefetch: () => {},
+      back: () => {},
+      forward: () => {},
+      refresh: () => {},
+    };
+  }
+}
+
 interface PaymentFailedRetryViewProps {
   order: OrderConfirmationData;
   token?: string | null;
   onRetrySuccess?: (result: PaymentApiResponse) => void | Promise<void>;
   onRetryFailure?: (result: PaymentApiResponse) => void | Promise<OrderConfirmationData | null>;
+  router?: { push: (url: string) => void };
 }
 
 export function PaymentFailedRetryView({
@@ -27,8 +43,10 @@ export function PaymentFailedRetryView({
   token,
   onRetrySuccess,
   onRetryFailure,
+  router: customRouter,
 }: PaymentFailedRetryViewProps) {
-  const router = useRouter();
+  const defaultRouter = useSafeAppRouter();
+  const router = customRouter || defaultRouter;
 
   // State lưu trữ dữ liệu order thực tế trên UI (cập nhật ngay khi prop đổi hoặc khi refetch server truth)
   const [currentOrder, setCurrentOrder] = useState<OrderConfirmationData>(order);
@@ -61,6 +79,10 @@ export function PaymentFailedRetryView({
 
   // Terminal state: Quá hạn 15 phút hoặc đơn hàng đã bị CANCELLED từ máy chủ
   const isTerminal = isExpiredState || isCancelled;
+
+  // Trạng thái mất đồng bộ Server Truth: Khóa retry form khi refetch GET /orders/me thất bại
+  const [isServerSyncFailed, setIsServerSyncFailed] = useState<boolean>(false);
+  const [isSyncingServerTruth, setIsSyncingServerTruth] = useState<boolean>(false);
 
   // Form thử lại
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodType>("CARD");
@@ -97,10 +119,38 @@ export function PaymentFailedRetryView({
   // Tỷ lệ % thời gian còn lại (trên tổng 15 phút = 900s)
   const percentLeft = Math.max(0, Math.min(100, Math.round((remainingSeconds / 900) * 100)));
 
+  // Thử đồng bộ lại Server Truth khi đang ở blocking error state
+  const handleManualSyncServerTruth = async () => {
+    if (isSyncingServerTruth || !onRetryFailure) return;
+    setIsSyncingServerTruth(true);
+    setSubmitError(null);
+    try {
+      const reloaded = await onRetryFailure({} as PaymentApiResponse);
+      if (reloaded) {
+        setCurrentOrder(reloaded);
+        setIsServerSyncFailed(false);
+        const isSuccess =
+          reloaded.status === "PAID" ||
+          reloaded.status === "PREPARING" ||
+          reloaded.status === "READY" ||
+          reloaded.status === "COMPLETED";
+        if (isSuccess && onRetrySuccess) {
+          await onRetrySuccess({} as PaymentApiResponse);
+        }
+      } else {
+        setSubmitError("Máy chủ vẫn chưa phản hồi trạng thái đơn hàng. Vui lòng thử lại sau giây lát.");
+      }
+    } catch {
+      setSubmitError("Lỗi kết nối khi cố gắng đồng bộ từ máy chủ. Vui lòng kiểm tra lại mạng.");
+    } finally {
+      setIsSyncingServerTruth(false);
+    }
+  };
+
   // Xử lý submit thanh toán lại
   const handleRetrySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submittingRef.current || isSubmitting || isTerminal) return;
+    if (submittingRef.current || isSubmitting || isTerminal || isServerSyncFailed) return;
 
     if (!token) {
       setSubmitError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.");
@@ -135,6 +185,7 @@ export function PaymentFailedRetryView({
 
       if (result.paymentStatus === "SUCCESS") {
         setIsNetworkUncertain(false);
+        setIsServerSyncFailed(false);
         if (onRetrySuccess) {
           await onRetrySuccess(result);
         } else {
@@ -149,12 +200,28 @@ export function PaymentFailedRetryView({
 
         // Tải lại server truth từ GET /orders/me trước khi quyết định trạng thái tiếp theo
         let latestOrder = activeOrder;
+        let refetchSucceeded = false;
         if (onRetryFailure) {
-          const reloaded = await onRetryFailure(result);
-          if (reloaded) {
-            setCurrentOrder(reloaded);
-            latestOrder = reloaded;
+          try {
+            const reloaded = await onRetryFailure(result);
+            if (reloaded) {
+              setCurrentOrder(reloaded);
+              latestOrder = reloaded;
+              refetchSucceeded = true;
+              setIsServerSyncFailed(false);
+            }
+          } catch {
+            refetchSucceeded = false;
           }
+        }
+
+        // Invariant: Nếu refetch server truth fail -> chuyển sang blocking error state, khóa retry
+        if (!refetchSucceeded && onRetryFailure) {
+          setIsServerSyncFailed(true);
+          setSubmitError(
+            "Không thể đồng bộ trạng thái mới nhất từ máy chủ sau khi giao dịch bị từ chối. Biểu mẫu thử lại đã được khóa để bảo vệ tính nhất quán dữ liệu. Vui lòng bấm thử đồng bộ lại."
+          );
+          return;
         }
 
         setSubmitError(
@@ -171,7 +238,7 @@ export function PaymentFailedRetryView({
 
       // 1. Phân loại IDEMPOTENCY_KEY_CONFLICT trước tiên (kể cả khi HTTP 409):
       // Tuyệt đối không coi là INVALID_TRANSITION. Phải xoay (rotate) Idempotency-Key mới ngay lập tức
-      // để tránh việc người dùng bị kẹt retry mãi với key cũ bị xung đột.
+      // để tránh việc người dùng bị kẹt retry mãi với key cũ bị xung đột. Giữ form mở để tiếp tục thử lại.
       const isIdempotencyConflict =
         errCode === "IDEMPOTENCY_KEY_CONFLICT" ||
         msg.includes("IDEMPOTENCY_KEY_CONFLICT");
@@ -187,6 +254,7 @@ export function PaymentFailedRetryView({
 
       if (isIdempotencyConflict) {
         setIsNetworkUncertain(false);
+        setIsServerSyncFailed(false);
         const nextKey = generateIdempotencyKey();
         setCurrentIdempotencyKey(nextKey);
         setSubmitError(
@@ -194,11 +262,13 @@ export function PaymentFailedRetryView({
         );
       } else if (isNetworkErr) {
         setIsNetworkUncertain(true);
+        setIsServerSyncFailed(false);
         setSubmitError(
           "Không thể kết nối đến máy chủ hoặc giao dịch đang xử lý. Idempotency-Key đã được giữ nguyên để bạn có thể thử lại an toàn."
         );
       } else if (msg === "UNAUTHORIZED" || statusCode === 401) {
         setIsNetworkUncertain(false);
+        setIsServerSyncFailed(false);
         setSubmitError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.");
       } else if (
         errCode === "INVALID_TRANSITION" ||
@@ -208,22 +278,39 @@ export function PaymentFailedRetryView({
         setIsNetworkUncertain(false);
         // Khi backend trả 409 INVALID_TRANSITION do order đã đổi state (PAID, CANCELLED,...):
         // Lập tức refetch GET /orders/me từ server truth và khóa/chuyển UI theo state server mới
+        let refetchSucceeded = false;
         let newStatus: string | undefined;
         if (onRetryFailure) {
-          const reloaded = await onRetryFailure({} as PaymentApiResponse);
-          if (reloaded) {
-            setCurrentOrder(reloaded);
-            newStatus = reloaded.status;
-            const isSuccess =
-              reloaded.status === "PAID" ||
-              reloaded.status === "PREPARING" ||
-              reloaded.status === "READY" ||
-              reloaded.status === "COMPLETED";
-            if (isSuccess && onRetrySuccess) {
-              await onRetrySuccess({} as PaymentApiResponse);
+          try {
+            const reloaded = await onRetryFailure({} as PaymentApiResponse);
+            if (reloaded) {
+              setCurrentOrder(reloaded);
+              newStatus = reloaded.status;
+              refetchSucceeded = true;
+              setIsServerSyncFailed(false);
+              const isSuccess =
+                reloaded.status === "PAID" ||
+                reloaded.status === "PREPARING" ||
+                reloaded.status === "READY" ||
+                reloaded.status === "COMPLETED";
+              if (isSuccess && onRetrySuccess) {
+                await onRetrySuccess({} as PaymentApiResponse);
+              }
             }
+          } catch {
+            refetchSucceeded = false;
           }
         }
+
+        // Invariant: Nếu refetch server truth fail sau 409 -> chuyển sang blocking error state, khóa retry
+        if (!refetchSucceeded && onRetryFailure) {
+          setIsServerSyncFailed(true);
+          setSubmitError(
+            "Không thể đồng bộ trạng thái đơn hàng từ máy chủ sau lỗi INVALID_TRANSITION. Biểu mẫu thử lại đã được khóa để ngăn thao tác trên dữ liệu cũ (stale order). Vui lòng thử đồng bộ lại."
+          );
+          return;
+        }
+
         setSubmitError(
           newStatus === "CANCELLED"
             ? "Đơn hàng đã bị hủy trên hệ thống (INVALID_TRANSITION). Không thể tiếp tục thanh toán."
@@ -266,7 +353,7 @@ export function PaymentFailedRetryView({
       {/* Hero Notification Banner */}
       <section
         className={`w-full border-b border-[#EFECE6] py-8 ${
-          isTerminal
+          isTerminal || isServerSyncFailed
             ? "bg-surface-container"
             : activeOrder.status === "PENDING"
             ? "bg-[#FFFBEB]"
@@ -278,7 +365,7 @@ export function PaymentFailedRetryView({
             <div className="flex items-start gap-4">
               <div
                 className={`w-14 h-14 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm border ${
-                  isTerminal
+                  isTerminal || isServerSyncFailed
                     ? "bg-surface-container-highest text-on-surface-variant border-outline-variant"
                     : activeOrder.status === "PENDING"
                     ? "bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]"
@@ -290,6 +377,8 @@ export function PaymentFailedRetryView({
                     ? "cancel"
                     : isExpiredState
                     ? "schedule"
+                    : isServerSyncFailed
+                    ? "sync_problem"
                     : activeOrder.status === "PENDING"
                     ? "hourglass_top"
                     : "error"}
@@ -302,6 +391,8 @@ export function PaymentFailedRetryView({
                       ? "Đơn hàng đã bị hủy"
                       : isExpiredState
                       ? "Đơn hàng đã hết hạn thanh toán"
+                      : isServerSyncFailed
+                      ? "Trạng thái máy chủ chưa xác định"
                       : activeOrder.status === "PENDING"
                       ? "Đơn hàng đang chờ thanh toán"
                       : "Thanh toán thất bại & Thử lại"}
@@ -309,7 +400,7 @@ export function PaymentFailedRetryView({
                   <span
                     id="orderStatusBadge"
                     className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
-                      isTerminal
+                      isTerminal || isServerSyncFailed
                         ? "bg-surface-container-highest text-on-surface-variant border-outline-variant"
                         : activeOrder.status === "PENDING"
                         ? "bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]"
@@ -318,7 +409,7 @@ export function PaymentFailedRetryView({
                   >
                     <span
                       className={`w-2 h-2 rounded-full ${
-                        isTerminal
+                        isTerminal || isServerSyncFailed
                           ? "bg-on-surface-variant"
                           : activeOrder.status === "PENDING"
                           ? "bg-[#D97706]"
@@ -330,6 +421,8 @@ export function PaymentFailedRetryView({
                       ? "CANCELLED (ĐÃ HỦY)"
                       : isExpiredState
                       ? `${activeOrder.status} (QUÁ HẠN 15 PHÚT)`
+                      : isServerSyncFailed
+                      ? "SERVER_SYNC_REQUIRED"
                       : activeOrder.status === "PENDING"
                       ? "PENDING (CHỜ THANH TOÁN)"
                       : "PAYMENT_FAILED (BỊ TỪ CHỐI)"}
@@ -340,6 +433,8 @@ export function PaymentFailedRetryView({
                     ? "Đơn hàng này đã bị hủy trên hệ thống và tồn kho đã được hoàn trả."
                     : isExpiredState
                     ? "Thời gian giữ chỗ tồn kho (15 phút) đã kết thúc. Bạn không thể tiếp tục thực hiện thanh toán cho đơn hàng này."
+                    : isServerSyncFailed
+                    ? "Hệ thống chưa thể lấy lại trạng thái đơn hàng chính xác từ máy chủ. Biểu mẫu thanh toán đã tạm khóa để đảm bảo an toàn."
                     : activeOrder.status === "PENDING"
                     ? "Đơn hàng của bạn đang ở trạng thái chờ thanh toán. Vui lòng chọn phương thức Thẻ hoặc Ví để hoàn tất trong thời hạn 15 phút."
                     : "Giao dịch thanh toán chưa thể hoàn tất. Đơn hàng của bạn đang được bảo lưu tạm thời, bạn có thể đổi phương thức và thử lại ngay."}
@@ -450,7 +545,7 @@ export function PaymentFailedRetryView({
         <div
           id="orderNoticeBanner"
           className={`p-4 rounded-xl border flex items-start gap-3 ${
-            isTerminal
+            isTerminal || isServerSyncFailed
               ? "bg-surface-container-high border-outline-variant/40 text-on-surface"
               : activeOrder.status === "PENDING"
               ? "bg-[#FFFBEB] border-[#FDE68A] text-[#92400E]"
@@ -459,7 +554,7 @@ export function PaymentFailedRetryView({
         >
           <span
             className={`material-symbols-outlined text-[22px] flex-shrink-0 mt-0.5 ${
-              isTerminal
+              isTerminal || isServerSyncFailed
                 ? "text-on-surface-variant"
                 : activeOrder.status === "PENDING"
                 ? "text-[#D97706]"
@@ -470,6 +565,8 @@ export function PaymentFailedRetryView({
               ? "block"
               : isExpiredState
               ? "timer_off"
+              : isServerSyncFailed
+              ? "sync_problem"
               : activeOrder.status === "PENDING"
               ? "info"
               : "warning"}
@@ -491,6 +588,15 @@ export function PaymentFailedRetryView({
                 </p>
                 <p className="leading-relaxed text-on-surface-variant">
                   Theo quy định của hệ thống, đơn hàng chỉ được giữ tối đa 15 phút kể từ lúc tạo. Vui lòng quay về thực đơn để tạo đơn hàng mới.
+                </p>
+              </>
+            ) : isServerSyncFailed ? (
+              <>
+                <p className="font-bold">
+                  Chưa thể xác định trạng thái đơn hàng từ máy chủ
+                </p>
+                <p className="leading-relaxed text-on-surface-variant">
+                  Để đảm bảo tính nhất quán (Server Truth), form thử lại đã tạm khóa. Vui lòng bấm &quot;Thử đồng bộ lại từ máy chủ&quot;.
                 </p>
               </>
             ) : activeOrder.status === "PENDING" ? (
@@ -518,21 +624,23 @@ export function PaymentFailedRetryView({
           </div>
         </div>
 
-        {/* Main Grid: Left (7 cols - Retry Form hoặc Terminal State View), Right (5 cols - Summary) */}
+        {/* Main Grid: Left (7 cols - Retry Form hoặc Terminal/Blocked State View), Right (5 cols - Summary) */}
         <div className="grid grid-cols-12 gap-8 items-start">
-          {/* Left: Retry Form hoặc Khối thông báo kết thúc */}
+          {/* Left: Retry Form hoặc Khối thông báo kết thúc / Blocking Error State */}
           <section className="col-span-12 lg:col-span-7 space-y-6">
             <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm border border-[#EFECE6] space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-[#EFECE6]">
                 <div className="flex items-center gap-2.5">
                   <span className="material-symbols-outlined text-primary text-[24px]">
-                    {isTerminal ? "info" : "payments"}
+                    {isTerminal ? "info" : isServerSyncFailed ? "sync_problem" : "payments"}
                   </span>
                   <h2 className="text-lg font-bold text-on-surface">
                     {isCancelled
                       ? "Đơn hàng đã kết thúc"
                       : isExpiredState
                       ? "Đơn hàng đã hết hiệu lực"
+                      : isServerSyncFailed
+                      ? "Đồng bộ trạng thái máy chủ"
                       : activeOrder.status === "PENDING"
                       ? "Chọn phương thức thanh toán"
                       : "Chọn phương thức thanh toán thử lại"}
@@ -542,14 +650,16 @@ export function PaymentFailedRetryView({
                   className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${
                     isTerminal
                       ? "bg-surface-container-high text-on-surface-variant"
+                      : isServerSyncFailed
+                      ? "bg-[#FEE2E2] text-[#DC2626]"
                       : "text-tertiary bg-tertiary-fixed/60"
                   }`}
                 >
-                  {isTerminal ? "TRẠNG THÁI CUỐI" : "POST /payments"}
+                  {isTerminal ? "TRẠNG THÁI CUỐI" : isServerSyncFailed ? "ĐỒNG BỘ THẤT BẠI" : "POST /payments"}
                 </span>
               </div>
 
-              {/* Khi đơn hàng đã CANCELLED hoặc EXPIRED: form và nút retry biến mất hoàn toàn khỏi DOM */}
+              {/* Nhánh 1: Đơn hàng đã CANCELLED hoặc EXPIRED (Terminal State): form và nút retry biến mất hoàn toàn */}
               {isTerminal ? (
                 <div id="orderTerminalStateNotice" className="text-center py-8 space-y-3">
                   <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mx-auto text-on-surface-variant">
@@ -575,7 +685,48 @@ export function PaymentFailedRetryView({
                     </Link>
                   </div>
                 </div>
+              ) : isServerSyncFailed ? (
+                /* Nhánh 2: Refetch server truth fail (Blocking error / Unknown state): Khóa form, không cho phép gửi request stale */
+                <div id="serverSyncFailedNotice" className="text-center py-8 space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-[#FEE2E2] text-[#DC2626] flex items-center justify-center mx-auto">
+                    <span className="material-symbols-outlined text-[32px]">sync_problem</span>
+                  </div>
+                  <h3 className="text-base font-bold text-on-surface">
+                    Chưa thể xác định trạng thái đơn hàng từ máy chủ
+                  </h3>
+                  <p className="text-xs text-on-surface-variant max-w-md mx-auto leading-relaxed">
+                    Hệ thống không thể tải dữ liệu mới nhất của đơn hàng từ máy chủ sau giao dịch.
+                    Để đảm bảo an toàn và tuân thủ quy tắc Server Truth, biểu mẫu thanh toán đã tạm khóa để tránh gửi trùng yêu cầu trên dữ liệu cũ.
+                  </p>
+                  {submitError && (
+                    <div className="p-3 rounded-lg bg-error-container/20 text-error text-xs max-w-md mx-auto border border-error/20">
+                      {submitError}
+                    </div>
+                  )}
+                  <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      id="btnRetrySyncServerTruth"
+                      onClick={handleManualSyncServerTruth}
+                      disabled={isSyncingServerTruth}
+                      className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-primary hover:bg-[#70370e] text-on-primary text-xs font-bold shadow transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {isSyncingServerTruth ? "sync" : "refresh"}
+                      </span>
+                      <span>{isSyncingServerTruth ? "Đang đồng bộ lại..." : "Thử đồng bộ lại từ máy chủ"}</span>
+                    </button>
+                    <Link
+                      href="/orders"
+                      className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-[#EFECE6] bg-surface hover:bg-surface-container text-xs font-semibold text-on-surface transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">history</span>
+                      <span>Kiểm tra trong Lịch sử đơn</span>
+                    </Link>
+                  </div>
+                </div>
               ) : (
+                /* Nhánh 3: Form thử lại bình thường */
                 <form onSubmit={handleRetrySubmit} className="space-y-5">
                   {/* Option 1: Card */}
                   <label
@@ -890,3 +1041,5 @@ export function PaymentFailedRetryView({
     </div>
   );
 }
+
+export default PaymentFailedRetryView;

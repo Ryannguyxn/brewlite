@@ -41,6 +41,7 @@ export default function Header({
   // Lấy dữ liệu xác thực người dùng từ AuthContext (SCRUM-41)
   const { user, isAuthenticated, logout, openAuthModal } = useAuth();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   const handleNotice = (label: string) => {
     if (onFeatureNotice) {
@@ -129,22 +130,49 @@ export default function Header({
         </nav>
 
         <div className="flex items-center gap-space-md flex-shrink-0">
-          {/* Ô tìm kiếm tách riêng biệt sang nhóm tiện ích bên phải, không đè hay đứng trước Thực đơn */}
-          <div className="hidden lg:flex items-center w-48 xl:w-60 min-w-0">
-            <div className="relative w-full">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-outline">
-                <span className="material-symbols-outlined text-[20px]">
-                  search
-                </span>
+          {/* Nút icon tìm kiếm thu nhỏ gọn gàng, không đẩy nút Đăng nhập / Đăng ký ra ngoài */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsSearchOpen(!isSearchOpen)}
+              className="w-10 h-10 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant hover:text-primary flex items-center justify-center transition-colors cursor-pointer"
+              aria-label="Tìm kiếm món"
+              aria-expanded={isSearchOpen}
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                {isSearchOpen ? "close" : "search"}
               </span>
-              <input
-                className="w-full pl-10 pr-4 py-2 bg-surface-container-lowest text-on-surface placeholder:text-outline text-body-sm font-body-sm rounded-full focus:outline-none focus:ring-1 focus:ring-primary shadow-[0_1px_4px_rgba(44,32,24,0.04)] transition-all"
-                placeholder={siteConfig.searchPlaceholder}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => onSearchChange?.(e.target.value)}
-              />
-            </div>
+            </button>
+
+            {isSearchOpen && (
+              <div className="absolute right-0 mt-2 w-72 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/40 p-2.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-outline material-symbols-outlined text-[18px] pointer-events-none">
+                    search
+                  </span>
+                  <input
+                    autoFocus
+                    className="w-full pl-9 pr-8 py-2 bg-surface-container-low text-on-surface placeholder:text-outline text-body-sm font-body-sm rounded-lg focus:outline-none focus:ring-1 focus:ring-primary shadow-inner"
+                    placeholder={siteConfig.searchPlaceholder}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => onSearchChange?.(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => onSearchChange?.("")}
+                      className="absolute right-2.5 text-outline hover:text-on-surface cursor-pointer"
+                      aria-label="Xóa từ khóa tìm kiếm"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        cancel
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           <button
             id="header-cart-btn"

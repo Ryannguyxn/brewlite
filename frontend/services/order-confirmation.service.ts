@@ -293,7 +293,7 @@ export async function submitRetryPaymentApi(params: {
 export interface AuthMeProfile {
   id: string;
   email: string;
-  fullName: string;
+  fullName: string | null;
   loyaltyPoints: number;
 }
 
@@ -312,8 +312,12 @@ export function validateAuthMeResponse(raw: unknown): AuthMeProfile {
   if (typeof obj.email !== "string" || !obj.email.includes("@")) {
     throw new Error("Trường 'email' từ GET /auth/me không hợp lệ.");
   }
-  if (typeof obj.fullName !== "string" || obj.fullName.trim() === "") {
-    throw new Error("Trường 'fullName' từ GET /auth/me không được để trống.");
+  let fullName: string | null = null;
+  if (obj.fullName !== null && obj.fullName !== undefined) {
+    if (typeof obj.fullName !== "string") {
+      throw new Error("Trường 'fullName' từ GET /auth/me phải là chuỗi hoặc null.");
+    }
+    fullName = obj.fullName.trim() || null;
   }
   if (
     typeof obj.loyaltyPoints !== "number" ||
@@ -326,7 +330,7 @@ export function validateAuthMeResponse(raw: unknown): AuthMeProfile {
   return {
     id: obj.id.trim(),
     email: obj.email.trim(),
-    fullName: obj.fullName.trim(),
+    fullName,
     loyaltyPoints: obj.loyaltyPoints,
   };
 }
@@ -362,4 +366,3 @@ export async function fetchAuthMeProfile(token: string): Promise<AuthMeProfile |
   const raw: unknown = await response.json().catch(() => null);
   return validateAuthMeResponse(raw);
 }
-

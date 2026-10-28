@@ -18,13 +18,15 @@ import {
 interface PaymentFailedRetryViewProps {
   order: OrderConfirmationData;
   token?: string | null;
-  onRetrySuccess?: (result: PaymentApiResponse) => void;
+  onRetrySuccess?: (result: PaymentApiResponse) => void | Promise<void>;
+  onRetryFailure?: (result: PaymentApiResponse) => void | Promise<OrderConfirmationData | null>;
 }
 
 export function PaymentFailedRetryView({
   order,
   token,
   onRetrySuccess,
+  onRetryFailure,
 }: PaymentFailedRetryViewProps) {
   const router = useRouter();
   // Trạng thái đếm ngược 15 phút
@@ -34,6 +36,16 @@ export function PaymentFailedRetryView({
   const [isExpiredState, setIsExpiredState] = useState<boolean>(() =>
     isOrderExpired(order)
   );
+
+  // Đồng bộ state trực tiếp khi order prop thay đổi (React Pattern: adjust state during render)
+  const [prevOrderId, setPrevOrderId] = useState<string>(order.id);
+  const [prevExpiresAt, setPrevExpiresAt] = useState<string>(order.expiresAt);
+  if (order.id !== prevOrderId || order.expiresAt !== prevExpiresAt) {
+    setPrevOrderId(order.id);
+    setPrevExpiresAt(order.expiresAt);
+    setRemainingSeconds(computeOrderRemainingSeconds(order.expiresAt));
+    setIsExpiredState(isOrderExpired(order));
+  }
 
   // Form thử lại
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodType>("CARD");
@@ -109,7 +121,7 @@ export function PaymentFailedRetryView({
       if (result.paymentStatus === "SUCCESS") {
         setIsNetworkUncertain(false);
         if (onRetrySuccess) {
-          onRetrySuccess(result);
+          await onRetrySuccess(result);
         } else {
           // Chuyển hướng sang OrderSuccessView
           router.push(`/order-confirmation?orderId=${order.id}`);
@@ -118,8 +130,18 @@ export function PaymentFailedRetryView({
         // Giao dịch FAILED dứt khoát từ server (PAYMENT_DECLINED)
         setIsNetworkUncertain(false);
         setCurrentIdempotencyKey(generateIdempotencyKey());
+
+        // Tải lại server truth từ GET /orders/me trước khi quyết định trạng thái tiếp theo
+        let latestOrder = order;
+        if (onRetryFailure) {
+          const reloaded = await onRetryFailure(result);
+          if (reloaded) {
+            latestOrder = reloaded;
+          }
+        }
+
         setSubmitError(
-          `Giao dịch vẫn bị từ chối (${result.failureReason || "PAYMENT_DECLINED"}). Vui lòng thử phương thức khác.`
+          `Giao dịch vẫn bị từ chối (${result.failureReason || latestOrder.payment?.failureReason || "PAYMENT_DECLINED"}). Vui lòng thử phương thức khác.`
         );
       }
     } catch (err: unknown) {
@@ -250,12 +272,12 @@ export function PaymentFailedRetryView({
                   </span>
                 </div>
                 <p className="text-sm text-on-surface-variant max-w-2xl leading-relaxed">
-                  {isExpiredState
-                    ? "Thời gian giữ chỗ tồn kho (15 phút) đã kết thúc. Bạn không thể tiếp tục thanh toán cho đơn hàng này nữa."
+                  {order.status === "CANCELLED"
+                    ? "Đơn hàng này đã bị hủy trên hệ thống và tồn kho đã được hoàn trả."
+                    : isExpiredState
+                    ? "Thời gian giữ chỗ tồn kho (15 phút) đã kết thúc. Bạn không thể tiếp tục thực hiện thanh toán cho đơn hàng này."
                     : order.status === "PENDING"
                     ? "Đơn hàng của bạn đang ở trạng thái chờ thanh toán. Vui lòng chọn phương thức Thẻ hoặc Ví để hoàn tất trong thời hạn 15 phút."
-                    : order.status === "CANCELLED"
-                    ? "Đơn hàng này đã bị hủy trên hệ thống và tồn kho đã được hoàn trả."
                     : "Giao dịch thanh toán chưa thể hoàn tất. Đơn hàng của bạn đang được bảo lưu tạm thời, bạn có thể đổi phương thức và thử lại ngay."}
                 </p>
               </div>
@@ -381,22 +403,22 @@ export function PaymentFailedRetryView({
               : "warning"}
           </span>
           <div className="space-y-0.5 text-xs">
-            {isExpiredState ? (
+            {order.status === "CANCELLED" ? (
+              <>
+                <p className="font-bold">
+                  Đơn hàng đã bị hủy (CANCELLED)
+                </p>
+                <p className="leading-relaxed text-on-surface-variant">
+                  Đơn hàng này hiện ở trạng thái đã hủy từ hệ thống. Không thể thực hiện thanh toán tiếp.
+                </p>
+              </>
+            ) : isExpiredState ? (
               <>
                 <p className="font-bold">
                   Thời hạn giữ chỗ đơn hàng đã kết thúc (15 phút)
                 </p>
                 <p className="leading-relaxed text-on-surface-variant">
                   Theo quy định của hệ thống, đơn hàng chỉ được giữ tối đa 15 phút kể từ lúc tạo. Vui lòng quay về thực đơn để tạo đơn hàng mới.
-                </p>
-              </>
-            ) : order.status === "CANCELLED" ? (
-              <>
-                <p className="font-bold">
-                  Đơn hàng đã bị hủy (CANCELLED)
-                </p>
-                <p className="leading-relaxed text-on-surface-variant">
-                  Đơn hàng này hiện ở trạng thái đã hủy. Không thể thực hiện thanh toán tiếp.
                 </p>
               </>
             ) : order.status === "PENDING" ? (
@@ -454,8 +476,9 @@ export function PaymentFailedRetryView({
                     Không thể thử lại cho đơn hàng này
                   </h3>
                   <p className="text-xs text-on-surface-variant max-w-md mx-auto leading-relaxed">
-                    Đơn hàng đã hết hạn thanh toán và chuyển về trạng thái hủy. Tồn kho và ưu đãi đã
-                    được hoàn trả để đảm bảo công bằng cho các khách hàng khác.
+                    {order.status === "CANCELLED"
+                      ? "Đơn hàng này đã bị hủy trên hệ thống. Tồn kho và ưu đãi đã được hoàn trả để đảm bảo công bằng cho các khách hàng khác."
+                      : "Thời gian giữ chỗ đơn hàng đã kết thúc (15 phút). Bạn không thể tiếp tục thử lại thanh toán cho đơn hàng này nữa."}
                   </p>
                   <div className="pt-2">
                     <Link

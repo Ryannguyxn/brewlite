@@ -86,13 +86,14 @@ function OrderConfirmationContent() {
     };
   }, [token, orderIdParam]);
 
-  // Handler khi retry payment thành công:
-  // TUYỆT ĐỐI KHÔNG tự đổi Order sang PAID bằng local state!
-  // Phải tải lại server truth từ GET /orders/me và GET /auth/me để đảm bảo trạng thái từ máy chủ.
-  const handleRetrySuccess = async () => {
-    if (!token || !orderIdParam) return;
+  // Handler khi retry payment hoàn thành (dù SUCCESS hay FAILED):
+  // Luôn reload server truth từ GET /orders/me và GET /auth/me để cập nhật trạng thái đơn hàng chính xác từ máy chủ.
+  const handleReloadOrder = async (showFullLoading = true) => {
+    if (!token || !orderIdParam) return null;
     try {
-      setLoading(true);
+      if (showFullLoading) {
+        setLoading(true);
+      }
       const [orders, profile] = await Promise.all([
         fetchMyOrdersApi(token),
         fetchAuthMeProfile(token),
@@ -103,15 +104,32 @@ function OrderConfirmationContent() {
       const updatedOrder = findOrderForConfirmation(orders, orderIdParam);
       if (updatedOrder) {
         setOrder(updatedOrder);
+        return updatedOrder;
       } else {
-        setError("Không tìm thấy thông tin đơn hàng sau khi cập nhật từ máy chủ.");
+        if (showFullLoading) {
+          setError("Không tìm thấy thông tin đơn hàng sau khi cập nhật từ máy chủ.");
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(`Không thể làm mới trạng thái đơn hàng sau thanh toán: ${msg}`);
+      if (showFullLoading) {
+        setError(`Không thể làm mới trạng thái đơn hàng sau thanh toán: ${msg}`);
+      }
     } finally {
-      setLoading(false);
+      if (showFullLoading) {
+        setLoading(false);
+      }
     }
+    return null;
+  };
+
+  const handleRetrySuccess = async () => {
+    await handleReloadOrder(true);
+  };
+
+  const handleRetryFailure = async () => {
+    // Khi retry FAILED, reload server truth ngầm mà không làm mất thông báo lỗi trong Retry form
+    return await handleReloadOrder(false);
   };
 
   // 1. Chưa đăng nhập
@@ -202,6 +220,7 @@ function OrderConfirmationContent() {
       order={order}
       token={token}
       onRetrySuccess={handleRetrySuccess}
+      onRetryFailure={handleRetryFailure}
     />
   );
 }

@@ -7,15 +7,16 @@ import type { OrderConfirmationData } from "@/services/order-confirmation.servic
 
 interface OrderSuccessViewProps {
   order: OrderConfirmationData;
-  customerName?: string;
+  customerName?: string | null;
   userPoints?: number;
 }
 
 export function OrderSuccessView({
   order,
-  customerName = "Quý khách",
+  customerName: rawCustomerName,
   userPoints = 0,
 }: OrderSuccessViewProps) {
+  const customerName = rawCustomerName?.trim() || "Quý khách";
   const [copiedVoucher, setCopiedVoucher] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
 
@@ -83,21 +84,53 @@ export function OrderSuccessView({
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-3">
                   <h1 className="font-headline-md text-2xl md:text-3xl font-bold text-on-surface">
-                    Đặt hàng &amp; Thanh toán thành công!
+                    {order.status === "COMPLETED"
+                      ? "Đơn hàng đã hoàn thành!"
+                      : order.status === "READY"
+                      ? "Đồ uống đã sẵn sàng phục vụ!"
+                      : "Đặt hàng & Thanh toán thành công!"}
                   </h1>
                   <span
                     id="orderStatusBadge"
                     className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F0FDF4] text-[#16A34A] text-xs font-bold border border-[#DCFCE7]"
                   >
                     <span className="w-2 h-2 rounded-full bg-[#16A34A]"></span>
-                    ĐÃ THANH TOÁN ({order.status})
+                    {order.status === "COMPLETED"
+                      ? "ĐÃ HOÀN THÀNH (COMPLETED)"
+                      : order.status === "READY"
+                      ? "SẴN SÀNG PHỤC VỤ (READY)"
+                      : order.status === "PREPARING"
+                      ? "ĐANG PHA CHẾ (PREPARING)"
+                      : "ĐÃ THANH TOÁN (PAID)"}
                   </span>
                 </div>
                 <p className="text-sm text-on-surface-variant max-w-2xl leading-relaxed">
-                  Cảm ơn <span className="font-semibold text-on-surface">{customerName}</span>, đơn
-                  hàng của bạn đã được tiếp nhận và Barista tại{" "}
-                  <span className="text-primary font-medium">BrewLite Saigon Center</span> đang
-                  chuẩn bị pha chế thủ công.
+                  {order.status === "COMPLETED" ? (
+                    <>
+                      Đơn hàng của bạn đã hoàn thành trọn vẹn. Cảm ơn{" "}
+                      <span className="font-semibold text-on-surface">{customerName}</span> đã lựa chọn
+                      BrewLite, chúc bạn thưởng thức đồ uống thật ngon miệng!
+                    </>
+                  ) : order.status === "READY" ? (
+                    <>
+                      Đồ uống của bạn đã sẵn sàng! Mời{" "}
+                      <span className="font-semibold text-on-surface">{customerName}</span> đến nhận tại quầy
+                      hoặc đón nhân viên giao hàng tại điểm hẹn.
+                    </>
+                  ) : order.status === "PREPARING" ? (
+                    <>
+                      Cảm ơn <span className="font-semibold text-on-surface">{customerName}</span>, đơn
+                      hàng của bạn đang được Barista tại{" "}
+                      <span className="text-primary font-medium">BrewLite Saigon Center</span> trực tiếp pha
+                      chế thủ công.
+                    </>
+                  ) : (
+                    <>
+                      Cảm ơn <span className="font-semibold text-on-surface">{customerName}</span>, đơn
+                      hàng của bạn đã được tiếp nhận thành công và đang được đưa vào hàng đợi tại quầy
+                      Barista <span className="text-primary font-medium">BrewLite Saigon Center</span>.
+                    </>
+                  )}
                 </p>
               </div>
             </div>
@@ -150,13 +183,42 @@ export function OrderSuccessView({
               </div>
               <div>
                 <span className="text-xs text-on-surface-variant uppercase tracking-wider block font-medium">
-                  Thời gian giao dự kiến
+                  {order.status === "COMPLETED"
+                    ? "Trạng thái đơn hàng"
+                    : order.status === "READY"
+                    ? "Thời gian phục vụ"
+                    : "Thời gian giao dự kiến"}
                 </span>
                 <h2 className="text-lg md:text-xl font-bold text-primary">
-                  15 - 25 phút{" "}
-                  <span className="text-sm text-on-surface-variant font-normal">
-                    (Đang trong hàng đợi pha chế)
-                  </span>
+                  {order.status === "COMPLETED" ? (
+                    <>
+                      Đã hoàn tất{" "}
+                      <span className="text-sm text-on-surface-variant font-normal">
+                        (Đã giao trọn vẹn cho khách hàng)
+                      </span>
+                    </>
+                  ) : order.status === "READY" ? (
+                    <>
+                      Sẵn sàng ngay{" "}
+                      <span className="text-sm text-on-surface-variant font-normal">
+                        (Đồ uống đã hoàn tất tại quầy)
+                      </span>
+                    </>
+                  ) : order.status === "PREPARING" ? (
+                    <>
+                      10 - 15 phút{" "}
+                      <span className="text-sm text-on-surface-variant font-normal">
+                        (Đang trong quá trình pha chế thủ công)
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      15 - 25 phút{" "}
+                      <span className="text-sm text-on-surface-variant font-normal">
+                        (Đã tiếp nhận, chuẩn bị vào quầy)
+                      </span>
+                    </>
+                  )}
                 </h2>
               </div>
             </div>
@@ -168,14 +230,26 @@ export function OrderSuccessView({
             </div>
           </div>
 
-          {/* Stepper 4 stages */}
+          {/* Stepper 4 stages: Dynamic theo order.status (PAID, PREPARING, READY, COMPLETED) */}
           <div className="relative py-2">
             <div className="hidden md:block absolute top-6 left-12 right-12 h-1 bg-surface-container-high rounded-full -z-0">
-              <div className="h-full bg-primary rounded-full transition-all duration-700 w-[38%]"></div>
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-700"
+                style={{
+                  width:
+                    order.status === "COMPLETED"
+                      ? "100%"
+                      : order.status === "READY"
+                      ? "72%"
+                      : order.status === "PREPARING"
+                      ? "42%"
+                      : "15%",
+                }}
+              ></div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 relative z-10">
-              {/* Step 1: Hoàn thành */}
+              {/* Step 1: Đã tiếp nhận đơn */}
               <div className="flex md:flex-col items-center md:items-center text-left md:text-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-[#16A34A] text-white flex items-center justify-center shadow-md flex-shrink-0">
                   <span className="material-symbols-outlined text-[22px]">check</span>
@@ -188,41 +262,122 @@ export function OrderSuccessView({
                 </div>
               </div>
 
-              {/* Step 2: Đang thực hiện */}
+              {/* Step 2: Pha chế thủ công */}
               <div className="flex md:flex-col items-center md:items-center text-left md:text-center gap-3">
-                <div className="relative flex items-center justify-center">
-                  <span className="absolute w-14 h-14 rounded-full bg-primary/20 animate-ping"></span>
-                  <div className="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-md flex-shrink-0 relative">
-                    <span className="material-symbols-outlined text-[24px]">coffee_maker</span>
+                {order.status === "COMPLETED" || order.status === "READY" ? (
+                  <div className="w-12 h-12 rounded-full bg-[#16A34A] text-white flex items-center justify-center shadow-md flex-shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">check</span>
                   </div>
-                </div>
+                ) : order.status === "PREPARING" ? (
+                  <div className="relative flex items-center justify-center">
+                    <span className="absolute w-14 h-14 rounded-full bg-primary/20 animate-ping"></span>
+                    <div className="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-md flex-shrink-0 relative">
+                      <span className="material-symbols-outlined text-[24px]">coffee_maker</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center flex-shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">hourglass_empty</span>
+                  </div>
+                )}
                 <div>
-                  <p className="text-sm text-primary font-bold">Đang pha chế thủ công</p>
+                  <p
+                    className={`text-sm font-bold ${
+                      order.status === "PREPARING"
+                        ? "text-primary"
+                        : "text-on-surface"
+                    }`}
+                  >
+                    {order.status === "COMPLETED" || order.status === "READY"
+                      ? "Đã pha chế xong"
+                      : order.status === "PREPARING"
+                      ? "Đang pha chế thủ công"
+                      : "Chờ pha chế"}
+                  </p>
                   <p className="text-xs text-on-surface-variant mt-0.5">
-                    Chiết xuất Espresso &amp; Cold Brew
+                    {order.status === "COMPLETED" || order.status === "READY"
+                      ? "Hoàn tất bởi Master Barista"
+                      : order.status === "PREPARING"
+                      ? "Chiết xuất Espresso & Cold Brew"
+                      : "Đang xếp hàng vào quầy"}
                   </p>
                 </div>
               </div>
 
-              {/* Step 3: Đang giao hàng */}
-              <div className="flex md:flex-col items-center md:items-center text-left md:text-center gap-3 opacity-60">
-                <div className="w-12 h-12 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center flex-shrink-0">
-                  <span className="material-symbols-outlined text-[22px]">moped</span>
-                </div>
+              {/* Step 3: Đang giao hàng / Sẵn sàng */}
+              <div
+                className={`flex md:flex-col items-center md:items-center text-left md:text-center gap-3 ${
+                  order.status === "PAID" || order.status === "PREPARING"
+                    ? "opacity-60"
+                    : ""
+                }`}
+              >
+                {order.status === "COMPLETED" ? (
+                  <div className="w-12 h-12 rounded-full bg-[#16A34A] text-white flex items-center justify-center shadow-md flex-shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">check</span>
+                  </div>
+                ) : order.status === "READY" ? (
+                  <div className="relative flex items-center justify-center">
+                    <span className="absolute w-14 h-14 rounded-full bg-primary/20 animate-ping"></span>
+                    <div className="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-md flex-shrink-0 relative">
+                      <span className="material-symbols-outlined text-[24px]">moped</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center flex-shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">moped</span>
+                  </div>
+                )}
                 <div>
-                  <p className="text-sm font-semibold text-on-surface">Đang giao hàng</p>
-                  <p className="text-xs text-on-surface-variant mt-0.5">Dự kiến 15 phút tới</p>
+                  <p
+                    className={`text-sm font-semibold ${
+                      order.status === "READY" ? "text-primary font-bold" : "text-on-surface"
+                    }`}
+                  >
+                    {order.status === "COMPLETED"
+                      ? "Đã giao hàng"
+                      : order.status === "READY"
+                      ? "Sẵn sàng phục vụ"
+                      : "Chờ giao hàng"}
+                  </p>
+                  <p className="text-xs text-on-surface-variant mt-0.5">
+                    {order.status === "COMPLETED"
+                      ? "Đã giao trọn vẹn"
+                      : order.status === "READY"
+                      ? "Mời nhận đồ uống tại quầy"
+                      : "Dự kiến sau khi pha chế"}
+                  </p>
                 </div>
               </div>
 
-              {/* Step 4: Giao hàng thành công */}
-              <div className="flex md:flex-col items-center md:items-center text-left md:text-center gap-3 opacity-60">
-                <div className="w-12 h-12 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center flex-shrink-0">
-                  <span className="material-symbols-outlined text-[22px]">inventory</span>
-                </div>
+              {/* Step 4: Giao hàng thành công / Hoàn tất */}
+              <div
+                className={`flex md:flex-col items-center md:items-center text-left md:text-center gap-3 ${
+                  order.status !== "COMPLETED" ? "opacity-60" : ""
+                }`}
+              >
+                {order.status === "COMPLETED" ? (
+                  <div className="w-12 h-12 rounded-full bg-[#16A34A] text-white flex items-center justify-center shadow-md flex-shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">check</span>
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center flex-shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">inventory</span>
+                  </div>
+                )}
                 <div>
-                  <p className="text-sm font-semibold text-on-surface">Giao tận tay</p>
-                  <p className="text-xs text-on-surface-variant mt-0.5">Thưởng thức trọn vị</p>
+                  <p
+                    className={`text-sm font-semibold ${
+                      order.status === "COMPLETED" ? "text-primary font-bold" : "text-on-surface"
+                    }`}
+                  >
+                    {order.status === "COMPLETED" ? "Hoàn tất đơn hàng" : "Giao tận tay"}
+                  </p>
+                  <p className="text-xs text-on-surface-variant mt-0.5">
+                    {order.status === "COMPLETED"
+                      ? "Cảm ơn bạn đã thưởng thức"
+                      : "Thưởng thức trọn vị"}
+                  </p>
                 </div>
               </div>
             </div>
@@ -253,7 +408,13 @@ export function OrderSuccessView({
                   </div>
                 </div>
                 <span className="px-3 py-1 rounded-full bg-surface-container-lowest text-primary text-xs font-semibold shadow-sm">
-                  Đang chiết xuất
+                  {order.status === "COMPLETED"
+                    ? "Đã phục vụ"
+                    : order.status === "READY"
+                    ? "Đã sẵn sàng"
+                    : order.status === "PREPARING"
+                    ? "Đang chiết xuất"
+                    : "Chờ tiếp nhận"}
                 </span>
               </div>
             </div>

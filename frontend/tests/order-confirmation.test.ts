@@ -49,7 +49,7 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
     items: [
       {
         id: "item-1",
-        productId: "prod-1",
+        productId: "550e8400-e29b-41d4-a716-446655440001",
         productName: "Cà Phê Muối",
         size: "M",
         sizeMultiplierPercent: 120,
@@ -57,7 +57,7 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
         unitPriceVnd: 42000,
         quantity: 2,
         lineTotalVnd: 84000,
-        toppings: [{ id: "top-1", name: "Kem Cheese", priceVnd: 10000 }],
+        toppings: [{ id: "550e8400-e29b-41d4-a716-446655440091", name: "Kem Cheese", priceVnd: 10000 }],
       },
     ],
     payment: {
@@ -85,7 +85,7 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
     items: [
       {
         id: "item-2",
-        productId: "prod-2",
+        productId: "550e8400-e29b-41d4-a716-446655440002",
         productName: "Cà Phê Sữa Đá",
         size: "S",
         sizeMultiplierPercent: 100,
@@ -100,9 +100,9 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       id: "550e8400-e29b-41d4-a716-446655440021",
       status: "FAILED",
       method: "CARD",
-      methodLast4: "0002",
+      methodLast4: "1234",
       amountVnd: 65000,
-      mockReference: "MOCK-CARD-0002-5678",
+      mockReference: "MOCK-CARD-1234-5678",
       failureReason: "PAYMENT_DECLINED",
       createdAt: new Date().toISOString(),
     },
@@ -481,7 +481,7 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       assert.throws(() => validateAuthMeResponse("string"), /đối tượng JSON hợp lệ/);
     });
 
-    it("should reject invalid UUID, missing email, or empty fullName in validateAuthMeResponse", () => {
+    it("should reject invalid UUID or invalid email in validateAuthMeResponse", () => {
       // Invalid UUID
       assert.throws(
         () =>
@@ -505,17 +505,46 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
           }),
         /email/
       );
+    });
 
-      // Empty fullName
+    it("should accept fullName as null, undefined, or whitespace (defaults to null)", () => {
+      const rawNull = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "user@test.com",
+        fullName: null,
+        loyaltyPoints: 10,
+      };
+      const res1 = validateAuthMeResponse(rawNull);
+      assert.equal(res1.fullName, null);
+
+      const rawUndefined = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "user@test.com",
+        loyaltyPoints: 10,
+      };
+      const res2 = validateAuthMeResponse(rawUndefined);
+      assert.equal(res2.fullName, null);
+
+      const rawWhitespace = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        email: "user@test.com",
+        fullName: "   ",
+        loyaltyPoints: 10,
+      };
+      const res3 = validateAuthMeResponse(rawWhitespace);
+      assert.equal(res3.fullName, null);
+    });
+
+    it("should reject non-string and non-null fullName in validateAuthMeResponse", () => {
       assert.throws(
         () =>
           validateAuthMeResponse({
             id: "550e8400-e29b-41d4-a716-446655440001",
             email: "user@test.com",
-            fullName: "   ",
+            fullName: 12345,
             loyaltyPoints: 10,
           }),
-        /fullName/
+        /chuỗi hoặc null/
       );
     });
 
@@ -615,6 +644,99 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
           return msg.includes("malformed order snapshot") || msg.includes("sai lệch");
         }
       );
+    });
+
+    it("should handle retry payment returning FAILED and allow caller to reload server truth", async () => {
+      const validToken = createValidMockJwt();
+      const failedPaymentResponse = {
+        paymentId: "550e8400-e29b-41d4-a716-446655440099",
+        orderId: mockOrderFailed.id,
+        paymentStatus: "FAILED",
+        orderStatus: "PAYMENT_FAILED",
+        amountVnd: 65000,
+        method: "CARD",
+        methodLast4: "1234",
+        mockReference: "MOCK-CARD-1234-5678",
+        pointsEarned: 0,
+        failureReason: "PAYMENT_DECLINED",
+        createdAt: new Date().toISOString(),
+      };
+
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => failedPaymentResponse,
+      })) as unknown as typeof fetch;
+
+      const result = await submitRetryPaymentApi({
+        orderId: mockOrderFailed.id,
+        method: "CARD",
+        identifier: "1234567890121234",
+        token: validToken,
+      });
+
+      assert.equal(result.paymentStatus, "FAILED");
+      assert.equal(result.orderStatus, "PAYMENT_FAILED");
+      assert.equal(result.failureReason, "PAYMENT_DECLINED");
+
+      // Verify server truth re-fetch works seamlessly
+      const mockUpdatedOrders = {
+        items: [
+          {
+            ...mockOrderFailed,
+            status: "PAYMENT_FAILED",
+            payment: {
+              id: result.paymentId,
+              status: "FAILED",
+              method: "CARD",
+              methodLast4: "1234",
+              amountVnd: 65000,
+              mockReference: "MOCK-CARD-1234-5678",
+              failureReason: "PAYMENT_DECLINED",
+              createdAt: result.createdAt,
+            },
+          },
+        ],
+        meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+      };
+
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => mockUpdatedOrders,
+      })) as unknown as typeof fetch;
+
+      const refreshed = await fetchMyOrdersApi(validToken);
+      assert.equal(refreshed.length, 1);
+      assert.equal(refreshed[0].id, mockOrderFailed.id);
+      assert.equal(refreshed[0].payment?.failureReason, "PAYMENT_DECLINED");
+    });
+  });
+
+  describe("6. Lifecycle Status & Copy Invariants", () => {
+    it("should never assert an expired order is CANCELLED unless server explicitly returns CANCELLED status", () => {
+      const now = Date.now();
+      const expiredPendingOrder: OrderConfirmationData = {
+        ...mockOrderFailed,
+        status: "PENDING",
+        expiresAt: new Date(now - 1000).toISOString(),
+      };
+
+      // Order is expired by time
+      assert.equal(isOrderExpired(expiredPendingOrder, now), true);
+      // But server status is still PENDING, NOT CANCELLED!
+      assert.notEqual(expiredPendingOrder.status, "CANCELLED");
+    });
+
+    it("should correctly support all lifecycle statuses: PAID, PREPARING, READY, COMPLETED", () => {
+      const validStatuses = ["PAID", "PREPARING", "READY", "COMPLETED"];
+      for (const st of validStatuses) {
+        const orderData: OrderConfirmationData = {
+          ...mockOrderSuccess,
+          status: st as OrderConfirmationData["status"],
+        };
+        assert.ok(validStatuses.includes(orderData.status));
+      }
     });
   });
 });

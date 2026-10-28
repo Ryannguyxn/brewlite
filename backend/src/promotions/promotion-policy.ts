@@ -14,17 +14,21 @@ export function assertCouponValid(
   subtotal: bigint,
   now: Date,
 ): asserts coupon is ValidityCoupon {
-  if (
-    !coupon ||
-    coupon.startsAt > now ||
-    coupon.expiresAt <= now ||
-    subtotal < coupon.minSubtotalVnd
-  )
+  const message = !coupon
+    ? 'Coupon does not exist'
+    : coupon.startsAt > now
+      ? 'Coupon is not active yet'
+      : coupon.expiresAt <= now
+        ? 'Coupon has expired'
+        : subtotal < coupon.minSubtotalVnd
+          ? 'Order subtotal does not meet coupon minimum'
+          : null;
+  if (message)
     throw new BadRequestException({
       statusCode: 400,
       error: 'Bad Request',
       code: 'INVALID_COUPON',
-      message: 'Coupon is unavailable',
+      message,
     });
 }
 export function calculateDiscount(

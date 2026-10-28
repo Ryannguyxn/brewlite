@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { PaymentFailedRetryView } from "../components/PaymentFailedRetryView";
+import { CartProvider, useCart, clearStoredActiveOrder } from "../context/CartContext";
 import { beforeEach, describe, it } from "node:test";
 import {
   type OrderConfirmationData,
@@ -1022,10 +1023,14 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
     let originalWindow: unknown;
     let originalDocument: unknown;
     let originalSelf: unknown;
+    let originalLocalStorage: unknown;
+    let originalSessionStorage: unknown;
     let globalTarget: {
       window: unknown;
       document: unknown;
       self: unknown;
+      localStorage: unknown;
+      sessionStorage: unknown;
       IS_REACT_ACT_ENVIRONMENT?: boolean;
     };
     let originalActEnv: boolean | undefined;
@@ -1038,11 +1043,15 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       originalWindow = globalTarget.window;
       originalDocument = globalTarget.document;
       originalSelf = globalTarget.self;
+      originalLocalStorage = globalTarget.localStorage;
+      originalSessionStorage = globalTarget.sessionStorage;
       originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
 
       globalTarget.window = dom.window;
       globalTarget.document = dom.window.document;
       globalTarget.self = dom.window;
+      globalTarget.localStorage = dom.window.localStorage;
+      globalTarget.sessionStorage = dom.window.sessionStorage;
       globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
     };
 
@@ -1050,6 +1059,8 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       globalTarget.window = originalWindow;
       globalTarget.document = originalDocument;
       globalTarget.self = originalSelf;
+      globalTarget.localStorage = originalLocalStorage;
+      globalTarget.sessionStorage = originalSessionStorage;
       globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
       dom.window.close();
     };
@@ -1170,7 +1181,11 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
         assert.notEqual(capturedKeys[0], capturedKeys[1], "Idempotency-Key lần 2 PHẢI khác lần 1 khi conflict");
         assert.equal(capturedPayloads[0].orderId, testOrder.id);
         assert.equal(capturedPayloads[1].orderId, testOrder.id);
-        assert.equal(capturedPayloads[0].paymentMethod, capturedPayloads[1].paymentMethod);
+        assert.equal(capturedPayloads[0].method, "CARD");
+        assert.equal(capturedPayloads[1].method, "CARD");
+        assert.deepEqual(capturedPayloads[0].paymentDetails, { cardNumber: "1234567890121234" });
+        assert.deepEqual(capturedPayloads[1].paymentDetails, { cardNumber: "1234567890121234" });
+        assert.deepEqual(capturedPayloads[0].paymentDetails, capturedPayloads[1].paymentDetails);
         assert.equal(retrySuccessCalled, true);
       } finally {
         await act(async () => {
@@ -1414,51 +1429,204 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
       }
     });
 
-    it("should clear Cart exactly once upon confirmed Payment SUCCESS, and NEVER clear on FAILED, network error, or 409", () => {
-      // Test cart clearing invariants
-      let cartClearCount = 0;
-      let storedOrderClearCount = 0;
+    it("should mount component with CartProvider and verify Cart only clears once upon confirmed Payment SUCCESS, and NEVER clears on FAILED, network error, or 409", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const testOrder = createTestOrder();
+      const mockToken = createValidMockJwt();
 
-      const mockClearCart = () => {
-        cartClearCount += 1;
+      const sampleCartItem = {
+        id: "cart-item-1",
+        productId: "550e8400-e29b-41d4-a716-446655440001",
+        productName: "Cà phê Sữa Đá",
+        size: "M",
+        sizeMultiplierPercent: 100,
+        basePriceVnd: 35000,
+        quantity: 2,
+        unitPriceVnd: 35000,
+        lineTotalVnd: 70000,
+        toppings: [],
       };
-      const mockClearStoredActiveOrder = () => {
-        storedOrderClearCount += 1;
+
+      const CART_KEY = "brewlite_cart_v1";
+
+      function MountedOrderConfirmationHarness({
+        order,
+        onSuccessCb,
+      }: {
+        order: OrderConfirmationData;
+        onSuccessCb?: () => void;
+      }) {
+        const { items, clearCart } = useCart();
+
+        // Exact handler from frontend/app/order-confirmation/page.tsx:
+        const handleRetrySuccess = async () => {
+          clearCart();
+          clearStoredActiveOrder();
+          onSuccessCb?.();
+        };
+
+        return React.createElement(
+          "div",
+          null,
+          React.createElement("span", { id: "liveCartCount" }, String(items.length)),
+          React.createElement(PaymentFailedRetryView, {
+            order,
+            token: mockToken,
+            onRetrySuccess: handleRetrySuccess,
+            onRetryFailure: async () => null,
+          })
+        );
+      }
+
+      const mountHarness = async (scenarioKey: string, onSuccessCb?: () => void) => {
+        dom.window.localStorage.setItem(CART_KEY, JSON.stringify([sampleCartItem]));
+        dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+        await act(async () => {
+          root.render(
+            React.createElement(
+              CartProvider as React.ComponentType<{ key?: string }>,
+              { key: scenarioKey },
+              React.createElement(MountedOrderConfirmationHarness, {
+                order: testOrder,
+                onSuccessCb,
+              })
+            )
+          );
+        });
       };
 
-      const handlePaymentOutcome = (outcome: "SUCCESS" | "FAILED" | "NETWORK_ERR" | "409_INVALID" | "CANCELLED") => {
-        if (outcome === "SUCCESS") {
-          // Rule: Cart chỉ clear khi Payment SUCCESS được xác nhận
-          mockClearCart();
-          mockClearStoredActiveOrder();
-        }
-        // Các trường hợp khác: giữ Cart nguyên vẹn để cho phép retry
-      };
+      try {
+        // --- CASE 1: Payment FAILED (PAYMENT_DECLINED) -> Cart MUST be preserved ---
+        global.fetch = async (url) => {
+          const u = String(url);
+          if (u.includes("/payments")) {
+            return new Response(
+              JSON.stringify({
+                paymentId: "550e8400-e29b-41d4-a716-446655440071",
+                orderId: testOrder.id,
+                paymentStatus: "FAILED",
+                orderStatus: "PAYMENT_FAILED",
+                method: "CARD",
+                methodLast4: "0002",
+                mockReference: "MOCK-REF-FAILED",
+                amountVnd: testOrder.totalVnd,
+                pointsEarned: 0,
+                failureReason: "PAYMENT_DECLINED",
+                createdAt: new Date().toISOString(),
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            );
+          }
+          return new Response("Not found", { status: 404 });
+        };
 
-      // 1. FAILED -> Không clear
-      handlePaymentOutcome("FAILED");
-      assert.equal(cartClearCount, 0);
-      assert.equal(storedOrderClearCount, 0);
+        await mountHarness("case-failed");
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "1", "Giỏ hàng phải có 1 item ban đầu");
 
-      // 2. NETWORK_ERR -> Không clear
-      handlePaymentOutcome("NETWORK_ERR");
-      assert.equal(cartClearCount, 0);
-      assert.equal(storedOrderClearCount, 0);
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
 
-      // 3. 409_INVALID -> Không clear
-      handlePaymentOutcome("409_INVALID");
-      assert.equal(cartClearCount, 0);
-      assert.equal(storedOrderClearCount, 0);
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "1", "Giỏ hàng KHÔNG được clear khi payment FAILED");
+        assert.ok(dom.window.localStorage.getItem(CART_KEY), "LocalStorage cart phải được giữ nguyên khi payment FAILED");
 
-      // 4. CANCELLED -> Không clear (giữ giỏ để khách có thể mua lại nếu muốn)
-      handlePaymentOutcome("CANCELLED");
-      assert.equal(cartClearCount, 0);
-      assert.equal(storedOrderClearCount, 0);
+        // --- CASE 2: Network Error -> Cart MUST be preserved ---
+        global.fetch = async (url) => {
+          const u = String(url);
+          if (u.includes("/payments")) {
+            throw new TypeError("Failed to fetch (offline)");
+          }
+          return new Response("Not found", { status: 404 });
+        };
 
-      // 5. SUCCESS -> Clear đúng 1 lần
-      handlePaymentOutcome("SUCCESS");
-      assert.equal(cartClearCount, 1, "Cart phải clear đúng 1 lần sau SUCCESS");
-      assert.equal(storedOrderClearCount, 1, "Stored active order phải clear đúng 1 lần sau SUCCESS");
+        await mountHarness("case-network");
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "1");
+
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "1", "Giỏ hàng KHÔNG được clear khi gặp lỗi mạng");
+        assert.ok(dom.window.localStorage.getItem(CART_KEY), "LocalStorage cart phải được giữ nguyên khi gặp lỗi mạng");
+
+        // --- CASE 3: 409 INVALID_TRANSITION -> Cart MUST be preserved ---
+        global.fetch = async (url) => {
+          const u = String(url);
+          if (u.includes("/payments")) {
+            return new Response(
+              JSON.stringify({
+                statusCode: 409,
+                message: "INVALID_TRANSITION: Cannot transition order",
+                error: "Conflict",
+              }),
+              { status: 409, headers: { "Content-Type": "application/json" } }
+            );
+          }
+          return new Response("Not found", { status: 404 });
+        };
+
+        await mountHarness("case-409");
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "1");
+
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "1", "Giỏ hàng KHÔNG được clear khi 409 INVALID_TRANSITION");
+        assert.ok(dom.window.localStorage.getItem(CART_KEY), "LocalStorage cart phải được giữ nguyên khi 409");
+
+        // --- CASE 4: Payment SUCCESS -> Cart MUST be cleared exactly once ---
+        global.fetch = async (url) => {
+          const u = String(url);
+          if (u.includes("/payments")) {
+            return new Response(
+              JSON.stringify({
+                paymentId: "550e8400-e29b-41d4-a716-446655440079",
+                orderId: testOrder.id,
+                paymentStatus: "SUCCESS",
+                orderStatus: "PAID",
+                method: "CARD",
+                methodLast4: "1234",
+                mockReference: "MOCK-REF-SUCCESS",
+                amountVnd: testOrder.totalVnd,
+                pointsEarned: 8,
+                failureReason: null,
+                createdAt: new Date().toISOString(),
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            );
+          }
+          return new Response("Not found", { status: 404 });
+        };
+
+        let successCallbackCalled = false;
+        await mountHarness("case-success", () => {
+          successCallbackCalled = true;
+        });
+
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "1");
+
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(successCallbackCalled, true, "onRetrySuccess phải được gọi khi payment SUCCESS");
+        assert.equal(container.querySelector("#liveCartCount")?.textContent, "0", "Giỏ hàng phải được xóa về 0 sau khi retry SUCCESS");
+        const finalStorageCart = dom.window.localStorage.getItem(CART_KEY);
+        assert.ok(!finalStorageCart || finalStorageCart === "[]", "LocalStorage cart phải được clear sau SUCCESS");
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
     });
   });
 

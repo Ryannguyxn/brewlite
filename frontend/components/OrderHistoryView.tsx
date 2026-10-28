@@ -8,7 +8,6 @@ import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
 import {
   MOCK_SITE_CONFIG,
-  MOCK_USER_PROFILE,
   type GetMyOrdersQueryParams,
   type GetMyOrdersResponseDto,
   type OrderHistoryItemDto,
@@ -377,6 +376,308 @@ function getStitchStatusBadgeConfig(status: OrderStatus): {
         filterGroup: "CANCELLED",
       };
   }
+}
+
+/**
+ * Kiểm tra xem đơn hàng có thể thanh toán tiếp hay không (SCRUM-65):
+ * - Trạng thái phải là PENDING hoặc PAYMENT_FAILED.
+ * - expiresAt phải là mốc ISO hợp lệ và lớn hơn thời điểm tham chiếu referenceTimestampMs.
+ */
+export function isOrderPayable(
+  order: Pick<OrderHistoryItemDto, "status" | "expiresAt"> | null | undefined,
+  referenceTimestampMs = Date.now()
+): boolean {
+  if (!order) return false;
+  if (order.status !== "PENDING" && order.status !== "PAYMENT_FAILED") {
+    return false;
+  }
+  const expiresMs = Number.isFinite(Date.parse(order.expiresAt))
+    ? new Date(order.expiresAt).getTime()
+    : 0;
+  return expiresMs > referenceTimestampMs;
+}
+
+export interface OrderSnapshotModalProps {
+  order: OrderHistoryItemDto;
+  onClose: () => void;
+  onReorder: (order: OrderHistoryItemDto) => void;
+  /** Thời điểm tham chiếu (ms) để xác định đơn còn hạn hay đã hết hạn. Mặc định là Date.now() */
+  referenceTimestampMs?: number;
+}
+
+export function OrderSnapshotModal({
+  order,
+  onClose,
+  onReorder,
+  referenceTimestampMs,
+}: OrderSnapshotModalProps) {
+  const [isPayable, setIsPayable] = useState<boolean>(() =>
+    isOrderPayable(order, referenceTimestampMs ?? Date.now())
+  );
+
+  useEffect(() => {
+    setIsPayable(isOrderPayable(order, referenceTimestampMs ?? Date.now()));
+  }, [order, referenceTimestampMs]);
+
+  const modalStatus = getStitchStatusBadgeConfig(order.status);
+
+  return (
+    <div
+      id="orderSnapshotDetailModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="orderSnapshotModalTitle"
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface-container-lowest rounded-xl shadow-2xl border border-outline-variant/40 max-w-2xl w-full max-h-[90vh] overflow-y-auto p-space-lg flex flex-col gap-space-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-surface-container pb-3">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3
+                id="orderSnapshotModalTitle"
+                className="font-headline-md text-headline-md text-on-surface"
+              >
+                Chi tiết Snapshot Đơn hàng
+              </h3>
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-label-md text-[11px] font-semibold ${modalStatus.pillClass}`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${modalStatus.dotClass}`}
+                />
+                <span>{modalStatus.badgeText}</span>
+              </span>
+            </div>
+            <p className="font-mono text-[13px] text-on-surface-variant mt-1 break-all">
+              #{order.id}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Đóng chi tiết đơn hàng"
+            className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[20px]">
+              close
+            </span>
+          </button>
+        </div>
+
+        {/* Thông tin thời gian tạo & hết hạn giữ chỗ 15 phút */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-surface-container-low p-3.5 rounded-xl text-body-sm">
+          <div>
+            <span className="text-on-surface-variant block">
+              Thời điểm tạo đơn (createdAt):
+            </span>
+            <strong className="text-on-surface">
+              {formatOrderTimestampVi(order.createdAt)}
+            </strong>
+          </div>
+          <div>
+            <span className="text-on-surface-variant block">
+              Hết hạn giữ chỗ 15 phút (expiresAt):
+            </span>
+            <strong className="text-on-surface">
+              {formatOrderTimestampVi(order.expiresAt)}
+            </strong>
+          </div>
+        </div>
+
+        {/* Danh sách dòng món Snapshot kèm ảnh sản phẩm */}
+        <div className="space-y-2.5">
+          <h4 className="font-title-sm text-title-sm text-on-surface">
+            Danh sách món đã lưu Snapshot ({order.items.length} dòng)
+          </h4>
+          <div className="space-y-2.5">
+            {order.items.map((item: OrderItemSnapshotDto) => {
+              const itemImg = resolveOrderItemImageUrl(
+                item.productId,
+                item.productName
+              );
+              return (
+                <div
+                  key={item.id}
+                  className="p-3 rounded-xl bg-surface-container-low/70 border border-outline-variant/30 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-14 h-14 rounded-lg overflow-hidden bg-surface-container flex-shrink-0 border border-outline-variant/25">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={itemImg}
+                        alt={item.productName}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="font-title-sm text-title-sm text-on-surface truncate">
+                        <span className="text-primary font-bold">
+                          {item.quantity}x
+                        </span>{" "}
+                        {item.productName}{" "}
+                        <span className="text-on-surface-variant font-normal text-body-sm">
+                          • {formatSizeLabel(item.size, item.sizeMultiplierPercent)}
+                        </span>
+                      </div>
+                      <div className="font-body-sm text-[12px] text-outline">
+                        Giá gốc: {formatVnd(item.basePriceVnd)} • Đơn giá:{" "}
+                        {formatVnd(item.unitPriceVnd)} × {item.quantity}
+                      </div>
+                      {item.toppings.length > 0 && (
+                        <div className="font-body-sm text-[12px] text-on-surface-variant">
+                          Topping:{" "}
+                          {item.toppings
+                            .map((t) => `${t.name} (+${formatVnd(t.priceVnd)})`)
+                            .join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="font-title-sm text-title-sm text-primary font-bold whitespace-nowrap">
+                    {formatVnd(item.lineTotalVnd)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Tóm tắt giao dịch thanh toán (Payment Summary) */}
+        <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-1.5 text-body-sm">
+          <h4 className="font-title-sm text-title-sm text-on-surface">
+            Thông tin thanh toán (Payment Summary)
+          </h4>
+          {order.payment ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <span className="text-on-surface-variant">Phương thức: </span>
+                <strong className="text-on-surface">
+                  {order.payment.method === "CARD"
+                    ? `CARD${
+                        order.payment.methodLast4
+                          ? ` •••• ${order.payment.methodLast4}`
+                          : ""
+                      }`
+                    : "WALLET"}
+                </strong>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">Trạng thái: </span>
+                <strong
+                  className={
+                    order.payment.status === "SUCCESS"
+                      ? "text-[#16A34A]"
+                      : "text-error"
+                  }
+                >
+                  {order.payment.status}
+                </strong>
+              </div>
+              {order.payment.mockReference && (
+                <div>
+                  <span className="text-on-surface-variant">
+                    Mã tham chiếu:{" "}
+                  </span>
+                  <code className="font-mono text-on-surface">
+                    {order.payment.mockReference}
+                  </code>
+                </div>
+              )}
+              {order.payment.failureReason && (
+                <div>
+                  <span className="text-on-surface-variant">
+                    Lý do từ chối:{" "}
+                  </span>
+                  <code className="font-mono text-error font-semibold">
+                    {order.payment.failureReason}
+                  </code>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-on-surface-variant">
+              Chưa phát sinh giao dịch thanh toán (
+              <code className="font-mono">payment: null</code>).
+            </p>
+          )}
+        </div>
+
+        {/* Bảng đối soát tổng tiền chuẩn ERD */}
+        <div className="p-3.5 rounded-xl bg-surface-container rounded-lg flex flex-col gap-1.5 text-body-sm">
+          <div className="flex justify-between text-on-surface-variant">
+            <span>Tạm tính (subtotalVnd):</span>
+            <strong className="text-on-surface">
+              {formatVnd(order.subtotalVnd)}
+            </strong>
+          </div>
+          <div className="flex justify-between text-tertiary font-medium">
+            <span>
+              Giảm giá (discountVnd
+              {order.couponCode ? ` • ${order.couponCode}` : ""}):
+            </span>
+            <span>-{formatVnd(order.discountVnd)}</span>
+          </div>
+          <div className="flex justify-between pt-2 border-t border-outline/15 text-title-sm">
+            <span className="font-bold text-on-surface">
+              Tổng thanh toán (totalVnd):
+            </span>
+            <span className="font-bold text-primary">
+              {formatVnd(order.totalVnd)}
+            </span>
+          </div>
+          <div className="flex justify-between text-on-surface-variant pt-0.5">
+            <span>Điểm tích lũy đã cộng (pointsEarned):</span>
+            <strong className="text-tertiary">
+              +{order.pointsEarned} điểm
+            </strong>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md text-label-md hover:bg-surface-container-high transition-colors cursor-pointer"
+          >
+            Đóng
+          </button>
+          {isPayable && (
+            <Link
+              id="order-snapshot-pay-cta"
+              data-testid="order-snapshot-pay-cta"
+              data-order-id={order.id}
+              href={`/payment?orderId=${order.id}`}
+              className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-container transition-colors flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                payment
+              </span>
+              <span>
+                Thanh toán ngay ({formatVnd(order.totalVnd)})
+              </span>
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onReorder(order);
+            }}
+            className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md text-label-md transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">
+              repeat
+            </span>
+            <span>Đặt lại món</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function OrderHistoryView() {
@@ -1622,295 +1923,11 @@ export default function OrderHistoryView() {
       {/* MODAL CHI TIẾT SNAPSHOT ĐƠN HÀNG & HÓA ĐƠN ĐIỆN TỬ                  */}
       {/* =================================================================== */}
       {selectedOrderSnapshot && (
-        <div
-          id="orderSnapshotDetailModal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="orderSnapshotModalTitle"
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setSelectedOrderSnapshot(null)}
-        >
-          <div
-            className="bg-surface-container-lowest rounded-xl shadow-2xl border border-outline-variant/40 max-w-2xl w-full max-h-[90vh] overflow-y-auto p-space-lg flex flex-col gap-space-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {(() => {
-              const modalStatus = getStitchStatusBadgeConfig(
-                selectedOrderSnapshot.status
-              );
-              return (
-                <>
-                  <div className="flex items-start justify-between gap-4 border-b border-surface-container pb-3">
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3
-                          id="orderSnapshotModalTitle"
-                          className="font-headline-md text-headline-md text-on-surface"
-                        >
-                          Chi tiết Snapshot Đơn hàng
-                        </h3>
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-label-md text-[11px] font-semibold ${modalStatus.pillClass}`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${modalStatus.dotClass}`}
-                          />
-                          <span>{modalStatus.badgeText}</span>
-                        </span>
-                      </div>
-                      <p className="font-mono text-[13px] text-on-surface-variant mt-1 break-all">
-                        #{selectedOrderSnapshot.id}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedOrderSnapshot(null)}
-                      aria-label="Đóng chi tiết đơn hàng"
-                      className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">
-                        close
-                      </span>
-                    </button>
-                  </div>
-
-                  {/* Thông tin thời gian tạo & hết hạn giữ chỗ 15 phút */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-surface-container-low p-3.5 rounded-xl text-body-sm">
-                    <div>
-                      <span className="text-on-surface-variant block">
-                        Thời điểm tạo đơn (createdAt):
-                      </span>
-                      <strong className="text-on-surface">
-                        {formatOrderTimestampVi(
-                          selectedOrderSnapshot.createdAt
-                        )}
-                      </strong>
-                    </div>
-                    <div>
-                      <span className="text-on-surface-variant block">
-                        Hết hạn giữ chỗ 15 phút (expiresAt):
-                      </span>
-                      <strong className="text-on-surface">
-                        {formatOrderTimestampVi(
-                          selectedOrderSnapshot.expiresAt
-                        )}
-                      </strong>
-                    </div>
-                  </div>
-
-                  {/* Danh sách dòng món Snapshot kèm ảnh sản phẩm */}
-                  <div className="space-y-2.5">
-                    <h4 className="font-title-sm text-title-sm text-on-surface">
-                      Danh sách món đã lưu Snapshot (
-                      {selectedOrderSnapshot.items.length} dòng)
-                    </h4>
-                    <div className="space-y-2.5">
-                      {selectedOrderSnapshot.items.map(
-                        (item: OrderItemSnapshotDto) => {
-                          const itemImg = resolveOrderItemImageUrl(
-                            item.productId,
-                            item.productName
-                          );
-                          return (
-                            <div
-                              key={item.id}
-                              className="p-3 rounded-xl bg-surface-container-low/70 border border-outline-variant/30 flex items-center justify-between gap-3"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-14 h-14 rounded-lg overflow-hidden bg-surface-container flex-shrink-0 border border-outline-variant/25">
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={itemImg}
-                                    alt={item.productName}
-                                    className="w-full h-full object-cover"
-                                  />
-                                </div>
-                                <div className="space-y-0.5 min-w-0">
-                                  <div className="font-title-sm text-title-sm text-on-surface truncate">
-                                    <span className="text-primary font-bold">
-                                      {item.quantity}x
-                                    </span>{" "}
-                                    {item.productName}{" "}
-                                    <span className="text-on-surface-variant font-normal text-body-sm">
-                                      •{" "}
-                                      {formatSizeLabel(
-                                        item.size,
-                                        item.sizeMultiplierPercent
-                                      )}
-                                    </span>
-                                  </div>
-                                  <div className="font-body-sm text-[12px] text-outline">
-                                    Giá gốc: {formatVnd(item.basePriceVnd)} •
-                                    Đơn giá: {formatVnd(item.unitPriceVnd)} ×{" "}
-                                    {item.quantity}
-                                  </div>
-                                  {item.toppings.length > 0 && (
-                                    <div className="font-body-sm text-[12px] text-on-surface-variant">
-                                      Topping:{" "}
-                                      {item.toppings
-                                        .map(
-                                          (t) =>
-                                            `${t.name} (+${formatVnd(t.priceVnd)})`
-                                        )
-                                        .join(", ")}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="font-title-sm text-title-sm text-primary font-bold whitespace-nowrap">
-                                {formatVnd(item.lineTotalVnd)}
-                              </div>
-                            </div>
-                          );
-                        }
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Tóm tắt giao dịch thanh toán (Payment Summary) */}
-                  <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-1.5 text-body-sm">
-                    <h4 className="font-title-sm text-title-sm text-on-surface">
-                      Thông tin thanh toán (Payment Summary)
-                    </h4>
-                    {selectedOrderSnapshot.payment ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <span className="text-on-surface-variant">
-                            Phương thức:{" "}
-                          </span>
-                          <strong className="text-on-surface">
-                            {selectedOrderSnapshot.payment.method === "CARD"
-                              ? `CARD${
-                                  selectedOrderSnapshot.payment.methodLast4
-                                    ? ` •••• ${selectedOrderSnapshot.payment.methodLast4}`
-                                    : ""
-                                }`
-                              : "WALLET"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span className="text-on-surface-variant">
-                            Trạng thái:{" "}
-                          </span>
-                          <strong
-                            className={
-                              selectedOrderSnapshot.payment.status === "SUCCESS"
-                                ? "text-[#16A34A]"
-                                : "text-error"
-                            }
-                          >
-                            {selectedOrderSnapshot.payment.status}
-                          </strong>
-                        </div>
-                        {selectedOrderSnapshot.payment.mockReference && (
-                          <div>
-                            <span className="text-on-surface-variant">
-                              Mã tham chiếu:{" "}
-                            </span>
-                            <code className="font-mono text-on-surface">
-                              {selectedOrderSnapshot.payment.mockReference}
-                            </code>
-                          </div>
-                        )}
-                        {selectedOrderSnapshot.payment.failureReason && (
-                          <div>
-                            <span className="text-on-surface-variant">
-                              Lý do từ chối:{" "}
-                            </span>
-                            <code className="font-mono text-error font-semibold">
-                              {selectedOrderSnapshot.payment.failureReason}
-                            </code>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-on-surface-variant">
-                        Chưa phát sinh giao dịch thanh toán (
-                        <code className="font-mono">payment: null</code>).
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Bảng đối soát tổng tiền chuẩn ERD */}
-                  <div className="p-3.5 rounded-xl bg-surface-container rounded-lg flex flex-col gap-1.5 text-body-sm">
-                    <div className="flex justify-between text-on-surface-variant">
-                      <span>Tạm tính (subtotalVnd):</span>
-                      <strong className="text-on-surface">
-                        {formatVnd(selectedOrderSnapshot.subtotalVnd)}
-                      </strong>
-                    </div>
-                    <div className="flex justify-between text-tertiary font-medium">
-                      <span>
-                        Giảm giá (discountVnd
-                        {selectedOrderSnapshot.couponCode
-                          ? ` • ${selectedOrderSnapshot.couponCode}`
-                          : ""}
-                        ):
-                      </span>
-                      <span>
-                        -{formatVnd(selectedOrderSnapshot.discountVnd)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between pt-2 border-t border-outline/15 text-title-sm">
-                      <span className="font-bold text-on-surface">
-                        Tổng thanh toán (totalVnd):
-                      </span>
-                      <span className="font-bold text-primary">
-                        {formatVnd(selectedOrderSnapshot.totalVnd)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-on-surface-variant pt-0.5">
-                      <span>Điểm tích lũy đã cộng (pointsEarned):</span>
-                      <strong className="text-tertiary">
-                        +{selectedOrderSnapshot.pointsEarned} điểm
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedOrderSnapshot(null)}
-                      className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md text-label-md hover:bg-surface-container-high transition-colors cursor-pointer"
-                    >
-                      Đóng
-                    </button>
-                    {(selectedOrderSnapshot.status === "PENDING" ||
-                      selectedOrderSnapshot.status === "PAYMENT_FAILED") &&
-                      Number.isFinite(Date.parse(selectedOrderSnapshot.expiresAt)) &&
-                      Date.now() < new Date(selectedOrderSnapshot.expiresAt).getTime() && (
-                        <Link
-                          href={`/payment?orderId=${selectedOrderSnapshot.id}`}
-                          className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-container transition-colors flex items-center gap-1.5"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">
-                            payment
-                          </span>
-                          <span>
-                            Thanh toán ngay ({formatVnd(selectedOrderSnapshot.totalVnd)})
-                          </span>
-                        </Link>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const target = selectedOrderSnapshot;
-                        setSelectedOrderSnapshot(null);
-                        handleReorderItems(target);
-                      }}
-                      className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md text-label-md transition-colors flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        repeat
-                      </span>
-                      <span>Đặt lại món</span>
-                    </button>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
+        <OrderSnapshotModal
+          order={selectedOrderSnapshot}
+          onClose={() => setSelectedOrderSnapshot(null)}
+          onReorder={handleReorderItems}
+        />
       )}
 
       {/* Toast thông báo thao tác (vị trí top-right chuẩn Stitch) */}

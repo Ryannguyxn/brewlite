@@ -26,6 +26,8 @@ import {
 import OrderHistoryView, {
   executeFetchOrderHistory,
   isMockPreviewAllowed,
+  isOrderPayable,
+  OrderSnapshotModal,
   resolveOrderItemImageUrl,
   type OrderHistoryErrorState,
 } from "@/components/OrderHistoryView";
@@ -1144,4 +1146,250 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
     assert.equal(errorHolder.current?.statusCode, 500);
     assert.equal(errorHolder.current?.code, "INTERNAL_ERROR");
   });
+
+  describe("13. UI Test: CTA Thanh toán ngay trong Snapshot Modal cho đơn còn hạn / hết hạn & đúng orderId điều hướng (SCRUM-65)", () => {
+    const baseTimeMs = 1770000000000; // Mốc thời gian chuẩn cố định
+
+    function createTestOrderSnapshot(overrides?: Partial<OrderHistoryItemDto>): OrderHistoryItemDto {
+      return {
+        id: overrides?.id ?? "550e8400-e29b-41d4-a716-446655440001",
+        status: overrides?.status ?? "PENDING",
+        createdAt: overrides?.createdAt ?? new Date(baseTimeMs - 300000).toISOString(),
+        expiresAt: overrides?.expiresAt ?? new Date(baseTimeMs + 600000).toISOString(), // Còn 10 phút
+        subtotalVnd: overrides?.subtotalVnd ?? 125000,
+        discountVnd: overrides?.discountVnd ?? 0,
+        totalVnd: overrides?.totalVnd ?? 125000,
+        couponCode: overrides?.couponCode ?? null,
+        pointsEarned: overrides?.pointsEarned ?? 12,
+        items: overrides?.items ?? [
+          {
+            id: "item-snapshot-1",
+            productId: "prod-cafe-sua-da",
+            productName: "Cà phê sữa đá",
+            size: "M",
+            sizeMultiplierPercent: 20,
+            basePriceVnd: 45000,
+            unitPriceVnd: 54000,
+            quantity: 2,
+            lineTotalVnd: 108000,
+            toppings: [],
+          },
+        ],
+        payment: overrides?.payment ?? null,
+      };
+    }
+
+    it("13a. hiển thị nút CTA thanh toán kèm đúng orderId khi đơn PENDING còn trong thời hạn giữ chỗ 15 phút", () => {
+      const orderPending = createTestOrderSnapshot({
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        status: "PENDING",
+        totalVnd: 125000,
+        expiresAt: new Date(baseTimeMs + 600000).toISOString(),
+      });
+
+      const markup = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(OrderSnapshotModal, {
+          order: orderPending,
+          onClose: () => {},
+          onReorder: () => {},
+          referenceTimestampMs: baseTimeMs,
+        })
+      );
+
+      // 1. Kiểm tra tồn tại CTA thanh toán
+      assert.ok(
+        markup.includes('id="order-snapshot-pay-cta"'),
+        "Snapshot modal phải hiển thị nút CTA thanh toán cho đơn PENDING còn hạn"
+      );
+      assert.ok(
+        markup.includes('data-testid="order-snapshot-pay-cta"'),
+        "Nút thanh toán phải gắn data-testid order-snapshot-pay-cta để kiểm thử UI"
+      );
+
+      // 2. Kiểm tra điều hướng đúng orderId
+      const expectedHref = '/payment?orderId=550e8400-e29b-41d4-a716-446655440001';
+      assert.ok(
+        markup.includes(`href="${expectedHref}"`),
+        `CTA thanh toán phải trỏ chính xác đến ${expectedHref}`
+      );
+      assert.ok(
+        markup.includes('data-order-id="550e8400-e29b-41d4-a716-446655440001"'),
+        "CTA thanh toán phải mang data-order-id tương ứng với id của đơn hàng"
+      );
+
+      // 3. Kiểm tra nhãn hiển thị và định dạng tiền tệ
+      assert.ok(
+        markup.includes("Thanh toán ngay"),
+        "Nút phải hiển thị nhãn 'Thanh toán ngay'"
+      );
+      assert.ok(
+        markup.includes("125.000"),
+        "Nút phải hiển thị chính xác tổng tiền cần thanh toán của đơn hàng (125.000 đ)"
+      );
+    });
+
+    it("13b. hiển thị nút CTA thanh toán kèm đúng orderId khi đơn PAYMENT_FAILED còn trong thời hạn", () => {
+      const orderFailed = createTestOrderSnapshot({
+        id: "990e8400-e29b-41d4-a716-446655440099",
+        status: "PAYMENT_FAILED",
+        totalVnd: 85000,
+        expiresAt: new Date(baseTimeMs + 300000).toISOString(),
+        payment: {
+          id: "pay-failed-1",
+          method: "CARD",
+          methodLast4: "4242",
+          status: "FAILED",
+          amountVnd: 85000,
+          failureReason: "Thẻ không đủ số dư",
+          mockReference: null,
+          createdAt: new Date(baseTimeMs - 60000).toISOString(),
+        },
+      });
+
+      const markup = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(OrderSnapshotModal, {
+          order: orderFailed,
+          onClose: () => {},
+          onReorder: () => {},
+          referenceTimestampMs: baseTimeMs,
+        })
+      );
+
+      assert.ok(
+        markup.includes('id="order-snapshot-pay-cta"'),
+        "Snapshot modal phải hiển thị nút CTA thanh toán cho đơn PAYMENT_FAILED còn hạn để khách thanh toán lại"
+      );
+      const expectedHref = '/payment?orderId=990e8400-e29b-41d4-a716-446655440099';
+      assert.ok(
+        markup.includes(`href="${expectedHref}"`),
+        `CTA thanh toán phải trỏ chính xác đến ${expectedHref}`
+      );
+      assert.ok(
+        markup.includes('data-order-id="990e8400-e29b-41d4-a716-446655440099"'),
+        "CTA thanh toán phải mang đúng orderId của đơn PAYMENT_FAILED"
+      );
+      assert.ok(
+        markup.includes("85.000"),
+        "Nút phải hiển thị đúng số tiền 85.000 đ"
+      );
+    });
+
+    it("13c. KHÔNG hiển thị CTA thanh toán khi đơn PENDING đã HẾT HẠN giữ chỗ (expired)", () => {
+      const orderExpired = createTestOrderSnapshot({
+        id: "550e8400-e29b-41d4-a716-446655440003",
+        status: "PENDING",
+        expiresAt: new Date(baseTimeMs - 1000).toISOString(), // Đã hết hạn 1 giây trước
+      });
+
+      const markup = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(OrderSnapshotModal, {
+          order: orderExpired,
+          onClose: () => {},
+          onReorder: () => {},
+          referenceTimestampMs: baseTimeMs,
+        })
+      );
+
+      // Tuyệt đối không được render nút thanh toán và link điều hướng
+      assert.ok(
+        !markup.includes('id="order-snapshot-pay-cta"'),
+        "Không được render nút order-snapshot-pay-cta cho đơn PENDING đã hết hạn"
+      );
+      assert.ok(
+        !markup.includes('/payment?orderId='),
+        "Không được chứa bất kỳ link điều hướng thanh toán nào cho đơn đã hết hạn"
+      );
+      assert.ok(
+        !markup.includes("Thanh toán ngay"),
+        "Không được hiển thị chữ 'Thanh toán ngay' khi đơn hết hạn giữ chỗ"
+      );
+      // Nút 'Đóng' và 'Đặt lại món' vẫn phải hiển thị bình thường
+      assert.ok(markup.includes("Đóng"), "Nút Đóng vẫn phải tồn tại");
+      assert.ok(markup.includes("Đặt lại món"), "Nút Đặt lại món vẫn phải tồn tại");
+    });
+
+    it("13d. KHÔNG hiển thị CTA thanh toán khi đơn PAYMENT_FAILED đã HẾT HẠN", () => {
+      const orderFailedExpired = createTestOrderSnapshot({
+        id: "550e8400-e29b-41d4-a716-446655440004",
+        status: "PAYMENT_FAILED",
+        expiresAt: new Date(baseTimeMs - 50000).toISOString(),
+      });
+
+      const markup = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(OrderSnapshotModal, {
+          order: orderFailedExpired,
+          onClose: () => {},
+          onReorder: () => {},
+          referenceTimestampMs: baseTimeMs,
+        })
+      );
+
+      assert.ok(
+        !markup.includes('id="order-snapshot-pay-cta"'),
+        "Không được render nút CTA thanh toán cho đơn PAYMENT_FAILED đã hết hạn"
+      );
+      assert.ok(
+        !markup.includes('/payment?orderId='),
+        "Không được chứa link điều hướng thanh toán cho đơn PAYMENT_FAILED hết hạn"
+      );
+    });
+
+    it("13e. KHÔNG hiển thị CTA thanh toán cho các đơn hàng ở trạng thái PAID, COMPLETED, hoặc CANCELLED kể cả khi expiresAt trong tương lai", () => {
+      const statuses: Array<"PAID" | "COMPLETED" | "CANCELLED"> = [
+        "PAID",
+        "COMPLETED",
+        "CANCELLED",
+      ];
+
+      for (const status of statuses) {
+        const finishedOrder = createTestOrderSnapshot({
+          id: `550e8400-e29b-41d4-a716-4466554400${status}`,
+          status,
+          expiresAt: new Date(baseTimeMs + 600000).toISOString(), // expiresAt tương lai nhưng status đã kết thúc
+        });
+
+        const markup = ReactDOMServer.renderToStaticMarkup(
+          React.createElement(OrderSnapshotModal, {
+            order: finishedOrder,
+            onClose: () => {},
+            onReorder: () => {},
+            referenceTimestampMs: baseTimeMs,
+          })
+        );
+
+        assert.ok(
+          !markup.includes('id="order-snapshot-pay-cta"'),
+          `Không được hiển thị CTA thanh toán cho đơn có trạng thái ${status}`
+        );
+        assert.ok(
+          !markup.includes('/payment?orderId='),
+          `Không được có link thanh toán cho đơn có trạng thái ${status}`
+        );
+      }
+    });
+
+    it("13f. kiểm chứng hàm isOrderPayable với đầy đủ các biên dữ liệu", () => {
+      const future = new Date(baseTimeMs + 10000).toISOString();
+      const past = new Date(baseTimeMs - 10000).toISOString();
+
+      // Biên falsy / null / undefined
+      assert.equal(isOrderPayable(null, baseTimeMs), false);
+      assert.equal(isOrderPayable(undefined, baseTimeMs), false);
+
+      // Biên status không hợp lệ
+      assert.equal(isOrderPayable({ status: "PAID", expiresAt: future }, baseTimeMs), false);
+      assert.equal(isOrderPayable({ status: "COMPLETED", expiresAt: future }, baseTimeMs), false);
+      assert.equal(isOrderPayable({ status: "CANCELLED", expiresAt: future }, baseTimeMs), false);
+
+      // Biên expiresAt sai định dạng
+      assert.equal(isOrderPayable({ status: "PENDING", expiresAt: "invalid-iso" }, baseTimeMs), false);
+
+      // Biên thời gian quá khứ vs tương lai
+      assert.equal(isOrderPayable({ status: "PENDING", expiresAt: past }, baseTimeMs), false);
+      assert.equal(isOrderPayable({ status: "PAYMENT_FAILED", expiresAt: past }, baseTimeMs), false);
+      assert.equal(isOrderPayable({ status: "PENDING", expiresAt: future }, baseTimeMs), true);
+      assert.equal(isOrderPayable({ status: "PAYMENT_FAILED", expiresAt: future }, baseTimeMs), true);
+    });
+  });
+
 });

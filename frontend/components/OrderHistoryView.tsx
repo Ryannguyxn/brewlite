@@ -443,8 +443,8 @@ export function OrderSnapshotModal({
   onReorder,
   referenceTimestampMs,
 }: OrderSnapshotModalProps) {
-  // Trạng thái live countdown: tự động chuyển thành true khi thời gian hiện tại vượt qua expiresAt
-  const [hasExpiredLive, setHasExpiredLive] = useState<boolean>(false);
+  // Trạng thái live countdown: lưu orderId đã kích hoạt hết hạn để tự động cô lập theo từng đơn hàng
+  const [expiredOrderId, setExpiredOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     // 1. Chế độ test / SSR truyền referenceTimestampMs cố định: không kích hoạt live timer
@@ -453,8 +453,9 @@ export function OrderSnapshotModal({
     }
 
     // 2. Chế độ runtime: đặt timer tự động ẩn CTA ngay khi qua expiresAt
+    const currentOrderId = order.id;
     const cleanup = setupOrderExpirationTimer(order.expiresAt, () => {
-      setHasExpiredLive(true);
+      setExpiredOrderId(currentOrderId);
     });
 
     return () => {
@@ -464,10 +465,11 @@ export function OrderSnapshotModal({
 
   // CTA chỉ hiển thị khi:
   // - Trạng thái là PENDING hoặc PAYMENT_FAILED
-  // - Chưa bị hết hạn trong live timer (!hasExpiredLive)
+  // - Đơn hàng hiện tại chưa bị hết hạn trong live timer
   // - Còn trong hạn tại thời điểm tham chiếu (isOrderPayable)
+  const isCurrentOrderExpiredLive = expiredOrderId === order.id;
   const isPayable =
-    !hasExpiredLive && isOrderPayable(order, referenceTimestampMs);
+    !isCurrentOrderExpiredLive && isOrderPayable(order, referenceTimestampMs);
 
   const modalStatus = getStitchStatusBadgeConfig(order.status);
 
@@ -2001,6 +2003,7 @@ export default function OrderHistoryView() {
       {/* =================================================================== */}
       {selectedOrderSnapshot && (
         <OrderSnapshotModal
+          key={selectedOrderSnapshot.id}
           order={selectedOrderSnapshot}
           onClose={() => setSelectedOrderSnapshot(null)}
           onReorder={handleReorderItems}

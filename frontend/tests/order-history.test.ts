@@ -1605,6 +1605,198 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
         mock.timers.reset();
       }
     });
+
+    it("13k. component lifecycle cleanup test: xác nhận timer bị hủy an toàn khi modal unmount ở cấp component", async () => {
+      mock.timers.enable({ apis: ["setTimeout", "Date"] });
+      try {
+        const now = 1770000000000;
+        mock.timers.setTime(now);
+
+        const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', { url: "http://localhost" });
+        const originalWindow = globalThis.window;
+        const originalDocument = globalThis.document;
+        const originalSelf = globalThis.self;
+        const globalTarget = globalThis as unknown as {
+          window: unknown;
+          document: unknown;
+          self: unknown;
+          IS_REACT_ACT_ENVIRONMENT?: boolean;
+        };
+        const originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
+
+        globalTarget.window = dom.window;
+        globalTarget.document = dom.window.document;
+        globalTarget.self = dom.window;
+        globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
+
+        const container = dom.window.document.getElementById("root");
+        const root = createRoot(container!);
+
+        const orderExpiringIn10s = createTestOrderSnapshot({
+          id: "550e8400-e29b-41d4-a716-446655440099",
+          status: "PENDING",
+          createdAt: new Date(now - 60000).toISOString(),
+          expiresAt: new Date(now + 10000).toISOString(), // Còn đúng 10 giây
+          totalVnd: 50000,
+        });
+
+        // 1. Mount modal vào DOM
+        await act(async () => {
+          root.render(
+            React.createElement(OrderSnapshotModal, {
+              order: orderExpiringIn10s,
+              onClose: () => {},
+              onReorder: () => {},
+            })
+          );
+        });
+
+        // CTA phải xuất hiện
+        assert.ok(container!.querySelector("#order-snapshot-pay-cta") !== null);
+
+        // 2. Unmount modal khi đơn vẫn còn 7s (ở giây thứ 3)
+        await act(async () => {
+          mock.timers.tick(3000);
+        });
+        await act(async () => {
+          root.unmount();
+        });
+
+        // Container sau khi unmount phải rỗng
+        assert.equal(container!.innerHTML, "");
+
+        // 3. Tiến thời gian vượt xa hạn ban đầu (+15s)
+        // Callback không còn tồn tại, không gây lỗi hay leak trên unmounted component
+        await act(async () => {
+          mock.timers.tick(15000);
+        });
+
+        dom.window.close();
+        globalTarget.window = originalWindow;
+        globalTarget.document = originalDocument;
+        globalTarget.self = originalSelf;
+        globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+      } finally {
+        mock.timers.reset();
+      }
+    });
+
+    it("13l. component lifecycle order switch test: xác nhận timer của order cũ bị hủy và timer của order mới hoạt động chính xác khi đổi order ở cấp component", async () => {
+      mock.timers.enable({ apis: ["setTimeout", "Date"] });
+      try {
+        const now = 1770000000000;
+        mock.timers.setTime(now);
+
+        const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', { url: "http://localhost" });
+        const originalWindow = globalThis.window;
+        const originalDocument = globalThis.document;
+        const originalSelf = globalThis.self;
+        const globalTarget = globalThis as unknown as {
+          window: unknown;
+          document: unknown;
+          self: unknown;
+          IS_REACT_ACT_ENVIRONMENT?: boolean;
+        };
+        const originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
+
+        globalTarget.window = dom.window;
+        globalTarget.document = dom.window.document;
+        globalTarget.self = dom.window;
+        globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
+
+        const container = dom.window.document.getElementById("root");
+        const root = createRoot(container!);
+
+        const orderA = createTestOrderSnapshot({
+          id: "order-a-expires-5s",
+          status: "PENDING",
+          createdAt: new Date(now - 60000).toISOString(),
+          expiresAt: new Date(now + 5000).toISOString(), // Hết hạn sau 5 giây
+          totalVnd: 50000,
+        });
+
+        const orderB = createTestOrderSnapshot({
+          id: "order-b-expires-20s",
+          status: "PENDING",
+          createdAt: new Date(now - 60000).toISOString(),
+          expiresAt: new Date(now + 20000).toISOString(), // Hết hạn sau 20 giây
+          totalVnd: 90000,
+        });
+
+        // 1. Mount với Order A
+        await act(async () => {
+          root.render(
+            React.createElement(OrderSnapshotModal, {
+              order: orderA,
+              onClose: () => {},
+              onReorder: () => {},
+            })
+          );
+        });
+
+        const ctaA = container!.querySelector("#order-snapshot-pay-cta");
+        assert.ok(ctaA !== null);
+        assert.equal(ctaA.getAttribute("data-order-id"), "order-a-expires-5s");
+
+        // 2. Ở giây thứ 2 (khi Order A chưa hết hạn), đổi prop sang Order B
+        await act(async () => {
+          mock.timers.tick(2000);
+        });
+
+        await act(async () => {
+          root.render(
+            React.createElement(OrderSnapshotModal, {
+              order: orderB,
+              onClose: () => {},
+              onReorder: () => {},
+            })
+          );
+        });
+
+        const ctaB = container!.querySelector("#order-snapshot-pay-cta");
+        assert.ok(ctaB !== null);
+        assert.equal(ctaB.getAttribute("data-order-id"), "order-b-expires-20s");
+
+        // 3. Tiến thời gian thêm 4000ms (tổng 6000ms kể từ now - đã qua mốc 5s của Order A)
+        // Vì timer của Order A đã được useEffect cleanup hủy bỏ, CTA của Order B KHÔNG bị ảnh hưởng
+        await act(async () => {
+          mock.timers.tick(4000);
+        });
+
+        const ctaBStillActive = container!.querySelector("#order-snapshot-pay-cta");
+        assert.ok(
+          ctaBStillActive !== null,
+          "Timer của Order A đã được dọn dẹp (cleanup), CTA của Order B vẫn phải tồn tại sau khi qua mốc 5s của Order A"
+        );
+        assert.equal(ctaBStillActive.getAttribute("data-order-id"), "order-b-expires-20s");
+
+        // 4. Tiến thời gian đến mốc 20000ms (chạm mốc hết hạn của chính Order B)
+        // 6000ms + 14000ms = 20000ms
+        await act(async () => {
+          mock.timers.tick(14000);
+        });
+
+        const ctaBExpired = container!.querySelector("#order-snapshot-pay-cta");
+        assert.equal(
+          ctaBExpired,
+          null,
+          "CTA của Order B phải tự động biến mất khi chạm đúng hạn 20s của chính Order B"
+        );
+
+        // 5. Cleanup
+        await act(async () => {
+          root.unmount();
+        });
+        dom.window.close();
+
+        globalTarget.window = originalWindow;
+        globalTarget.document = originalDocument;
+        globalTarget.self = originalSelf;
+        globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+      } finally {
+        mock.timers.reset();
+      }
+    });
   });
 
   describe("14. Server Truth & User Isolation cho Order Snapshot Modal (SCRUM-65)", () => {

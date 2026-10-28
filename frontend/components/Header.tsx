@@ -145,7 +145,16 @@ export default function Header({
             </button>
 
             {isSearchOpen && (
-              <div className="absolute right-0 mt-2 w-[calc(100vw-1.5rem)] max-w-xs sm:w-72 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/40 p-2.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <>
+                {/* Backdrop mờ đóng panel tìm kiếm khi click ra ngoài trên mobile */}
+                <div
+                  className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] sm:hidden"
+                  onClick={() => setIsSearchOpen(false)}
+                  aria-hidden="true"
+                />
+
+                {/* Panel tìm kiếm: trên mobile neo cố định theo viewport (fixed inset-x-3 top-[68px]), trên desktop neo theo nút Search (sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-72) */}
+                <div className="fixed inset-x-3 top-[68px] sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-72 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/40 p-2.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="relative flex items-center">
                   <span className="absolute left-3 text-outline material-symbols-outlined text-[18px] pointer-events-none">
                     search
@@ -171,7 +180,8 @@ export default function Header({
                     </button>
                   )}
                 </div>
-              </div>
+                </div>
+              </>
             )}
           </div>
           <button

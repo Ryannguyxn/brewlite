@@ -87,24 +87,7 @@ export default function Header({
           </button>
         </div>
 
-        <div className="hidden xl:flex items-center flex-initial w-64 2xl:w-80 min-w-0 mx-space-sm">
-          <div className="relative w-full">
-            <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-outline">
-              <span className="material-symbols-outlined text-[20px]">
-                search
-              </span>
-            </span>
-            <input
-              className="w-full pl-10 pr-4 py-2 bg-surface-container-lowest text-on-surface placeholder:text-outline text-body-sm font-body-sm rounded-full focus:outline-none focus:ring-1 focus:ring-primary shadow-[0_1px_4px_rgba(44,32,24,0.04)] transition-all"
-              placeholder={siteConfig.searchPlaceholder}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange?.(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <nav className="hidden md:flex items-center gap-1 flex-shrink-0 z-10">
+        <nav className="hidden md:flex items-center gap-1 flex-shrink-0">
           <Link
             className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors whitespace-nowrap ${
               activeNav === "thuc-don"
@@ -146,6 +129,23 @@ export default function Header({
         </nav>
 
         <div className="flex items-center gap-space-md flex-shrink-0">
+          {/* Ô tìm kiếm tách riêng biệt sang nhóm tiện ích bên phải, không đè hay đứng trước Thực đơn */}
+          <div className="hidden lg:flex items-center w-48 xl:w-60 min-w-0">
+            <div className="relative w-full">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-outline">
+                <span className="material-symbols-outlined text-[20px]">
+                  search
+                </span>
+              </span>
+              <input
+                className="w-full pl-10 pr-4 py-2 bg-surface-container-lowest text-on-surface placeholder:text-outline text-body-sm font-body-sm rounded-full focus:outline-none focus:ring-1 focus:ring-primary shadow-[0_1px_4px_rgba(44,32,24,0.04)] transition-all"
+                placeholder={siteConfig.searchPlaceholder}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => onSearchChange?.(e.target.value)}
+              />
+            </div>
+          </div>
           <button
             id="header-cart-btn"
             onClick={handleCartButtonClick}

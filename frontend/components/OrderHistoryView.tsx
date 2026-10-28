@@ -401,6 +401,34 @@ export function isOrderPayable(
   return expiresMs > now;
 }
 
+/**
+ * Thiết lập timer tự động kích hoạt callback khi chạm mốc expiresAt của đơn hàng (SCRUM-65).
+ * - Trả về hàm cleanup () => void để hủy timer khi unmount hoặc đổi đơn.
+ * - Trả về null nếu đơn hàng đã hết hạn ngay thời điểm kiểm tra.
+ */
+export function setupOrderExpirationTimer(
+  expiresAtIso: string,
+  onExpire: () => void,
+  nowMs = Date.now()
+): (() => void) | null {
+  const expiresMs = Number.isFinite(Date.parse(expiresAtIso))
+    ? new Date(expiresAtIso).getTime()
+    : 0;
+  if (expiresMs <= 0) {
+    onExpire();
+    return null;
+  }
+  const remainingMs = expiresMs - nowMs;
+  if (remainingMs <= 0) {
+    onExpire();
+    return null;
+  }
+  const timer = setTimeout(onExpire, remainingMs);
+  return () => {
+    clearTimeout(timer);
+  };
+}
+
 export interface OrderSnapshotModalProps {
   order: OrderHistoryItemDto;
   onClose: () => void;
@@ -424,22 +452,13 @@ export function OrderSnapshotModal({
       return;
     }
 
-    const expiresMs = Number.isFinite(Date.parse(order.expiresAt))
-      ? new Date(order.expiresAt).getTime()
-      : 0;
-
-    const remainingMs = expiresMs - Date.now();
-    if (remainingMs <= 0) {
-      return;
-    }
-
     // 2. Chế độ runtime: đặt timer tự động ẩn CTA ngay khi qua expiresAt
-    const timer = setTimeout(() => {
+    const cleanup = setupOrderExpirationTimer(order.expiresAt, () => {
       setHasExpiredLive(true);
-    }, remainingMs);
+    });
 
     return () => {
-      clearTimeout(timer);
+      cleanup?.();
     };
   }, [order.id, order.status, order.expiresAt, referenceTimestampMs]);
 

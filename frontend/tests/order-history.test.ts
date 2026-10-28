@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
 import { MOCK_MY_ORDERS_RESPONSE, type OrderHistoryItemDto } from "@/mock-data";
@@ -28,6 +28,7 @@ import OrderHistoryView, {
   isMockPreviewAllowed,
   isOrderPayable,
   OrderSnapshotModal,
+  setupOrderExpirationTimer,
   resolveOrderItemImageUrl,
   type OrderHistoryErrorState,
 } from "@/components/OrderHistoryView";
@@ -1445,6 +1446,78 @@ describe("SCRUM-64: Order History UI & GET /orders/me Contract Tests", () => {
         !expiredMarkup.includes('/payment?orderId='),
         "Sau khi qua expiresAt, modal không được chứa bất kỳ link thanh toán nào"
       );
+    });
+
+    it("13h. client-side fake timer xác nhận timer kích hoạt chính xác sau expiresAt và tự ẩn CTA", () => {
+      mock.timers.enable({ apis: ["setTimeout", "Date"] });
+      try {
+        const now = 1770000000000;
+        mock.timers.setTime(now);
+
+        const remainingMs = 5000;
+        const expiresAtIso = new Date(now + remainingMs).toISOString();
+
+        let expiredTriggered = false;
+        const cleanup = setupOrderExpirationTimer(
+          expiresAtIso,
+          () => {
+            expiredTriggered = true;
+          },
+          now
+        );
+
+        assert.ok(cleanup !== null, "Hàm cleanup phải tồn tại khi đơn hàng còn hạn");
+        assert.equal(expiredTriggered, false, "Timer chưa được kích hoạt trước hạn");
+
+        // Nhích thời gian 4999ms (chưa tới hạn)
+        mock.timers.tick(4999);
+        assert.equal(expiredTriggered, false, "Chưa chạm mốc expiresAt, expiredTriggered vẫn phải là false");
+
+        // Nhích thêm 1ms (chạm mốc 5000ms = expiresAt)
+        mock.timers.tick(1);
+        assert.equal(
+          expiredTriggered,
+          true,
+          "Đúng thời điểm expiresAt, timer phải kích hoạt callback tự ẩn CTA"
+        );
+
+        cleanup();
+      } finally {
+        mock.timers.reset();
+      }
+    });
+
+    it("13i. client-side fake timer kiểm chứng hủy timer (cleanup) khi unmount hoặc đổi đơn", () => {
+      mock.timers.enable({ apis: ["setTimeout", "Date"] });
+      try {
+        const now = 1770000000000;
+        mock.timers.setTime(now);
+
+        const expiresAtIso = new Date(now + 10000).toISOString();
+
+        let expiredTriggered = false;
+        const cleanup = setupOrderExpirationTimer(
+          expiresAtIso,
+          () => {
+            expiredTriggered = true;
+          },
+          now
+        );
+
+        // Hủy timer ngay lập tức (mô phỏng unmount modal trước khi hết hạn)
+        cleanup?.();
+
+        // Nhích thời gian vượt quá hạn 10000ms
+        mock.timers.tick(15000);
+
+        assert.equal(
+          expiredTriggered,
+          false,
+          "Sau khi gọi cleanup, callback không được phép kích hoạt (không gây memory leak)"
+        );
+      } finally {
+        mock.timers.reset();
+      }
     });
   });
 

@@ -87,7 +87,7 @@ export default function Header({
           </button>
         </div>
 
-        <div className="hidden lg:flex items-center flex-1 max-w-sm min-w-0 mx-space-sm">
+        <div className="hidden xl:flex items-center flex-initial w-64 2xl:w-80 min-w-0 mx-space-sm">
           <div className="relative w-full">
             <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-outline">
               <span className="material-symbols-outlined text-[20px]">
@@ -104,7 +104,7 @@ export default function Header({
           </div>
         </div>
 
-        <nav className="hidden md:flex items-center gap-1 flex-shrink-0">
+        <nav className="hidden md:flex items-center gap-1 flex-shrink-0 z-10">
           <Link
             className={`px-3 py-2 font-label-lg text-label-lg rounded-lg transition-colors whitespace-nowrap ${
               activeNav === "thuc-don"

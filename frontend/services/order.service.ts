@@ -19,6 +19,7 @@ import {
   type PaymentMethod,
   type PaymentStatus,
 } from "@/mock-data";
+import { isValidIsoUtcString } from "./payment.service";
 import {
   API_BASE_URL,
   isValidUuid,
@@ -703,8 +704,7 @@ export function validateOrderResponseData(
 
   if (
     typeof record.createdAt !== "string" ||
-    !record.createdAt.trim() ||
-    Number.isNaN(Date.parse(record.createdAt))
+    !isValidIsoUtcString(record.createdAt)
   ) {
     throw createOrderError(
       "Thời gian tạo đơn (createdAt) từ máy chủ không đúng chuẩn ISO 8601.",
@@ -1359,8 +1359,7 @@ export function validateOrderPaymentSummaryData(
 
   if (
     typeof payment.createdAt !== "string" ||
-    !payment.createdAt.trim() ||
-    Number.isNaN(Date.parse(payment.createdAt))
+    !isValidIsoUtcString(payment.createdAt)
   ) {
     throw createOrderError(
       `Thời gian giao dịch (payment.createdAt) của đơn hàng thứ ${orderIdx + 1} không đúng chuẩn ISO 8601.`,
@@ -1437,8 +1436,7 @@ export function validateOrderHistoryItemData(
 
   if (
     typeof record.createdAt !== "string" ||
-    !record.createdAt.trim() ||
-    Number.isNaN(Date.parse(record.createdAt))
+    !isValidIsoUtcString(record.createdAt)
   ) {
     throw createOrderError(
       `Thời gian tạo đơn (createdAt) ở đơn hàng thứ ${orderIdx + 1} không đúng chuẩn ISO 8601.`,
@@ -1451,8 +1449,7 @@ export function validateOrderHistoryItemData(
 
   if (
     typeof record.expiresAt !== "string" ||
-    !record.expiresAt.trim() ||
-    Number.isNaN(Date.parse(record.expiresAt))
+    !isValidIsoUtcString(record.expiresAt)
   ) {
     throw createOrderError(
       `Thời gian hết hạn giữ chỗ (expiresAt) ở đơn hàng thứ ${orderIdx + 1} bị thiếu hoặc không đúng chuẩn ISO 8601.`,

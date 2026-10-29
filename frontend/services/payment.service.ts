@@ -44,6 +44,21 @@ export const CARD_NUMBER_REGEX = /^[0-9]{16}$/;
 export const WALLET_PHONE_REGEX = /^[0-9]{10}$/;
 
 /**
+ * Kiểm tra chuỗi ngày/giờ có đúng chuẩn ISO 8601 UTC (bắt buộc phân cách 'T' và kết thúc bằng 'Z') theo API Contract v3.0.
+ * Ngăn chặn việc chấp nhận các chuỗi parse được bằng Date.parse() nhưng sai chuẩn như "2026-10-29 10:00:00", "10/29/2026",
+ * "Thu, 29 Oct 2026 10:00:00 GMT", hoặc chuỗi có offset không phải UTC như "+07:00".
+ */
+export function isValidIsoUtcString(val: unknown): val is string {
+  if (typeof val !== "string") return false;
+  const trimmed = val.trim();
+  if (trimmed !== val) return false;
+  const ISO_UTC_REGEX =
+    /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?Z$/;
+  if (!ISO_UTC_REGEX.test(val)) return false;
+  return Number.isFinite(Date.parse(val));
+}
+
+/**
  * Điều hướng endpoint Backend qua Next.js rewrite proxy (`/api/backend/...`) khi chạy trên trình duyệt (client-side)
  * để tránh lỗi CORS giữa frontend (cổng 3000) và backend (cổng 3001), đồng bộ với auth.service và order.service.
  */
@@ -665,9 +680,9 @@ export function validatePaymentResponseData(
     }
   }
 
-  if (!mockReference || !createdAt || Number.isNaN(Date.parse(createdAt))) {
+  if (!mockReference || typeof createdAt !== "string" || !isValidIsoUtcString(createdAt)) {
     throw createPaymentError(
-      "Phản hồi thanh toán thiếu mockReference hoặc createdAt không phải ngày ISO 8601 hợp lệ.",
+      "Phản hồi thanh toán thiếu mockReference hoặc createdAt không phải ngày ISO 8601 UTC hợp lệ.",
       502,
       "INTERNAL_ERROR",
       idempotencyKey,
@@ -1004,24 +1019,56 @@ function validateOrderItemSnapshot(raw: unknown): OrderItemSnapshotDto | null {
 
 /**
  * Runtime validation cho PaymentSnapshot từ `GET /orders/me`:
+ * - Không bao giờ tự mặc định/coerce trường sai sang `"CARD"`, `null` hoặc giá trị khác.
+ * - Mọi trường bắt buộc phải tồn tại, đúng kiểu, đúng enum và đúng quy tắc nullable của API Contract v3.0 §4.2.
  */
-function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto | null {
-  if (!raw || typeof raw !== "object") return null;
+export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const p = raw as Record<string, unknown>;
-  if (typeof p.id !== "string" || !isValidUuid(p.id)) return null;
+  if (typeof p.id !== "string" || !isValidUuid(p.id.trim())) return null;
   if (p.status !== "SUCCESS" && p.status !== "FAILED") return null;
-  if (typeof p.amountVnd !== "number" || !Number.isSafeInteger(p.amountVnd) || p.amountVnd < 0) return null;
-  const createdAtMs = typeof p.createdAt === "string" ? Date.parse(p.createdAt) : NaN;
-  if (!Number.isFinite(createdAtMs)) return null;
+  if (p.method !== "CARD" && p.method !== "WALLET") return null;
+
+  if (!("methodLast4" in p) || p.methodLast4 === undefined) return null;
+  if (
+    p.methodLast4 !== null &&
+    (typeof p.methodLast4 !== "string" || !/^[0-9]{4}$/.test(p.methodLast4))
+  ) {
+    return null;
+  }
+
+  if (
+    typeof p.amountVnd !== "number" ||
+    !Number.isSafeInteger(p.amountVnd) ||
+    p.amountVnd < 0
+  ) {
+    return null;
+  }
+
+  if (!("mockReference" in p) || p.mockReference === undefined) return null;
+  if (
+    p.mockReference !== null &&
+    (typeof p.mockReference !== "string" || !p.mockReference.trim())
+  ) {
+    return null;
+  }
+
+  if (!("failureReason" in p) || p.failureReason === undefined) return null;
+  if (p.failureReason !== null && p.failureReason !== "PAYMENT_DECLINED") {
+    return null;
+  }
+
+  if (typeof p.createdAt !== "string" || !isValidIsoUtcString(p.createdAt)) return null;
+  const createdAtMs = Date.parse(p.createdAt);
 
   return {
     id: p.id.trim(),
     status: p.status,
-    method: typeof p.method === "string" ? (p.method as PaymentMethod) : "CARD",
-    methodLast4: typeof p.methodLast4 === "string" && /^[0-9]{4}$/.test(p.methodLast4) ? p.methodLast4 : null,
+    method: p.method,
+    methodLast4: p.methodLast4,
     amountVnd: p.amountVnd,
-    mockReference: typeof p.mockReference === "string" ? p.mockReference : null,
-    failureReason: p.failureReason === "PAYMENT_DECLINED" ? "PAYMENT_DECLINED" : null,
+    mockReference: typeof p.mockReference === "string" ? p.mockReference.trim() : null,
+    failureReason: p.failureReason,
     createdAt: new Date(createdAtMs).toISOString(),
   };
 }
@@ -1046,11 +1093,11 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
   ];
   if (typeof o.status !== "string" || !validStatuses.includes(o.status)) return null;
 
-  const createdMs = typeof o.createdAt === "string" ? Date.parse(o.createdAt) : NaN;
-  if (!Number.isFinite(createdMs)) return null;
+  if (typeof o.createdAt !== "string" || !isValidIsoUtcString(o.createdAt)) return null;
+  const createdMs = Date.parse(o.createdAt);
 
-  const expiresMs = typeof o.expiresAt === "string" ? Date.parse(o.expiresAt) : NaN;
-  if (!Number.isFinite(expiresMs)) return null;
+  if (typeof o.expiresAt !== "string" || !isValidIsoUtcString(o.expiresAt)) return null;
+  const expiresMs = Date.parse(o.expiresAt);
   const expiresAtIso = new Date(expiresMs).toISOString();
 
   if (
@@ -1075,7 +1122,15 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
     validItems.push(validIt);
   }
 
-  const payment = o.payment ? validatePaymentSnapshot(o.payment) : null;
+  if (!("payment" in o) || o.payment === undefined) {
+    return null;
+  }
+
+  let payment: MyOrderPaymentSummaryDto | null = null;
+  if (o.payment !== null) {
+    payment = validatePaymentSnapshot(o.payment);
+    if (!payment) return null;
+  }
 
   return {
     id: o.id.trim(),

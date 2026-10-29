@@ -237,16 +237,28 @@ describe('POST /orders (real guard/controller/service; mocked database)', () => 
     ).toBe(0);
   });
   it.each([
-    null,
-    { ...coupon, expiresAt: new Date(0) },
-    { ...coupon, startsAt: new Date('2098-01-01') },
-    { ...coupon, minSubtotalVnd: 200000n },
-  ])('rejects unavailable coupon %#', async (value) => {
+    [null, 'Coupon does not exist'],
+    [{ ...coupon, expiresAt: new Date(0) }, 'Coupon has expired'],
+    [
+      { ...coupon, startsAt: new Date('2098-01-01') },
+      'Coupon is not active yet',
+    ],
+    [
+      { ...coupon, minSubtotalVnd: 200000n },
+      'Order subtotal does not meet coupon minimum',
+    ],
+  ] as const)('explains invalid coupon %#', async (value, message) => {
     tx.coupon.findUnique.mockResolvedValue(value);
-    expect(
-      (await post({ items: [item], couponCode: 'WELCOME20' }).expect(400)).body
-        .code,
-    ).toBe('INVALID_COUPON');
+    const response = await post({
+      items: [item],
+      couponCode: 'WELCOME20',
+    }).expect(400);
+    expect(response.body).toEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'INVALID_COUPON',
+      message,
+    });
     expect(tx.product.updateMany).not.toHaveBeenCalled();
   });
   it('rejects exhausted total coupon quota with 409', async () => {

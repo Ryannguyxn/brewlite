@@ -8,7 +8,9 @@ import { beforeEach, describe, it } from "node:test";
 import {
   isValidIsoUtcString,
   validatePaymentResponseData,
+  validatePaymentSnapshot,
   validateMyOrderSnapshot,
+  validateMyOrdersResponse,
 } from "../services/payment.service";
 import {
   type OrderConfirmationData,
@@ -1818,6 +1820,204 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
           },
         }),
         null
+      );
+    });
+
+    it("should strictly validate PaymentSummary in GET /orders/me without silent defaulting or coercion, and fail response validation on any malformed field", async () => {
+      const baseValidPayment = {
+        id: "550e8400-e29b-41d4-a716-446655440077",
+        status: "SUCCESS",
+        method: "CARD",
+        methodLast4: "1234",
+        amountVnd: 70000,
+        mockReference: "MOCK-REF-1234",
+        failureReason: null,
+        createdAt: "2026-10-29T10:00:00.000Z",
+      };
+
+      const baseValidOrder: Record<string, unknown> = {
+        id: "550e8400-e29b-41d4-a716-446655440010",
+        status: "PAID",
+        createdAt: "2026-10-29T09:50:00.000Z",
+        expiresAt: "2026-10-29T10:05:00.000Z",
+        subtotalVnd: 70000,
+        discountVnd: 0,
+        totalVnd: 70000,
+        couponCode: null,
+        pointsEarned: 7,
+        payment: baseValidPayment,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Cà phê Sữa Đá",
+            size: "M",
+            sizeMultiplierPercent: 100,
+            basePriceVnd: 35000,
+            quantity: 2,
+            unitPriceVnd: 35000,
+            lineTotalVnd: 70000,
+            toppings: [],
+          },
+        ],
+      };
+
+      const isInternal502 = (err: unknown) => {
+        const e = err as { statusCode?: number; code?: string } | null;
+        return Boolean(e && e.statusCode === 502 && e.code === "INTERNAL_ERROR");
+      };
+
+      // 1. Valid PaymentSummary and payment = null both succeed
+      const validWithPayment = validateMyOrdersResponse({ items: [baseValidOrder] });
+      assert.equal(validWithPayment.items.length, 1);
+      assert.equal(validWithPayment.items[0].payment?.method, "CARD");
+      assert.equal(validWithPayment.items[0].payment?.methodLast4, "1234");
+
+      const validWithNullPayment = validateMyOrdersResponse({
+        items: [{ ...baseValidOrder, status: "PENDING", pointsEarned: 0, payment: null }],
+      });
+      assert.equal(validWithNullPayment.items.length, 1);
+      assert.equal(validWithNullPayment.items[0].payment, null);
+
+      // 2. Missing field 'payment' (omitted or undefined) MUST be rejected
+      const orderMissingPaymentField = { ...baseValidOrder };
+      delete orderMissingPaymentField.payment;
+      assert.equal(validateMyOrderSnapshot(orderMissingPaymentField), null);
+      assert.throws(() => validateMyOrdersResponse({ items: [orderMissingPaymentField] }), isInternal502);
+      assert.equal(validateMyOrderSnapshot({ ...baseValidOrder, payment: undefined }), null);
+      assert.throws(
+        () => validateMyOrdersResponse({ items: [{ ...baseValidOrder, payment: undefined }] }),
+        isInternal502
+      );
+
+      // 3. Invalid 'method' (must NOT silently default to "CARD")
+      for (const badMethod of ["CASH", "BANK_TRANSFER", "INVALID", "", null, undefined, 123, {}]) {
+        assert.equal(
+          validatePaymentSnapshot({ ...baseValidPayment, method: badMethod }),
+          null,
+          `method=${JSON.stringify(badMethod)} must be rejected`
+        );
+        assert.throws(
+          () =>
+            validateMyOrdersResponse({
+              items: [{ ...baseValidOrder, payment: { ...baseValidPayment, method: badMethod } }],
+            }),
+          isInternal502
+        );
+      }
+
+      // 4. Missing required fields in PaymentSummary (must NOT coerce to null or defaults)
+      const requiredPaymentFields = [
+        "id",
+        "status",
+        "method",
+        "methodLast4",
+        "amountVnd",
+        "mockReference",
+        "failureReason",
+        "createdAt",
+      ];
+      for (const field of requiredPaymentFields) {
+        const incompletePayment: Record<string, unknown> = { ...baseValidPayment };
+        delete incompletePayment[field];
+        assert.equal(
+          validatePaymentSnapshot(incompletePayment),
+          null,
+          `Missing field '${field}' in PaymentSummary must be rejected`
+        );
+        assert.throws(
+          () =>
+            validateMyOrdersResponse({
+              items: [{ ...baseValidOrder, payment: incompletePayment }],
+            }),
+          isInternal502,
+          `Missing field '${field}' in PaymentSummary must fail response validation`
+        );
+      }
+
+      // 5. Wrong types / invalid formats for methodLast4, amountVnd, createdAt, mockReference, failureReason
+      // 5a. methodLast4 wrong type or invalid pattern (must NOT coerce to null)
+      for (const badLast4 of [1234, true, "12", "12345", "abcd", "", {}]) {
+        assert.equal(
+          validatePaymentSnapshot({ ...baseValidPayment, methodLast4: badLast4 }),
+          null,
+          `methodLast4=${JSON.stringify(badLast4)} must be rejected`
+        );
+        assert.throws(
+          () =>
+            validateMyOrdersResponse({
+              items: [{ ...baseValidOrder, payment: { ...baseValidPayment, methodLast4: badLast4 } }],
+            }),
+          isInternal502
+        );
+      }
+      // Valid nullable methodLast4 = null is accepted
+      assert.ok(validatePaymentSnapshot({ ...baseValidPayment, methodLast4: null }));
+
+      // 5b. amountVnd wrong type or negative/float
+      for (const badAmount of ["70000", -1, 70000.5, NaN, null, undefined, true]) {
+        assert.equal(
+          validatePaymentSnapshot({ ...baseValidPayment, amountVnd: badAmount }),
+          null,
+          `amountVnd=${JSON.stringify(badAmount)} must be rejected`
+        );
+        assert.throws(
+          () =>
+            validateMyOrdersResponse({
+              items: [{ ...baseValidOrder, payment: { ...baseValidPayment, amountVnd: badAmount } }],
+            }),
+          isInternal502
+        );
+      }
+
+      // 5c. createdAt wrong type or non-ISO UTC
+      for (const badCreatedAt of [1730200000000, "2026-10-29 10:00:00", "10/29/2026", "not-a-date", null, undefined, {}]) {
+        assert.equal(
+          validatePaymentSnapshot({ ...baseValidPayment, createdAt: badCreatedAt }),
+          null,
+          `createdAt=${JSON.stringify(badCreatedAt)} must be rejected`
+        );
+        assert.throws(
+          () =>
+            validateMyOrdersResponse({
+              items: [{ ...baseValidOrder, payment: { ...baseValidPayment, createdAt: badCreatedAt } }],
+            }),
+          isInternal502
+        );
+      }
+
+      // 5d. mockReference & failureReason wrong type/enum (must NOT coerce to null)
+      for (const badRef of [12345, "", "   ", true, {}]) {
+        assert.equal(validatePaymentSnapshot({ ...baseValidPayment, mockReference: badRef }), null);
+      }
+      for (const badReason of ["UNKNOWN_REASON", "INSUFFICIENT_FUNDS", "", 123, true, {}]) {
+        assert.equal(validatePaymentSnapshot({ ...baseValidPayment, failureReason: badReason }), null);
+      }
+
+      // 6. End-to-end fetchMyOrdersApi must reject when GET /orders/me returns malformed PaymentSummary
+      const mockToken = createValidMockJwt();
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                ...baseValidOrder,
+                payment: {
+                  ...baseValidPayment,
+                  method: "INVALID_METHOD",
+                  methodLast4: 1234,
+                },
+              },
+            ],
+            meta: { page: null, limit: null, total: 1, totalPages: null },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+
+      await assert.rejects(
+        async () => fetchMyOrdersApi(mockToken),
+        isInternal502,
+        "fetchMyOrdersApi must reject when PaymentSummary is malformed"
       );
     });
 

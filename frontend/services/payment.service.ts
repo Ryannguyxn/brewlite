@@ -1019,24 +1019,56 @@ function validateOrderItemSnapshot(raw: unknown): OrderItemSnapshotDto | null {
 
 /**
  * Runtime validation cho PaymentSnapshot từ `GET /orders/me`:
+ * - Không bao giờ tự mặc định/coerce trường sai sang `"CARD"`, `null` hoặc giá trị khác.
+ * - Mọi trường bắt buộc phải tồn tại, đúng kiểu, đúng enum và đúng quy tắc nullable của API Contract v3.0 §4.2.
  */
-function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto | null {
-  if (!raw || typeof raw !== "object") return null;
+export function validatePaymentSnapshot(raw: unknown): MyOrderPaymentSummaryDto | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const p = raw as Record<string, unknown>;
-  if (typeof p.id !== "string" || !isValidUuid(p.id)) return null;
+  if (typeof p.id !== "string" || !isValidUuid(p.id.trim())) return null;
   if (p.status !== "SUCCESS" && p.status !== "FAILED") return null;
-  if (typeof p.amountVnd !== "number" || !Number.isSafeInteger(p.amountVnd) || p.amountVnd < 0) return null;
+  if (p.method !== "CARD" && p.method !== "WALLET") return null;
+
+  if (!("methodLast4" in p) || p.methodLast4 === undefined) return null;
+  if (
+    p.methodLast4 !== null &&
+    (typeof p.methodLast4 !== "string" || !/^[0-9]{4}$/.test(p.methodLast4))
+  ) {
+    return null;
+  }
+
+  if (
+    typeof p.amountVnd !== "number" ||
+    !Number.isSafeInteger(p.amountVnd) ||
+    p.amountVnd < 0
+  ) {
+    return null;
+  }
+
+  if (!("mockReference" in p) || p.mockReference === undefined) return null;
+  if (
+    p.mockReference !== null &&
+    (typeof p.mockReference !== "string" || !p.mockReference.trim())
+  ) {
+    return null;
+  }
+
+  if (!("failureReason" in p) || p.failureReason === undefined) return null;
+  if (p.failureReason !== null && p.failureReason !== "PAYMENT_DECLINED") {
+    return null;
+  }
+
   if (typeof p.createdAt !== "string" || !isValidIsoUtcString(p.createdAt)) return null;
   const createdAtMs = Date.parse(p.createdAt);
 
   return {
     id: p.id.trim(),
     status: p.status,
-    method: typeof p.method === "string" ? (p.method as PaymentMethod) : "CARD",
-    methodLast4: typeof p.methodLast4 === "string" && /^[0-9]{4}$/.test(p.methodLast4) ? p.methodLast4 : null,
+    method: p.method,
+    methodLast4: p.methodLast4,
     amountVnd: p.amountVnd,
-    mockReference: typeof p.mockReference === "string" ? p.mockReference : null,
-    failureReason: p.failureReason === "PAYMENT_DECLINED" ? "PAYMENT_DECLINED" : null,
+    mockReference: typeof p.mockReference === "string" ? p.mockReference.trim() : null,
+    failureReason: p.failureReason,
     createdAt: new Date(createdAtMs).toISOString(),
   };
 }
@@ -1090,8 +1122,12 @@ export function validateMyOrderSnapshot(raw: unknown): MyOrderDto | null {
     validItems.push(validIt);
   }
 
+  if (!("payment" in o) || o.payment === undefined) {
+    return null;
+  }
+
   let payment: MyOrderPaymentSummaryDto | null = null;
-  if (o.payment !== null && o.payment !== undefined) {
+  if (o.payment !== null) {
     payment = validatePaymentSnapshot(o.payment);
     if (!payment) return null;
   }

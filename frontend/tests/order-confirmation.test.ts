@@ -6,6 +6,11 @@ import { PaymentFailedRetryView } from "../components/PaymentFailedRetryView";
 import { CartProvider, useCart, clearStoredActiveOrder } from "../context/CartContext";
 import { beforeEach, describe, it } from "node:test";
 import {
+  isValidIsoUtcString,
+  validatePaymentResponseData,
+  validateMyOrderSnapshot,
+} from "../services/payment.service";
+import {
   type OrderConfirmationData,
   computeOrderRemainingSeconds,
   isOrderExpired,
@@ -1627,6 +1632,631 @@ describe("SCRUM-68: Order Confirmation Service & Logic Automated Tests", () => {
         });
         cleanupDom();
       }
+    });
+  });
+
+
+  describe("8. Strict ISO 8601 UTC Timestamp Runtime Validation Tests (API Contract v3.0)", () => {
+    let dom: JSDOM;
+    let originalWindow: unknown;
+    let originalDocument: unknown;
+    let originalSelf: unknown;
+    let originalLocalStorage: unknown;
+    let originalSessionStorage: unknown;
+    let globalTarget: {
+      window: unknown;
+      document: unknown;
+      self: unknown;
+      localStorage: unknown;
+      sessionStorage: unknown;
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    let originalActEnv: boolean | undefined;
+
+    const setupDom = () => {
+      dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
+        url: "http://localhost/order-confirmation",
+      });
+      globalTarget = globalThis as unknown as typeof globalTarget;
+      originalWindow = globalTarget.window;
+      originalDocument = globalTarget.document;
+      originalSelf = globalTarget.self;
+      originalLocalStorage = globalTarget.localStorage;
+      originalSessionStorage = globalTarget.sessionStorage;
+      originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
+
+      globalTarget.window = dom.window;
+      globalTarget.document = dom.window.document;
+      globalTarget.self = dom.window;
+      globalTarget.localStorage = dom.window.localStorage;
+      globalTarget.sessionStorage = dom.window.sessionStorage;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
+    };
+
+    const cleanupDom = () => {
+      globalTarget.window = originalWindow;
+      globalTarget.document = originalDocument;
+      globalTarget.self = originalSelf;
+      globalTarget.localStorage = originalLocalStorage;
+      globalTarget.sessionStorage = originalSessionStorage;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+      dom.window.close();
+    };
+
+    it("should strictly validate ISO 8601 UTC strings and reject parseable but non-ISO UTC strings", () => {
+      // Valid ISO 8601 UTC strings
+      assert.equal(isValidIsoUtcString("2026-10-25T02:00:00.000Z"), true);
+      assert.equal(isValidIsoUtcString("2026-10-25T02:00:00Z"), true);
+      assert.equal(isValidIsoUtcString("2026-10-25T02:00:00.123456Z"), true);
+
+      // Parseable by Date.parse() but VIOLATE ISO 8601 UTC Contract:
+      assert.equal(isValidIsoUtcString("2026-10-29 10:00:00"), false, "Space separator without T/Z must be rejected");
+      assert.equal(isValidIsoUtcString("10/29/2026"), false, "US date format must be rejected");
+      assert.equal(isValidIsoUtcString("Thu, 29 Oct 2026 10:00:00 GMT"), false, "RFC 2822 format must be rejected");
+      assert.equal(isValidIsoUtcString("2026-10-29T10:00:00+07:00"), false, "Non-UTC timezone offset (+07:00) must be rejected");
+      assert.equal(isValidIsoUtcString("2026-10-29T10:00:00-05:00"), false, "Non-UTC timezone offset (-05:00) must be rejected");
+      assert.equal(isValidIsoUtcString("2026-10-29T10:00:00"), false, "Missing UTC Z indicator must be rejected");
+      assert.equal(isValidIsoUtcString("2026-10-29"), false, "Date-only string must be rejected");
+      assert.equal(isValidIsoUtcString(""), false, "Empty string must be rejected");
+      assert.equal(isValidIsoUtcString(null), false, "null must be rejected");
+      assert.equal(isValidIsoUtcString(undefined), false, "undefined must be rejected");
+      assert.equal(isValidIsoUtcString(123456789), false, "number must be rejected");
+    });
+
+    it("should return 0 from computeOrderRemainingSeconds when expiresAt is parseable but not ISO UTC", () => {
+      const now = Date.now();
+      // "2026-10-29 10:00:00" is parseable by Date.parse but NOT valid ISO UTC
+      assert.equal(computeOrderRemainingSeconds("2026-10-29 10:00:00", now), 0);
+      assert.equal(computeOrderRemainingSeconds("10/29/2026", now), 0);
+      assert.equal(computeOrderRemainingSeconds("Thu, 29 Oct 2026 10:00:00 GMT", now), 0);
+      assert.equal(computeOrderRemainingSeconds("2026-10-29T10:00:00+07:00", now), 0);
+    });
+
+    it("should reject validatePaymentResponseData when createdAt is parseable but not ISO UTC (502 INTERNAL_ERROR)", () => {
+      const mockKey = "test-idempotency-key-1234";
+      const samplePayload = {
+        paymentId: "550e8400-e29b-41d4-a716-446655440077",
+        orderId: "550e8400-e29b-41d4-a716-446655440010",
+        paymentStatus: "SUCCESS",
+        orderStatus: "PAID",
+        method: "CARD",
+        methodLast4: "1234",
+        mockReference: "MOCK-REF-1234",
+        amountVnd: 70000,
+        pointsEarned: 7,
+        failureReason: null,
+        createdAt: "2026-10-29 10:00:00", // Parseable by Date.parse but NOT ISO UTC!
+      };
+
+      assert.throws(
+        () => validatePaymentResponseData(samplePayload, mockKey),
+        (err: unknown) => {
+          const e = err as { statusCode?: number; code?: string; message?: string };
+          return (
+            e.statusCode === 502 &&
+            e.code === "INTERNAL_ERROR" &&
+            Boolean(e.message?.includes("ISO 8601 UTC"))
+          );
+        }
+      );
+
+      // Also reject with timezone offset +07:00
+      assert.throws(
+        () =>
+          validatePaymentResponseData(
+            { ...samplePayload, createdAt: "2026-10-29T10:00:00+07:00" },
+            mockKey
+          ),
+        /ISO 8601 UTC/
+      );
+    });
+
+    it("should reject validateMyOrderSnapshot when createdAt, expiresAt or payment.createdAt is parseable but not ISO UTC", () => {
+      const validOrderObj = {
+        id: "550e8400-e29b-41d4-a716-446655440010",
+        status: "PENDING",
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 900000).toISOString(),
+        subtotalVnd: 70000,
+        discountVnd: 0,
+        totalVnd: 70000,
+        couponCode: null,
+        pointsEarned: 0,
+        payment: null,
+        items: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440011",
+            productId: "550e8400-e29b-41d4-a716-446655440001",
+            productName: "Cà phê Sữa Đá",
+            size: "M",
+            sizeMultiplierPercent: 100,
+            basePriceVnd: 35000,
+            quantity: 2,
+            unitPriceVnd: 35000,
+            lineTotalVnd: 70000,
+            toppings: [],
+          },
+        ],
+      };
+
+      // Valid order returns object
+      assert.ok(validateMyOrderSnapshot(validOrderObj));
+
+      // Reject non-ISO createdAt
+      assert.equal(
+        validateMyOrderSnapshot({ ...validOrderObj, createdAt: "2026-10-29 10:00:00" }),
+        null
+      );
+      assert.equal(
+        validateMyOrderSnapshot({ ...validOrderObj, createdAt: "2026-10-29T10:00:00+07:00" }),
+        null
+      );
+
+      // Reject non-ISO expiresAt
+      assert.equal(
+        validateMyOrderSnapshot({ ...validOrderObj, expiresAt: "2026-10-29 10:00:00" }),
+        null
+      );
+      assert.equal(
+        validateMyOrderSnapshot({ ...validOrderObj, expiresAt: "10/29/2026" }),
+        null
+      );
+
+      // Reject non-ISO payment.createdAt
+      assert.equal(
+        validateMyOrderSnapshot({
+          ...validOrderObj,
+          payment: {
+            id: "550e8400-e29b-41d4-a716-446655440077",
+            status: "SUCCESS",
+            method: "CARD",
+            methodLast4: "1234",
+            amountVnd: 70000,
+            mockReference: "MOCK-REF-1234",
+            failureReason: null,
+            createdAt: "2026-10-29 10:00:00", // Non-ISO
+          },
+        }),
+        null
+      );
+    });
+
+    it("should NEVER clear Cart when POST /payments returns HTTP 200 with malformed non-ISO timestamp", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const testOrder: OrderConfirmationData = {
+        id: "550e8400-e29b-41d4-a716-446655440099",
+        status: "PAYMENT_FAILED",
+        createdAt: new Date(Date.now() - 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        subtotalVnd: 70000,
+        discountVnd: 0,
+        totalVnd: 70000,
+        couponCode: null,
+        payment: null,
+        pointsEarned: 0,
+        items: [
+          {
+            id: "item-1",
+            productId: "prod-1",
+            productName: "Cà phê Sữa Đá",
+            size: "M",
+            sizeMultiplierPercent: 100,
+            basePriceVnd: 70000,
+            quantity: 1,
+            unitPriceVnd: 70000,
+            lineTotalVnd: 70000,
+            toppings: [],
+          },
+        ],
+      };
+      const mockToken = createValidMockJwt();
+
+      const sampleCartItem = {
+        id: "cart-item-1",
+        productId: "prod-1",
+        productName: "Cà phê Sữa Đá",
+        size: "M",
+        sizeMultiplierPercent: 100,
+        basePriceVnd: 70000,
+        quantity: 1,
+        unitPriceVnd: 70000,
+        lineTotalVnd: 70000,
+        toppings: [],
+      };
+
+      const CART_KEY = "brewlite_cart_v1";
+      dom.window.localStorage.setItem(CART_KEY, JSON.stringify([sampleCartItem]));
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      // Server returns HTTP 200 but createdAt is non-ISO format "2026-10-29 10:00:00"
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/payments")) {
+          return new Response(
+            JSON.stringify({
+              paymentId: "550e8400-e29b-41d4-a716-446655440077",
+              orderId: testOrder.id,
+              paymentStatus: "SUCCESS",
+              orderStatus: "PAID",
+              method: "CARD",
+              methodLast4: "1234",
+              mockReference: "MOCK-REF-1234",
+              amountVnd: 70000,
+              pointsEarned: 7,
+              failureReason: null,
+              createdAt: "2026-10-29 10:00:00", // MALFORMED NON-ISO TIMESTAMP
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      function Harness() {
+        const { items, clearCart } = useCart();
+        return React.createElement(
+          "div",
+          null,
+          React.createElement("span", { id: "testCartCount" }, String(items.length)),
+          React.createElement(PaymentFailedRetryView, {
+            order: testOrder,
+            token: mockToken,
+            onRetrySuccess: async () => {
+              clearCart();
+            },
+            onRetryFailure: async () => null,
+          })
+        );
+      }
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(
+              CartProvider as React.ComponentType<{ key?: string }>,
+              { key: "malformed-timestamp-test" },
+              React.createElement(Harness)
+            )
+          );
+        });
+
+        assert.equal(container.querySelector("#testCartCount")?.textContent, "1");
+
+        // Submit form
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        // Error message appears
+        assert.match(container.innerHTML, /ISO 8601/i);
+
+        // CART MUST BE PRESERVED! MUST NOT BE CLEARED!
+        assert.equal(
+          container.querySelector("#testCartCount")?.textContent,
+          "1",
+          "Giỏ hàng TUYỆT ĐỐI KHÔNG được xóa khi HTTP 200 malformed timestamp!"
+        );
+        const storedCart = dom.window.localStorage.getItem(CART_KEY);
+        assert.ok(storedCart && storedCart !== "[]", "LocalStorage cart phải được giữ nguyên");
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+  });
+
+  describe("9. Enhanced Mounted Component Lifecycle Tests (409 -> PAID, Double-submit, Refetch according to orderId, Exactly-once Cart Clear)", () => {
+    let dom: JSDOM;
+    let originalWindow: unknown;
+    let originalDocument: unknown;
+    let originalSelf: unknown;
+    let originalLocalStorage: unknown;
+    let originalSessionStorage: unknown;
+    let globalTarget: {
+      window: unknown;
+      document: unknown;
+      self: unknown;
+      localStorage: unknown;
+      sessionStorage: unknown;
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    let originalActEnv: boolean | undefined;
+
+    const setupDom = () => {
+      dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
+        url: "http://localhost/order-confirmation?orderId=550e8400-e29b-41d4-a716-446655440099",
+      });
+      globalTarget = globalThis as unknown as typeof globalTarget;
+      originalWindow = globalTarget.window;
+      originalDocument = globalTarget.document;
+      originalSelf = globalTarget.self;
+      originalLocalStorage = globalTarget.localStorage;
+      originalSessionStorage = globalTarget.sessionStorage;
+      originalActEnv = globalTarget.IS_REACT_ACT_ENVIRONMENT;
+
+      globalTarget.window = dom.window;
+      globalTarget.document = dom.window.document;
+      globalTarget.self = dom.window;
+      globalTarget.localStorage = dom.window.localStorage;
+      globalTarget.sessionStorage = dom.window.sessionStorage;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
+    };
+
+    const cleanupDom = () => {
+      globalTarget.window = originalWindow;
+      globalTarget.document = originalDocument;
+      globalTarget.self = originalSelf;
+      globalTarget.localStorage = originalLocalStorage;
+      globalTarget.sessionStorage = originalSessionStorage;
+      globalTarget.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+      dom.window.close();
+    };
+
+    const createTestOrder = (): OrderConfirmationData => ({
+      id: "550e8400-e29b-41d4-a716-446655440099",
+      status: "PAYMENT_FAILED",
+      createdAt: new Date(Date.now() - 60000).toISOString(),
+      expiresAt: new Date(Date.now() + 600000).toISOString(),
+      subtotalVnd: 85000,
+      discountVnd: 0,
+      totalVnd: 85000,
+      couponCode: null,
+      payment: null,
+      pointsEarned: 0,
+      items: [
+        {
+          id: "item-test-1",
+          productId: "prod-test-1",
+          productName: "Cà phê Sữa Đá",
+          size: "M",
+          sizeMultiplierPercent: 100,
+          basePriceVnd: 85000,
+          quantity: 1,
+          unitPriceVnd: 85000,
+          lineTotalVnd: 85000,
+          toppings: [],
+        },
+      ],
+    });
+
+    it("should handle 409 INVALID_TRANSITION -> refetch PAID: removes retry form, triggers onRetrySuccess and clears Cart exactly once", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      let currentOrder = createTestOrder();
+      const mockToken = createValidMockJwt();
+
+      let clearCartCallCount = 0;
+      const CART_KEY = "brewlite_cart_v1";
+      dom.window.localStorage.setItem(
+        CART_KEY,
+        JSON.stringify([{ id: "cart-1", productId: "p-1", productName: "Item", size: "M", quantity: 1, basePriceVnd: 85000, unitPriceVnd: 85000, lineTotalVnd: 85000, toppings: [] }])
+      );
+      dom.window.localStorage.setItem("brewlite_auth_token", mockToken);
+
+      // POST /payments returns 409 INVALID_TRANSITION (already paid in another tab)
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/payments")) {
+          return new Response(
+            JSON.stringify({
+              statusCode: 409,
+              message: "INVALID_TRANSITION: Order is already PAID",
+              error: "Conflict",
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        let reloadCalled = false;
+        const mockReload = async (): Promise<OrderConfirmationData | null> => {
+          reloadCalled = true;
+          currentOrder = {
+            ...currentOrder,
+            status: "PAID",
+            payment: {
+              id: "550e8400-e29b-41d4-a716-446655440078",
+              status: "SUCCESS",
+              method: "CARD",
+              methodLast4: "1234",
+              amountVnd: 85000,
+              mockReference: "MOCK-PAID-ALREADY",
+              failureReason: null,
+              createdAt: new Date().toISOString(),
+            },
+          };
+          return currentOrder;
+        };
+
+        function Harness() {
+          const { items, clearCart } = useCart();
+          const handleSuccess = async () => {
+            clearCartCallCount++;
+            clearCart();
+            clearStoredActiveOrder();
+          };
+
+          return React.createElement(
+            "div",
+            null,
+            React.createElement("span", { id: "liveCartNum" }, String(items.length)),
+            React.createElement(PaymentFailedRetryView, {
+              order: currentOrder,
+              token: mockToken,
+              onRetrySuccess: handleSuccess,
+              onRetryFailure: mockReload,
+            })
+          );
+        }
+
+        await act(async () => {
+          root.render(
+            React.createElement(
+              CartProvider as React.ComponentType<{ key?: string }>,
+              { key: "409-paid-test" },
+              React.createElement(Harness)
+            )
+          );
+        });
+
+        assert.equal(container.querySelector("#liveCartNum")?.textContent, "1");
+        assert.ok(container.querySelector("#btnSubmitRetryPayment"));
+
+        // Click retry -> 409 -> triggers mockReload returning PAID -> triggers onRetrySuccess
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(reloadCalled, true, "onRetryFailure phải được gọi để lấy server truth sau 409");
+        assert.equal(clearCartCallCount, 1, "clearCart() PHẢI được gọi đúng một lần duy nhất");
+        assert.equal(container.querySelector("#liveCartNum")?.textContent, "0", "Giỏ hàng phải chuyển về 0");
+
+        // Notice chuyển hướng hoặc trạng thái thành công xuất hiện
+        assert.match(container.innerHTML, /thành công trước đó|Đang chuyển hướng/i);
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("should prevent concurrent double-submit while Retry payment is in-flight", async () => {
+      setupDom();
+      const container = dom.window.document.getElementById("root")!;
+      const root = createRoot(container);
+      const testOrder = createTestOrder();
+      const mockToken = createValidMockJwt();
+
+      let paymentCallCount = 0;
+      let resolvePaymentPromise!: (res: Response) => void;
+
+      global.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes("/payments")) {
+          paymentCallCount++;
+          return new Promise<Response>((resolve) => {
+            resolvePaymentPromise = resolve;
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      try {
+        await act(async () => {
+          root.render(
+            React.createElement(PaymentFailedRetryView, {
+              order: testOrder,
+              token: mockToken,
+              onRetrySuccess: () => {},
+              onRetryFailure: async () => null,
+            })
+          );
+        });
+
+        const submitBtn = container.querySelector("#btnSubmitRetryPayment") as HTMLButtonElement;
+        assert.ok(submitBtn);
+        assert.equal(submitBtn.disabled, false);
+
+        // Submit lần 1 -> đưa vào trạng thái in-flight
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(paymentCallCount, 1, "Fetch phải được gọi lần 1");
+        // Nút submit phải bị disabled trong lúc in-flight
+        assert.equal(submitBtn.disabled, true, "Nút submit phải bị disabled khi đang gửi yêu cầu");
+
+        // Cố gắng submit lần 2 trong khi in-flight
+        await act(async () => {
+          const form = container.querySelector("form") as HTMLFormElement;
+          form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        });
+
+        assert.equal(paymentCallCount, 1, "Fetch TUYỆT ĐỐI KHÔNG được gọi lần 2 khi đang in-flight (double-submit blocked)");
+
+        // Hoàn tất response lần 1
+        await act(async () => {
+          resolvePaymentPromise(
+            new Response(
+              JSON.stringify({
+                paymentId: "550e8400-e29b-41d4-a716-446655440077",
+                orderId: testOrder.id,
+                paymentStatus: "SUCCESS",
+                orderStatus: "PAID",
+                method: "CARD",
+                methodLast4: "1234",
+                mockReference: "MOCK-REF-1234",
+                amountVnd: 85000,
+                pointsEarned: 8,
+                failureReason: null,
+                createdAt: new Date().toISOString(),
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            )
+          );
+        });
+      } finally {
+        await act(async () => {
+          root.unmount();
+        });
+        cleanupDom();
+      }
+    });
+
+    it("should strictly resolve target order by orderId and NEVER fallback to latest order", () => {
+      const orderA: OrderConfirmationData = {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        status: "PENDING",
+        createdAt: "2026-10-29T10:00:00.000Z",
+        expiresAt: "2026-10-29T10:15:00.000Z",
+        subtotalVnd: 50000,
+        discountVnd: 0,
+        totalVnd: 50000,
+        couponCode: null,
+        payment: null,
+        pointsEarned: 0,
+        items: [],
+      };
+      const orderB: OrderConfirmationData = {
+        id: "550e8400-e29b-41d4-a716-446655440002",
+        status: "PAID",
+        createdAt: "2026-10-29T09:00:00.000Z",
+        expiresAt: "2026-10-29T09:15:00.000Z",
+        subtotalVnd: 75000,
+        discountVnd: 0,
+        totalVnd: 75000,
+        couponCode: null,
+        payment: null,
+        pointsEarned: 7,
+        items: [],
+      };
+
+      const orders = [orderA, orderB];
+
+      // Khi truyền đúng orderId của order B -> trả về order B
+      assert.equal(findOrderForConfirmation(orders, "550e8400-e29b-41d4-a716-446655440002")?.id, orderB.id);
+
+      // Khi URL không có orderId, null, undefined, hoặc chuỗi rỗng:
+      // BẮT BUỘC trả về null, TUYỆT ĐỐI KHÔNG tự tiện fallback về order A (đơn mới nhất)
+      assert.equal(findOrderForConfirmation(orders, null), null);
+      assert.equal(findOrderForConfirmation(orders, undefined), null);
+      assert.equal(findOrderForConfirmation(orders, ""), null);
+      assert.equal(findOrderForConfirmation(orders, "   "), null);
+
+      // Khi orderId không tồn tại hoặc sai định dạng UUID
+      assert.equal(findOrderForConfirmation(orders, "550e8400-e29b-41d4-a716-446655440999"), null);
+      assert.equal(findOrderForConfirmation(orders, "invalid-uuid"), null);
     });
   });
 

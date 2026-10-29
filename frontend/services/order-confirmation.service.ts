@@ -7,7 +7,9 @@
 
 import { isValidUuid } from "./api.service";
 import { isTokenExpired } from "./auth.service";
-import { validateMyOrdersResponse, validatePaymentResponseData } from "./payment.service";
+import { isValidIsoUtcString, validateMyOrdersResponse, validatePaymentResponseData } from "./payment.service";
+
+export { isValidIsoUtcString };
 
 export type OrderStatus =
   | "PENDING"
@@ -125,7 +127,7 @@ export function computeOrderRemainingSeconds(
   expiresAtIso?: string | null,
   referenceNowMs: number = Date.now()
 ): number {
-  if (!expiresAtIso) return 0;
+  if (!expiresAtIso || !isValidIsoUtcString(expiresAtIso)) return 0;
   const targetMs = new Date(expiresAtIso).getTime();
   if (isNaN(targetMs)) return 0;
   const diffMs = targetMs - referenceNowMs;

@@ -26,24 +26,24 @@ và idempotency của SCRUM-54/55: SUCCESS đổi PAID, ghi pointsEarned, consum
 increment số dư một lần; FAILED giữ HELD/stock và không cộng điểm; replay không
 lặp hiệu ứng. Total 0 vẫn qua Mock Payment, nhận 0 điểm.
 
-## Bàn giao lifecycle cho Chí Khang
+## Lifecycle đã tích hợp trên dev
 
-releaseHeldCoupon(tx, orderId) là hàm nội bộ, chưa tự chạy từ Scheduler/API hủy.
-Owner lifecycle cần gọi hàm này SAU khi chuyển Order sang CANCELLED, trong CÙNG
-transaction với Order lock và hoàn stock. Helper tự recheck CANCELLED dưới Order
-FOR UPDATE, khóa Coupon, chỉ chuyển HELD -> RELEASED và decrement counter đúng
-một lần. Không thay loyalty. Gọi lại trả false. Thiếu reservation, reservation đã
-CONSUMED hoặc counter sai gây lỗi để toàn bộ transaction của caller rollback,
-không commit CANCELLED nửa chừng.
+SCRUM-58/59 gọi releaseHeldCoupon qua expireOrderInTransaction trong cùng
+transaction với khóa Order, kiểm tra thời hạn, chuyển CANCELLED và hoàn stock.
+OrderExpirationService chạy luồng này theo batch; Create Order cũng dùng chung
+primitive khi xử lý đơn cũ hết hạn. Không thêm Customer cancel API (deferred).
 
-Thứ tự khóa cần phối hợp: Order -> Product (sorted khi hoàn stock) -> Coupon ->
-CouponRedemption. Khi tạo Order mới: Product sorted -> Coupon. Payment giữ nguyên
-Order -> CouponRedemption -> User; HELD -> CONSUMED không tăng counter tổng nữa.
-Scheduler phải đọc lại trạng thái sau Order lock; không hủy Order đã PAID.
-Helper trả lượt không thay thế state machine, stock release hoặc Scheduler thật.
-Các test cancelCoupon trong integration là test harness, không phải endpoint hay
-kết quả nghiệm thu Scheduler/Payment race. Phần nối lifecycle cần review với
-SCRUM-57/59 khi code của Chí Khang có sẵn.
+Các test trong test/order-lifecycle.integration-spec.ts kiểm tra Scheduler thật,
+trả quota/stock đúng một lần, rollback và cạnh tranh Payment–Scheduler.
+Test harness trong promotions-postgres.integration-spec.ts chỉ kiểm tra helper.
+
+INVALID_COUPON giữ HTTP 400 và error envelope v3.0, với message phân biệt:
+- Coupon does not exist
+- Coupon is not active yet
+- Coupon has expired
+- Order subtotal does not meet coupon minimum
+
+Quota tổng/per-user vẫn trả HTTP 409 COUPON_UNAVAILABLE.
 
 ## Kiểm tra
 

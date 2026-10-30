@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/context/AuthContext";
@@ -306,6 +307,21 @@ export async function executePaymentSubmission(
   }
 }
 
+function useSafeAppRouter() {
+  try {
+    return useRouter();
+  } catch {
+    return {
+      push: () => {},
+      replace: () => {},
+      prefetch: () => {},
+      back: () => {},
+      forward: () => {},
+      refresh: () => {},
+    };
+  }
+}
+
 export interface PaymentPageViewProps {
   initialOrder?: CreateOrderResponseDto | MyOrderDto | null;
   initialMethod?: PaymentMethod;
@@ -327,6 +343,7 @@ export default function PaymentPageView({
   initialPaymentResult = null,
   initialPaymentError = null,
 }: PaymentPageViewProps) {
+  const router = useSafeAppRouter();
   const {
     openCart,
     clearCart,
@@ -388,6 +405,7 @@ export default function PaymentPageView({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(
     initialIsSubmitting
   );
+  const [isVnPayTabOpened, setIsVnPayTabOpened] = useState<boolean>(false);
   const submittingRef = useRef<boolean>(initialIsSubmitting);
   const [paymentResult, setPaymentResult] =
     useState<PaymentResponseDto | null>(initialPaymentResult);
@@ -746,6 +764,7 @@ export default function PaymentPageView({
     });
   };
 
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FDFBF7] font-body-md text-[#1E1510] antialiased">
       <Header onCartClick={openCart} activeNav="thuc-don" />
@@ -1088,6 +1107,93 @@ export default function PaymentPageView({
                           id="paymentMethodFormSection"
                           className="flex flex-col gap-space-md"
                         >
+                          {/* ĐƠN HÀNG 0Đ - ZERO_AMOUNT BYPASS (BR-06) */}
+                          {activeOrder && activeOrder.totalVnd === 0 && (
+                            <div className="p-5 rounded-xl bg-[#F0FDF4] border-2 border-[#16A34A] flex flex-col gap-3 shadow-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="material-symbols-outlined text-[#16A34A] text-[24px]">verified</span>
+                                <h3 className="font-title-sm text-[#15803D] font-bold">
+                                  Đơn hàng 0 ₫ — Quyết toán tức thì (BR-06)
+                                </h3>
+                              </div>
+                              <p className="text-xs text-[#166534] leading-relaxed">
+                                Đơn hàng được miễn phí 100% nhờ áp dụng khuyến mãi. Hệ thống tự động quyết toán nội bộ theo quy tắc BR-06 mà không cần chuyển tiếp sang cổng thanh toán VNPay.
+                              </p>
+                              <Link
+                                href={`/order-confirmation?orderId=${activeOrder.id}&view=zero`}
+                                id="btnZeroPaymentBypass"
+                                className="w-full py-3 px-6 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-title-sm text-title-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors text-center"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                                <span>Xác nhận đơn hàng 0 ₫ ngay</span>
+                              </Link>
+                            </div>
+                          )}
+
+                          {/* PHƯƠNG THỨC 0: Cổng thanh toán VNPay Sandbox (Phase 2 - BR-01) */}
+                          <div
+                            className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
+                              method === "VNPAY"
+                                ? "border-2 border-[#005baa] bg-[#f0f7fc]"
+                                : "border border-[#EFECE6] bg-white hover:border-[#005baa]/50"
+                            }`}
+                          >
+                            <label
+                              className="flex items-center justify-between cursor-pointer"
+                              onClick={() => handleSelectMethod("VNPAY")}
+                            >
+                              <div className="flex items-center gap-space-sm">
+                                <input
+                                  id="radioVnpay"
+                                  type="radio"
+                                  name="payment_method_enum"
+                                  value="VNPAY"
+                                  checked={method === "VNPAY"}
+                                  disabled={isSubmitting}
+                                  onChange={() => handleSelectMethod("VNPAY")}
+                                  className="w-4 h-4 text-[#005baa] focus:ring-[#005baa] border-[#EFECE6]"
+                                />
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-title-sm text-title-sm text-[#1E1510] font-bold">
+                                      Cổng thanh toán VNPay Sandbox
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-full bg-[#005baa] text-white font-label-md text-[11px] font-bold">
+                                      MẶC ĐỊNH PHASE 2 (BR-01)
+                                    </span>
+                                  </div>
+                                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+                                    Quét mã VNPAY-QR, Thẻ ATM Nội địa &amp; Thẻ Quốc tế Visa/Mastercard
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="w-12 h-8 rounded bg-white border border-[#EFECE6] flex items-center justify-center p-1 shadow-xs">
+                                <svg className="w-full h-full" fill="none" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                                  <rect fill="#005BAA" height="120" rx="20" width="120"></rect>
+                                  <path d="M22 36L44 84H58L36 36H22Z" fill="#ED1C24"></path>
+                                  <path d="M52 36L74 84H88L66 36H52Z" fill="#FFFFFF"></path>
+                                  <path d="M82 36L94 62L106 36H96L88 54L80 36H82Z" fill="#FFFFFF"></path>
+                                </svg>
+                              </div>
+                            </label>
+
+                            {method === "VNPAY" && (
+                            <div className="pt-2 border-t border-[#005baa]/20 space-y-2.5">
+                              <div className="p-3 bg-white rounded-lg border border-[#005baa]/20 text-xs text-on-surface-variant flex items-start gap-2">
+                                <span className="material-symbols-outlined text-[#005baa] text-[18px] shrink-0 mt-0.5">verified_user</span>
+                                <p className="leading-relaxed">
+                                  Bạn sẽ được chuyển hướng an toàn đến cổng thanh toán <span className="font-semibold text-[#005baa]">VNPay Sandbox</span> trong tab mới để xác thực giao dịch qua môi trường bảo mật SSL 256-bit chuẩn PCI-DSS khi bấm nút <strong>Xác nhận thanh toán</strong> bên dưới. Tab hiện tại sẽ được giữ nguyên.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] text-[#005baa] font-medium px-1">
+                                <span className="material-symbols-outlined text-[16px]">info</span>
+                                <span>Hỗ trợ thẻ ATM nội địa (NAPAS), VNPAY-QR và thẻ quốc tế Visa / Mastercard / JCB</span>
+                              </div>
+                            </div>
+                          )}
+
+                          </div>
+
                           {/* PHƯƠNG THỨC 1: Thẻ thanh toán (CARD) */}
                           <div
                             className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
@@ -1712,15 +1818,69 @@ export default function PaymentPageView({
                         </div>
                       )}
 
-                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments) */}
+                      {/* Thông báo khi đã mở tab VNPay thanh toán */}
+                      {isVnPayTabOpened && method === "VNPAY" && (
+                        <div
+                          id="vnpayTabNotice"
+                          className="p-3.5 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] text-[#1E40AF] flex items-start gap-2.5 text-xs animate-fadeIn"
+                        >
+                          <span className="material-symbols-outlined text-[20px] text-[#2563EB] shrink-0 mt-0.5">
+                            open_in_new
+                          </span>
+                          <div className="flex flex-col gap-1 w-full">
+                            <p className="font-semibold text-[#1E3A8A]">
+                              Cổng thanh toán VNPay đã được mở trong tab mới!
+                            </p>
+                            <p className="text-[#1E40AF]/90 leading-relaxed">
+                              Vui lòng hoàn tất thanh toán tại tab mới vừa mở. Tab thanh toán hiện tại vẫn được giữ nguyên để bạn theo dõi đơn hàng.
+                            </p>
+                            <div className="pt-1.5 flex items-center justify-between flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const vnpayUrl = `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=redirecting`;
+                                  if (typeof window !== "undefined") {
+                                    window.open(vnpayUrl, "_blank", "noopener,noreferrer");
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 font-bold text-[#1D4ED8] hover:underline cursor-pointer"
+                              >
+                                <span>Mở lại tab VNPay</span>
+                                <span className="material-symbols-outlined text-[14px]">launch</span>
+                              </button>
+                              <Link
+                                href={`/order-confirmation?orderId=${activeOrder.id}&view=processing`}
+                                className="inline-flex items-center gap-1 font-medium text-[#2563EB] hover:underline"
+                              >
+                                <span>Kiểm tra kết quả giao dịch</span>
+                                <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Checkout CTA Button: Xác nhận thanh toán (POST /payments hoặc Mở VNPay tab mới) */}
                       <button
                         id="btnSubmitPayment"
                         type="button"
                         disabled={isSubmitting || !isPayableOrder}
-                        onClick={() =>
-                          handleSubmitPayment({ reuseExistingKey: false })
-                        }
-                        className="w-full py-3.5 px-space-lg rounded-xl bg-[#C67C4E] hover:bg-[#b56e40] active:scale-[0.99] text-white font-title-sm text-title-sm font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                        onClick={() => {
+                          if (method === "VNPAY") {
+                            const vnpayUrl = `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=redirecting`;
+                            if (typeof window !== "undefined") {
+                              window.open(vnpayUrl, "_blank", "noopener,noreferrer");
+                            }
+                            setIsVnPayTabOpened(true);
+                            return;
+                          }
+                          handleSubmitPayment({ reuseExistingKey: false });
+                        }}
+                        className={`w-full py-3.5 px-space-lg rounded-xl active:scale-[0.99] text-white font-title-sm text-title-sm font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
+                          method === "VNPAY"
+                            ? "bg-[#005baa] hover:bg-[#004785]"
+                            : "bg-[#C67C4E] hover:bg-[#b56e40]"
+                        }`}
                       >
                         <span
                           className={`material-symbols-outlined text-[20px] ${
@@ -1733,6 +1893,8 @@ export default function PaymentPageView({
                             ? "check_circle"
                             : !isPayableOrder
                             ? "block"
+                            : method === "VNPAY"
+                            ? "open_in_new"
                             : "lock"}
                         </span>
                         <span>
@@ -1746,6 +1908,10 @@ export default function PaymentPageView({
                             ? isExpiredOrder
                               ? "Đơn hàng đã hết hạn (EXPIRED)"
                               : `Không thể thanh toán (${orderStatus})`
+                            : method === "VNPAY"
+                            ? `Xác nhận thanh toán qua VNPay • ${formatVnd(
+                                activeOrder.totalVnd
+                              )}`
                             : orderStatus === "PAYMENT_FAILED"
                             ? `Thử thanh toán lại • ${formatVnd(
                                 activeOrder.totalVnd

@@ -1,12 +1,29 @@
 """Offline source-level review. This DOES NOT replace Prisma/PostgreSQL validation."""
 from pathlib import Path
 import re, hashlib
-root=Path(__file__).resolve().parent.parent
-s=(root/'backend/prisma/schema.prisma').read_text(encoding='utf-8')
-m1=(root/'backend/prisma/migrations/20261031190000_scrum76_payment_pending_enum/migration.sql').read_text()
-m2=(root/'backend/prisma/migrations/20261031190100_scrum76_payment_gateway_delta/migration.sql').read_text()
-db=(root/'reference/schema_phase2_proposed_v0.2.2_CK-R01-R03_UPDATED.dbml').read_text()
-pre=(root/'backend/prisma/migrations/20261026065408_add_payment_schema/migration.sql').read_text()
+# Support both locations:
+# - repository: backend/prisma/tests/static_audit.py
+# - extracted review kit: tests/static_audit.py
+base = Path(__file__).resolve().parent.parent
+prisma_dir = base / 'backend' / 'prisma' if (base / 'backend' / 'prisma' / 'schema.prisma').is_file() else base
+if not (prisma_dir / 'schema.prisma').is_file():
+    raise FileNotFoundError(f'Cannot locate Prisma schema from {__file__}')
+
+# In Git, the approved DBML lives in docs/docs_Phase2; in the kit it lives in reference/.
+dbml_name = 'schema_phase2_proposed_v0.2.2_CK-R01-R03_UPDATED.dbml'
+dbml_candidates = [
+    base / 'reference' / dbml_name,
+    prisma_dir.parent.parent / 'docs' / 'docs_Phase2' / dbml_name,
+]
+dbml_path = next((path for path in dbml_candidates if path.is_file()), None)
+if dbml_path is None:
+    raise FileNotFoundError(f'DBML not found. Checked: {dbml_candidates}')
+
+s = (prisma_dir / 'schema.prisma').read_text(encoding='utf-8')
+m1 = (prisma_dir / 'migrations' / '20261031190000_scrum76_payment_pending_enum' / 'migration.sql').read_text(encoding='utf-8')
+m2 = (prisma_dir / 'migrations' / '20261031190100_scrum76_payment_gateway_delta' / 'migration.sql').read_text(encoding='utf-8')
+db = dbml_path.read_text(encoding='utf-8')
+pre = (prisma_dir / 'migrations' / '20261026065408_add_payment_schema' / 'migration.sql').read_text(encoding='utf-8')
 assert len(re.findall(r'^model\s+\w+\s*\{',s,re.M))==12
 assert 'model PaymentGatewayEvent {' in s and 'enum PaymentProvider {' in s
 assert 'PENDING' in s.split('enum PaymentStatus {',1)[1].split('}',1)[0]

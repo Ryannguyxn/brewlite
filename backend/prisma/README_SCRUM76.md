@@ -1,8 +1,8 @@
 # SCRUM-76 / P2-02 — Phase 2 Payment Prisma Schema & Migration (Review Kit)
 
-**Status: SOURCE-COMPLETE / STATIC-REVIEWED / NOT APPLIED / DB VERIFICATION PENDING**  
-**Date:** 2026-10-31  
-**Target:** `SCRUM-76-P2-02-Extend-Payment-Prisma-Schema-Create-Migration`  
+**Status: SOURCE-COMPLETE / STATIC-REVIEWED / NOT APPLIED / DB VERIFICATION PENDING**
+**Date:** 2026-10-31
+**Target:** `SCRUM-76-P2-02-Extend-Payment-Prisma-Schema-Create-Migration`
 **Scope:** Prisma schema, additive PostgreSQL migrations, SQL constraint tests, preserving Phase 1 Mock data. This is not the VNPay Gateway, frontend, IPN, QueryDR worker or finalization implementation.
 
 ## 1. Inputs actually reviewed

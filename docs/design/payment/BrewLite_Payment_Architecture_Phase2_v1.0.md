@@ -1,14 +1,14 @@
 # BrewLite — Payment Architecture Design (VNPay Phase 2)
 
-| Thuộc tính | Giá trị |
-|---|---|
-| Document | Payment Architecture Design |
-| Version | **v1.0 — Final Review Candidate** |
-| Date | 30/10/2026 |
-| Owner | HKhang — Technical Lead / VNPay Backend Owner |
-| Status | **READY FOR ARCHITECTURE BASELINE APPROVAL / NOT YET APPROVED** — các verification gates vẫn mở |
-| Target | Sprint Phase 2: 31/10/2026–03/11/2026 |
-| Source of truth | `docs/decisions/VNPay_Phase2_Change_Request.md` — BR-01…BR-06 Approved |
+| Thuộc tính      | Giá trị                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| Document        | Payment Architecture Design                                                                     |
+| Version         | **v1.0 — Final Review Candidate**                                                               |
+| Date            | 30/10/2026                                                                                      |
+| Owner           | HKhang — Technical Lead / VNPay Backend Owner                                                   |
+| Status          | **READY FOR ARCHITECTURE BASELINE APPROVAL / NOT YET APPROVED** — các verification gates vẫn mở |
+| Target          | Sprint Phase 2: 31/10/2026–03/11/2026                                                           |
+| Source of truth | `docs/decisions/VNPay_Phase2_Change_Request.md` — BR-01…BR-06 Approved                          |
 
 > **Phân loại quyết định:** `BASELINE` = yêu cầu nghiệp vụ đã chốt; `PROPOSED` = giải pháp kỹ thuật của tài liệu này, cần Leader duyệt; `VERIFY` = cần xác thực ở code/migration/VNPay Sandbox trước khi merge. Chưa coi các tên endpoint, field và class đề xuất trong tài liệu này là API Contract v4.0 Approved.
 
@@ -33,21 +33,21 @@ Mở rộng Payment Foundation Phase 1 của BrewLite (NestJS, Prisma 7, Postgre
 
 ## 2. Kết quả audit và quyết định Keep / Modify / Add
 
-| Thành phần hiện hữu | Hiện trạng được quan sát | Hướng |
-|---|---|---|
-| `payments.service.ts` | Mock đồng bộ: kiểm tra ownership → replay/idempotency → advisory lock → `FOR UPDATE` Order → success/failure trong cùng transaction | **MODIFY:** bảo lưu Mock semantics, tách finalization chung; không trộn gateway HTTP vào DB transaction |
-| `payment-processor.ts` | Abstract `execute(userId,key,dto)` chỉ phản ánh Mock sync | **MODIFY:** giới hạn nó cho Mock legacy hoặc thay bằng interface theo use case, tránh một interface ép mọi provider synchronous |
-| `mock-payment.service.ts` | `evaluate()` trả SUCCESS/FAILED theo test credentials | **KEEP** thuật toán test; **ADD** policy chặn ở production |
-| `payment-snapshot.ts` | Validator yêu cầu `mockReference`, `methodLast4`, kết quả terminal | **KEEP** cho snapshot Mock cũ; **ADD** serializer/validator riêng cho VNPay và ZERO_AMOUNT |
-| `payments.controller.ts` | `POST /payments` có JWT Guard cấp class | **KEEP** Mock route với policy; **ADD** controller IPN không yêu cầu JWT nhưng bắt buộc xác minh chữ ký |
-| `orders.service.ts` | `create()` gọi `expireOrderInTransaction()` trên active Order; `getMine()` chỉ lấy SUCCESS/FAILED, đọc Mock snapshot | **MODIFY** cả lazy expiration và history projection |
-| `order-expiration.service.ts` | Sweep mỗi 60s, chọn Order quá `expires_at`, gọi shared primitive | **MODIFY** theo Grace; kiểm tra lại sau khóa trong primitive |
-| `order-expiration.config.ts` | Config enable/batch size; interval 60s | **KEEP**, có thể thêm tùy chọn cấu hình grace/reconciliation test |
-| `order-state.service.ts` | `PAID → PREPARING → READY → COMPLETED` với Order row lock | **KEEP**, không thêm trạng thái Order `GRACE` |
-| `inventory-policy.ts` | Reserve stock atomically; `expireOrderInTransaction` khóa Order, cập nhật CANCELLED, hoàn inventory/coupon một transaction | **MODIFY** điều kiện được phép hủy; **KEEP** one-time release semantics |
-| `inventory-transaction.ts` | Transaction ReadCommitted, lock timeout, retry deadlock/serialization/lock timeout | **KEEP** wrapper; không retry các kết quả payment không chắc chắn như lỗi transient đã commit |
-| `schema.prisma` | Payment chỉ SUCCESS/FAILED, CARD/WALLET; unique `(userId,idempotencyKey)`; `responseSnapshot` Json bắt buộc | **MODIFY** schema có kiểm soát; xác minh partial indexes từ SQL migrations |
-| `scrum51_payment_migration_test.sql` | Có test các invariants DB Phase 1 | **EXTEND** test migration, pending VNPay, provider và dữ liệu legacy |
+| Thành phần hiện hữu                  | Hiện trạng được quan sát                                                                                                            | Hướng                                                                                                                           |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `payments.service.ts`                | Mock đồng bộ: kiểm tra ownership → replay/idempotency → advisory lock → `FOR UPDATE` Order → success/failure trong cùng transaction | **MODIFY:** bảo lưu Mock semantics, tách finalization chung; không trộn gateway HTTP vào DB transaction                         |
+| `payment-processor.ts`               | Abstract `execute(userId,key,dto)` chỉ phản ánh Mock sync                                                                           | **MODIFY:** giới hạn nó cho Mock legacy hoặc thay bằng interface theo use case, tránh một interface ép mọi provider synchronous |
+| `mock-payment.service.ts`            | `evaluate()` trả SUCCESS/FAILED theo test credentials                                                                               | **KEEP** thuật toán test; **ADD** policy chặn ở production                                                                      |
+| `payment-snapshot.ts`                | Validator yêu cầu `mockReference`, `methodLast4`, kết quả terminal                                                                  | **KEEP** cho snapshot Mock cũ; **ADD** serializer/validator riêng cho VNPay và ZERO_AMOUNT                                      |
+| `payments.controller.ts`             | `POST /payments` có JWT Guard cấp class                                                                                             | **KEEP** Mock route với policy; **ADD** controller IPN không yêu cầu JWT nhưng bắt buộc xác minh chữ ký                         |
+| `orders.service.ts`                  | `create()` gọi `expireOrderInTransaction()` trên active Order; `getMine()` chỉ lấy SUCCESS/FAILED, đọc Mock snapshot                | **MODIFY** cả lazy expiration và history projection                                                                             |
+| `order-expiration.service.ts`        | Sweep mỗi 60s, chọn Order quá `expires_at`, gọi shared primitive                                                                    | **MODIFY** theo Grace; kiểm tra lại sau khóa trong primitive                                                                    |
+| `order-expiration.config.ts`         | Config enable/batch size; interval 60s                                                                                              | **KEEP**, có thể thêm tùy chọn cấu hình grace/reconciliation test                                                               |
+| `order-state.service.ts`             | `PAID → PREPARING → READY → COMPLETED` với Order row lock                                                                           | **KEEP**, không thêm trạng thái Order `GRACE`                                                                                   |
+| `inventory-policy.ts`                | Reserve stock atomically; `expireOrderInTransaction` khóa Order, cập nhật CANCELLED, hoàn inventory/coupon một transaction          | **MODIFY** điều kiện được phép hủy; **KEEP** one-time release semantics                                                         |
+| `inventory-transaction.ts`           | Transaction ReadCommitted, lock timeout, retry deadlock/serialization/lock timeout                                                  | **KEEP** wrapper; không retry các kết quả payment không chắc chắn như lỗi transient đã commit                                   |
+| `schema.prisma`                      | Payment chỉ SUCCESS/FAILED, CARD/WALLET; unique `(userId,idempotencyKey)`; `responseSnapshot` Json bắt buộc                         | **MODIFY** schema có kiểm soát; xác minh partial indexes từ SQL migrations                                                      |
+| `scrum51_payment_migration_test.sql` | Có test các invariants DB Phase 1                                                                                                   | **EXTEND** test migration, pending VNPay, provider và dữ liệu legacy                                                            |
 
 ## 3. Invariants bắt buộc (BASELINE)
 
@@ -87,16 +87,16 @@ flowchart TD
 
 ### 4.1. Thành phần và owner
 
-| Component logic | Owner | Trách nhiệm | Không chịu trách nhiệm |
-|---|---|---|---|
-| VNPay Gateway / Initiation | HKhang | Tạo URL/transaction reference, ký request, kiểm tra ownership, pending attempt và replay | Không tự cập nhật coupon/loyalty |
-| IPN Controller / QueryDR Client | HKhang | Parse, xác minh chữ ký, mapping result, gọi finalization | Không để IPN tin Return URL hoặc bypass DB rules |
-| Shared Payment Finalization | Hoàng | Transaction atomic cho trạng thái Payment/Order, coupon, loyalty, late outcome | Không gọi HTTP gateway trong transaction |
-| DB schema/migrations | Thụy | Provider/status metadata/indexes/migration/test dữ liệu cũ | Không tự đổi BR |
-| Reconciliation Scheduler | Thụy | Lập lịch QueryDR, lease/claim chống chạy trùng, audit/manual review | Không tự set FAILED khi timeout |
-| Order Expiration / ZERO_AMOUNT / Mock policy | CKhang | Shared expiration policy, grace; internal zero flow và Mock config | Không viết một finalization song song |
-| Checkout/Payment UX | Khánh | Redirect, pending/result/retry theo backend | Không coi browser return là payment proof |
-| Order History/Confirmation/E2E | Lập | Projection payment history, acceptance/integration tests | Không sửa Contract một cách độc lập |
+| Component logic                              | Owner  | Trách nhiệm                                                                              | Không chịu trách nhiệm                           |
+| -------------------------------------------- | ------ | ---------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| VNPay Gateway / Initiation                   | HKhang | Tạo URL/transaction reference, ký request, kiểm tra ownership, pending attempt và replay | Không tự cập nhật coupon/loyalty                 |
+| IPN Controller / QueryDR Client              | HKhang | Parse, xác minh chữ ký, mapping result, gọi finalization                                 | Không để IPN tin Return URL hoặc bypass DB rules |
+| Shared Payment Finalization                  | Hoàng  | Transaction atomic cho trạng thái Payment/Order, coupon, loyalty, late outcome           | Không gọi HTTP gateway trong transaction         |
+| DB schema/migrations                         | Thụy   | Provider/status metadata/indexes/migration/test dữ liệu cũ                               | Không tự đổi BR                                  |
+| Reconciliation Scheduler                     | Thụy   | Lập lịch QueryDR, lease/claim chống chạy trùng, audit/manual review                      | Không tự set FAILED khi timeout                  |
+| Order Expiration / ZERO_AMOUNT / Mock policy | CKhang | Shared expiration policy, grace; internal zero flow và Mock config                       | Không viết một finalization song song            |
+| Checkout/Payment UX                          | Khánh  | Redirect, pending/result/retry theo backend                                              | Không coi browser return là payment proof        |
+| Order History/Confirmation/E2E               | Lập    | Projection payment history, acceptance/integration tests                                 | Không sửa Contract một cách độc lập              |
 
 **Triển khai NestJS:** ưu tiên bổ sung providers/controllers trong `PaymentsModule` và tích hợp với `OrdersModule`; không cần tách thành microservice hoặc tạo 8 modules mới. Tránh circular dependency bằng việc cô lập domain transaction helpers và xác lập imports rõ ràng.
 
@@ -112,18 +112,18 @@ flowchart TD
 
 ### 5.2. Trường cần thiết
 
-| Nhóm | Dữ liệu mục tiêu | Ghi chú |
-|---|---|---|
-| Cơ sở | `id`, `orderId`, `userId`, `amountVnd`, `status`, `createdAt` | Có sẵn phần lớn |
-| Provider | `provider` | Backfill records cũ về `MOCK` |
-| Idempotency | `(userId,idempotencyKey)`, `requestHash` | Giữ unique, cùng key không tự sinh attempt khác |
-| VNPay correlation | `vnpTxnRef` unique, transaction reference/ID gateway, original request metadata cần thiết | Không lưu secret; txnRef không tái sử dụng |
-| VNPay proof | signed/verified outcome identifiers, `vnpPayDate` có độ tin cậy phù hợp, verifiedAt, response/transaction codes | Chỉ lưu dữ liệu cần cho kiểm toán |
-| Reconciliation | nextCheckAt, attemptsCount, lastCheckedAt, reviewReason/status | Có thể là cột hoặc bảng phụ; tránh lưu raw nhạy cảm |
-| Gateway evidence/exception | externalEventIdentity, txnRef, verifiedOutcome, evidenceTime, discrepancyReason | **Cần cơ chế ghi nhận riêng khi Order đã có SUCCESS khác**; immutable/idempotent, không vi phạm unique SUCCESS |
-| URL replay | thông tin đầu vào chuẩn hóa đủ để tạo lại **cùng một URL/ký đúng cùng tham số**, hoặc snapshot URL có hạn | Không phụ thuộc clock hiện tại khi replay |
-| Snapshot | INIT response và FINAL result được phân biệt; Mock legacy snapshot vẫn đọc được | Nếu `responseSnapshot` NOT NULL, thiết kế JSON PENDING hợp lệ hoặc migration tương thích |
-| Method | current `PaymentMethod CARD/WALLET` | Đề xuất nullable/extended theo provider; quyết định cùng ERD Delta, không ép VNPay fake CARD |
+| Nhóm                       | Dữ liệu mục tiêu                                                                                                | Ghi chú                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Cơ sở                      | `id`, `orderId`, `userId`, `amountVnd`, `status`, `createdAt`                                                   | Có sẵn phần lớn                                                                                                |
+| Provider                   | `provider`                                                                                                      | Backfill records cũ về `MOCK`                                                                                  |
+| Idempotency                | `(userId,idempotencyKey)`, `requestHash`                                                                        | Giữ unique, cùng key không tự sinh attempt khác                                                                |
+| VNPay correlation          | `vnpTxnRef` unique, transaction reference/ID gateway, original request metadata cần thiết                       | Không lưu secret; txnRef không tái sử dụng                                                                     |
+| VNPay proof                | signed/verified outcome identifiers, `vnpPayDate` có độ tin cậy phù hợp, verifiedAt, response/transaction codes | Chỉ lưu dữ liệu cần cho kiểm toán                                                                              |
+| Reconciliation             | nextCheckAt, attemptsCount, lastCheckedAt, reviewReason/status                                                  | Có thể là cột hoặc bảng phụ; tránh lưu raw nhạy cảm                                                            |
+| Gateway evidence/exception | externalEventIdentity, txnRef, verifiedOutcome, evidenceTime, discrepancyReason                                 | **Cần cơ chế ghi nhận riêng khi Order đã có SUCCESS khác**; immutable/idempotent, không vi phạm unique SUCCESS |
+| URL replay                 | thông tin đầu vào chuẩn hóa đủ để tạo lại **cùng một URL/ký đúng cùng tham số**, hoặc snapshot URL có hạn       | Không phụ thuộc clock hiện tại khi replay                                                                      |
+| Snapshot                   | INIT response và FINAL result được phân biệt; Mock legacy snapshot vẫn đọc được                                 | Nếu `responseSnapshot` NOT NULL, thiết kế JSON PENDING hợp lệ hoặc migration tương thích                       |
+| Method                     | current `PaymentMethod CARD/WALLET`                                                                             | Đề xuất nullable/extended theo provider; quyết định cùng ERD Delta, không ép VNPay fake CARD                   |
 
 **DB constraints phải xác minh qua SQL migrations thực tế:** unique one SUCCESS per Order across providers; unique one PENDING VNPay per Order; unique txnRef; nonnegative amount; ownership/order amount consistency và active Order uniqueness. Prisma schema **không** thể hiện đầy đủ partial indexes PostgreSQL, nên không kết luận thiếu index chỉ từ Prisma.
 
@@ -258,16 +258,16 @@ flowchart TD
 
 ## 12. API surface dự kiến (chưa phải Contract v4.0)
 
-| Surface | Authentication | Mục đích | Ghi chú |
-|---|---|---|---|
-| `POST /payments` (existing) | JWT | Mock legacy | Giữ tương thích, policy giới hạn môi trường |
-| `POST /payments/vnpay/initiate` (**proposed**) | JWT | Tạo VNPay PENDING / URL | Body đề xuất `{orderId}`; key header bắt buộc; chưa chốt HTTP schema |
-| `GET /payments/vnpay/ipn` (baseline) | HMAC VNPay | Nhận outcome authoritative | Không có Customer JWT; response VNPay schema riêng |
-| Return URL handler / FE route (**proposed**) | Browser redirect | Hiển thị chờ/tra cứu kết quả | Không tự finalization chỉ bằng query frontend |
-| Payment status read (**proposed**) | JWT + ownership | FE poll trạng thái an toàn | Chưa chốt endpoint/path và response |
-| ZERO_AMOUNT initiation (**proposed**) | JWT | Hoàn tất Order 0đ | Chưa chốt tách route hay polymorphic API |
-| QueryDR client | Backend internal only | Reconciliation | Không công khai credential/endpoint cho Customer |
-| `GET /orders/me` (existing) | JWT | History/projection | Phải hiểu VNPay PENDING và non-Mock snapshots |
+| Surface                                        | Authentication        | Mục đích                     | Ghi chú                                                              |
+| ---------------------------------------------- | --------------------- | ---------------------------- | -------------------------------------------------------------------- |
+| `POST /payments` (existing)                    | JWT                   | Mock legacy                  | Giữ tương thích, policy giới hạn môi trường                          |
+| `POST /payments/vnpay/initiate` (**proposed**) | JWT                   | Tạo VNPay PENDING / URL      | Body đề xuất `{orderId}`; key header bắt buộc; chưa chốt HTTP schema |
+| `GET /payments/vnpay/ipn` (baseline)           | HMAC VNPay            | Nhận outcome authoritative   | Không có Customer JWT; response VNPay schema riêng                   |
+| Return URL handler / FE route (**proposed**)   | Browser redirect      | Hiển thị chờ/tra cứu kết quả | Không tự finalization chỉ bằng query frontend                        |
+| Payment status read (**proposed**)             | JWT + ownership       | FE poll trạng thái an toàn   | Chưa chốt endpoint/path và response                                  |
+| ZERO_AMOUNT initiation (**proposed**)          | JWT                   | Hoàn tất Order 0đ            | Chưa chốt tách route hay polymorphic API                             |
+| QueryDR client                                 | Backend internal only | Reconciliation               | Không công khai credential/endpoint cho Customer                     |
+| `GET /orders/me` (existing)                    | JWT                   | History/projection           | Phải hiểu VNPay PENDING và non-Mock snapshots                        |
 
 **Không tạo hai endpoint public cho cùng một hành vi trước khi duyệt Contract.** HTTP status/error code (ví dụ `ORDER_EXPIRED`, `ZERO_AMOUNT_REQUIRED`) trong các trao đổi trước **chỉ là đề xuất**.
 
@@ -275,20 +275,20 @@ flowchart TD
 
 ### 13.1. Mapping Jira dự kiến
 
-| Jira plan ID | Owner | Hạng mục |
-|---|---|---|
-| P2-01 | HKhang | Architecture + API Contract v4.0 |
-| P2-02 / P2-06 | Thụy | Schema/migration và DB tests |
-| P2-03 / P2-07 | HKhang | VNPay Gateway, initiation, IPN, QueryDR |
-| P2-04 / P2-05 | Hoàng | Shared Finalization và concurrency tests |
-| P2-08 | Thụy | Reconciliation Scheduler |
-| P2-09 / P2-10 / P2-11 | CKhang | Grace, ZERO_AMOUNT, Mock policy |
-| P2-12 / P2-13 | Khánh | VNPay UI và frontend tests |
-| P2-14 / P2-19 | Lập | Order History + E2E/regression |
-| P2-15 / P2-16 | Hoàng / Khánh | Dockerfile Backend / Frontend |
-| P2-17 | HKhang | Compose / packaging từ số 0 |
-| P2-18 | Lập | Docker clean-run tests |
-| P2-20 | Hoàng | README + báo cáo |
+| Jira plan ID          | Owner         | Hạng mục                                 |
+| --------------------- | ------------- | ---------------------------------------- |
+| P2-01                 | HKhang        | Architecture + API Contract v4.0         |
+| P2-02 / P2-06         | Thụy          | Schema/migration và DB tests             |
+| P2-03 / P2-07         | HKhang        | VNPay Gateway, initiation, IPN, QueryDR  |
+| P2-04 / P2-05         | Hoàng         | Shared Finalization và concurrency tests |
+| P2-08                 | Thụy          | Reconciliation Scheduler                 |
+| P2-09 / P2-10 / P2-11 | CKhang        | Grace, ZERO_AMOUNT, Mock policy          |
+| P2-12 / P2-13         | Khánh         | VNPay UI và frontend tests               |
+| P2-14 / P2-19         | Lập           | Order History + E2E/regression           |
+| P2-15 / P2-16         | Hoàng / Khánh | Dockerfile Backend / Frontend            |
+| P2-17                 | HKhang        | Compose / packaging từ số 0              |
+| P2-18                 | Lập           | Docker clean-run tests                   |
+| P2-20                 | Hoàng         | README + báo cáo                         |
 
 ### 13.2. Bộ test chặn nghiệm thu
 
@@ -305,22 +305,22 @@ flowchart TD
 
 ## 14. Risks, open decisions và điều kiện Approved
 
-| ID | Hạng mục | Loại | Owner | Điều kiện giải quyết |
-|---|---|---|---|---|
-| AR-01 | VNPay `vnp_ExpireDate` ngắn hơn 15m và tình huống initiation sát hạn | VERIFY | HKhang | Test Sandbox / docs, giữ TTL BR-03 |
-| AR-02 | Chính xác mapping HMAC/QueryDR/transaction statuses và IPN `RspCode` | VERIFY | HKhang | Test vectors và official docs |
-| AR-03 | Database partial unique indexes & migration đã có | VERIFY | Thụy | Kiểm tra SQL migrations và PostgreSQL catalog |
-| AR-04 | Payment provider, `method` nullable/enum, init/final snapshots, late-success evidence columns | PROPOSED | Thụy + HKhang | ERD Delta/Prisma được Leader duyệt |
-| AR-05 | Endpoint, DTO, HTTP statuses, errors cho Initiation, status polling, ZERO_AMOUNT | PROPOSED | HKhang | API Contract v4.0 được Leader duyệt |
-| AR-06 | Quy tắc payDate thiếu/không đáng tin, post-expiry gateway success | PROPOSED / VERIFY | HKhang + Hoàng | Chốt evidence policy không vi phạm BR-03 |
-| AR-07 | Grace với multiple instances và lock ordering across Create Order/IPN/Scheduler | PROPOSED | CKhang + Hoàng | Concurrency integration tests |
-| AR-08 | QueryDR scheduling, limits, exactly 60m horizon | VERIFY | Thụy | Sandbox limit và kịch bản đo kiểm |
-| AR-09 | Trạng thái Approved của US/AC v2.3, UC v3.1, ERD delta | DEPENDENCY | Leader | Consistency review cuối |
-| AR-10 | HashSecret bị lộ trong ảnh trước đây | SECURITY ACTION | HKhang | Rotate test secret, xác nhận không còn trong Git/log |
-| AR-11 | Cross-provider Mock/ZERO_AMOUNT khi VNPay PENDING | DESIGN RULE | CKhang + Hoàng | Tạo guard dùng chung và integration tests chống thanh toán đè |
-| AR-12 | SUCCESS sau Order expiry nhưng trước Grace end | DESIGN RULE | Hoàng + CKhang | Kiểm chứng xử lý tài chính, exception và Order cleanup bằng race tests |
-| AR-13 | Gateway SUCCESS thứ hai khi Order đã có Payment SUCCESS (multi-provider, late callback) | DESIGN RULE / ERD GATE | Hoàng + Thụy | Ghi bằng chứng/exception ngoài unique Payment.SUCCESS, idempotent, không phá dữ liệu hay fulfillment |
-| AR-14 | Giao dịch tài chính SUCCESS nhưng thiếu bằng chứng `vnp_PayDate` đáng tin; Payment không còn PENDING nhưng Order chưa PAID | DESIGN RULE | Hoàng + CKhang | Rõ metadata và scheduler hủy Order đúng hạn cuối Grace, không phụ thuộc duy nhất Payment PENDING |
+| ID    | Hạng mục                                                                                                                   | Loại                   | Owner          | Điều kiện giải quyết                                                                                 |
+| ----- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------- | -------------- | ---------------------------------------------------------------------------------------------------- |
+| AR-01 | VNPay `vnp_ExpireDate` ngắn hơn 15m và tình huống initiation sát hạn                                                       | VERIFY                 | HKhang         | Test Sandbox / docs, giữ TTL BR-03                                                                   |
+| AR-02 | Chính xác mapping HMAC/QueryDR/transaction statuses và IPN `RspCode`                                                       | VERIFY                 | HKhang         | Test vectors và official docs                                                                        |
+| AR-03 | Database partial unique indexes & migration đã có                                                                          | VERIFY                 | Thụy           | Kiểm tra SQL migrations và PostgreSQL catalog                                                        |
+| AR-04 | Payment provider, `method` nullable/enum, init/final snapshots, late-success evidence columns                              | PROPOSED               | Thụy + HKhang  | ERD Delta/Prisma được Leader duyệt                                                                   |
+| AR-05 | Endpoint, DTO, HTTP statuses, errors cho Initiation, status polling, ZERO_AMOUNT                                           | PROPOSED               | HKhang         | API Contract v4.0 được Leader duyệt                                                                  |
+| AR-06 | Quy tắc payDate thiếu/không đáng tin, post-expiry gateway success                                                          | PROPOSED / VERIFY      | HKhang + Hoàng | Chốt evidence policy không vi phạm BR-03                                                             |
+| AR-07 | Grace với multiple instances và lock ordering across Create Order/IPN/Scheduler                                            | PROPOSED               | CKhang + Hoàng | Concurrency integration tests                                                                        |
+| AR-08 | QueryDR scheduling, limits, exactly 60m horizon                                                                            | VERIFY                 | Thụy           | Sandbox limit và kịch bản đo kiểm                                                                    |
+| AR-09 | Trạng thái Approved của US/AC v2.3, UC v3.1, ERD delta                                                                     | DEPENDENCY             | Leader         | Consistency review cuối                                                                              |
+| AR-10 | HashSecret bị lộ trong ảnh trước đây                                                                                       | SECURITY ACTION        | HKhang         | Rotate test secret, xác nhận không còn trong Git/log                                                 |
+| AR-11 | Cross-provider Mock/ZERO_AMOUNT khi VNPay PENDING                                                                          | DESIGN RULE            | CKhang + Hoàng | Tạo guard dùng chung và integration tests chống thanh toán đè                                        |
+| AR-12 | SUCCESS sau Order expiry nhưng trước Grace end                                                                             | DESIGN RULE            | Hoàng + CKhang | Kiểm chứng xử lý tài chính, exception và Order cleanup bằng race tests                               |
+| AR-13 | Gateway SUCCESS thứ hai khi Order đã có Payment SUCCESS (multi-provider, late callback)                                    | DESIGN RULE / ERD GATE | Hoàng + Thụy   | Ghi bằng chứng/exception ngoài unique Payment.SUCCESS, idempotent, không phá dữ liệu hay fulfillment |
+| AR-14 | Giao dịch tài chính SUCCESS nhưng thiếu bằng chứng `vnp_PayDate` đáng tin; Payment không còn PENDING nhưng Order chưa PAID | DESIGN RULE            | Hoàng + CKhang | Rõ metadata và scheduler hủy Order đúng hạn cuối Grace, không phụ thuộc duy nhất Payment PENDING     |
 
 ### 14.1. Điều kiện duyệt Payment Architecture
 

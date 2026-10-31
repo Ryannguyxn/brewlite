@@ -42,6 +42,8 @@ import {
   toPaymentSubmissionErrorState,
   validateCreatePaymentPayload,
   validatePaymentResponseData,
+  initiateVnPayPaymentApi,
+  submitZeroAmountPaymentApi,
   type SubmitPaymentApiResult,
 } from "@/services/payment.service";
 
@@ -1870,13 +1872,46 @@ export default function PaymentPageView({
                         id="btnSubmitPayment"
                         type="button"
                         disabled={isSubmitting || !isPayableOrder}
-                        onClick={() => {
+                        onClick={async () => {
                           if (method === "VNPAY") {
+                            // BR-06: Đơn hàng 0đ quyết toán nội bộ không cần redirect
+                            if (activeOrder.totalVnd === 0) {
+                              setIsSubmitting(true);
+                              setPaymentError(null);
+                              try {
+                                await submitZeroAmountPaymentApi(
+                                  { orderId: activeOrder.id },
+                                  idempotencyKey,
+                                  { accessToken }
+                                );
+                                clearCart();
+                                if (setContextActiveOrder) setContextActiveOrder(null);
+                                clearStoredActiveOrder();
+                                router.push(`/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=zero`);
+                              } catch (err: unknown) {
+                                const submissionErr = toPaymentSubmissionErrorState(err, idempotencyKey);
+                                setPaymentError(submissionErr);
+                              } finally {
+                                setIsSubmitting(false);
+                              }
+                              return;
+                            }
+
+                            // Mở màn hình redirect / cổng VNPay
                             const vnpayUrl = `/order-confirmation?orderId=${encodeURIComponent(activeOrder.id)}&view=redirecting`;
                             if (typeof window !== "undefined") {
                               window.open(vnpayUrl, "_blank", "noopener,noreferrer");
                             }
                             setIsVnPayTabOpened(true);
+
+                            // Đồng thời kích hoạt POST /payments/vnpay/initiate
+                            if (accessToken && !isTokenExpired(accessToken)) {
+                              initiateVnPayPaymentApi(
+                                { orderId: activeOrder.id },
+                                idempotencyKey,
+                                { accessToken }
+                              ).catch(() => {});
+                            }
                             return;
                           }
                           handleSubmitPayment({ reuseExistingKey: false });

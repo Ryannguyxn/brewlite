@@ -215,12 +215,14 @@ export class PaymentsService extends PaymentProcessor {
                 idempotencyKey,
                 requestHash,
                 amountVnd: order.totalVnd,
+                provider: 'MOCK',
                 method: dto.method,
                 status: outcome.paymentStatus,
                 methodLast4: outcome.methodLast4,
                 mockReference: response.mockReference,
                 responseSnapshot: { ...response },
                 createdAt: clock.now,
+                updatedAt: clock.now,
               },
             });
             return { response, replayed: false };

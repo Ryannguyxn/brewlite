@@ -777,4 +777,156 @@ describe("VNPay Phase 2 UI & Flow Deep Test Suite", () => {
       assert.ok(genericErr.message.includes("Network connection drop"));
     });
   });
+  // =========================================================================
+  // SUITE 9: VNPay Sandbox Exclusive Selection & Under Development Notices
+  // =========================================================================
+  describe("9. VNPay Sandbox Exclusive Selection & Disabled Mock Methods (CARD/WALLET)", () => {
+    const mockAuthContext: AuthContextType = {
+      user: {
+        id: "user-test-vnpay-exclusive",
+        email: "test-vnpay@brewlite.vn",
+        fullName: "Tran Van Test",
+      },
+      accessToken: "mock-jwt-token-vnpay",
+      isAuthenticated: true,
+      isLoading: false,
+      isAuthModalOpen: false,
+      authModalMode: "login",
+      authModalMessage: null,
+      openAuthModal: () => {},
+      closeAuthModal: () => {},
+      login: async () => {},
+      register: async () => ({ id: "user-test-vnpay-exclusive", email: "test-vnpay@brewlite.vn", fullName: "Tran Van Test" }),
+      logout: () => {},
+      verifySession: () => true,
+      handleUnauthorizedCheckout: () => {},
+      pendingCheckout: false,
+      setPendingCheckout: () => {},
+    };
+
+    const mockCartContext: CartContextValue = {
+      items: [],
+      totalQuantity: 0,
+      totalLines: 0,
+      subtotalVnd: 0,
+      formattedSubtotal: "0 ₫",
+      isCartOpen: false,
+      couponCode: "",
+      setCouponCode: () => {},
+      feedbackMessage: null,
+      feedbackType: null,
+      addToCart: () => ({ success: true, message: "OK" }),
+      updateQuantity: () => {},
+      incrementQuantity: () => {},
+      decrementQuantity: () => {},
+      removeFromCart: () => {},
+      clearCart: () => {},
+      openCart: () => {},
+      closeCart: () => {},
+      toggleCart: () => {},
+      dismissFeedback: () => {},
+      mapToCreateOrderPayload: () => ({} as any),
+      activeOrder: null,
+      setActiveOrder: () => {},
+    };
+
+    it("defaults to VNPay Sandbox as selected method and renders CARD/WALLET as disabled under development", async () => {
+      const order = createSampleOrder({ status: "PENDING" });
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: mockCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: order as any,
+              })
+            )
+          )
+        );
+      });
+
+      // 1. Radio VNPay is checked by default
+      const radioVnpay = container.querySelector("#radioVnpay") as HTMLInputElement;
+      assert.ok(radioVnpay, "Radio VNPAY must exist");
+      assert.strictEqual(radioVnpay.checked, true, "Radio VNPAY must be checked by default");
+
+      // 2. Radio CARD and WALLET are disabled and NOT checked
+      const radioCard = container.querySelector("#radioCard") as HTMLInputElement;
+      assert.ok(radioCard, "Radio CARD must exist");
+      assert.strictEqual(radioCard.checked, false, "Radio CARD must NOT be checked");
+      assert.strictEqual(radioCard.disabled, true, "Radio CARD must be disabled");
+
+      const radioWallet = container.querySelector("#radioWallet") as HTMLInputElement;
+      assert.ok(radioWallet, "Radio WALLET must exist");
+      assert.strictEqual(radioWallet.checked, false, "Radio WALLET must NOT be checked");
+      assert.strictEqual(radioWallet.disabled, true, "Radio WALLET must be disabled");
+
+      // 3. Badges "ĐANG PHÁT TRIỂN" are rendered
+      const text = container.textContent || "";
+      assert.ok(text.includes("ĐANG PHÁT TRIỂN"), "Should render ĐANG PHÁT TRIỂN badges");
+      assert.ok(text.includes("Cổng thanh toán VNPay Sandbox"), "Should render VNPay option");
+    });
+
+    it("displays under development alert when user clicks on CARD or WALLET and keeps VNPAY selected", async () => {
+      const order = createSampleOrder({ status: "PENDING" });
+
+      await act(async () => {
+        root = createRoot(container);
+        root.render(
+          React.createElement(
+            AuthContext.Provider,
+            { value: mockAuthContext },
+            React.createElement(
+              CartContext.Provider,
+              { value: mockCartContext },
+              React.createElement(PaymentPageView, {
+                initialOrder: order as any,
+              })
+            )
+          )
+        );
+      });
+
+      // Click on CARD label/container
+      const cardOptionLabel = container.querySelector("#radioCard")?.closest("label");
+      assert.ok(cardOptionLabel, "CARD option label must exist");
+
+      await act(async () => {
+        cardOptionLabel.click();
+      });
+
+      // Verify devNotice banner appears
+      const noticeBanner = container.querySelector("#devPaymentNotice");
+      assert.ok(noticeBanner, "devPaymentNotice alert must appear after clicking CARD");
+      assert.ok(
+        noticeBanner.textContent?.includes("hiện đang được phát triển"),
+        "Notice must state that CARD is under development"
+      );
+
+      // Verify VNPAY remains checked
+      const radioVnpay = container.querySelector("#radioVnpay") as HTMLInputElement;
+      assert.strictEqual(radioVnpay.checked, true, "VNPAY must stay checked");
+
+      // Click on WALLET option
+      const walletOptionLabel = container.querySelector("#radioWallet")?.closest("label");
+      assert.ok(walletOptionLabel, "WALLET option label must exist");
+
+      await act(async () => {
+        walletOptionLabel.click();
+      });
+
+      const updatedNotice = container.querySelector("#devPaymentNotice");
+      assert.ok(updatedNotice, "devPaymentNotice alert must remain visible after clicking WALLET");
+      assert.ok(
+        updatedNotice.textContent?.includes("hiện đang được phát triển"),
+        "Notice must state that WALLET is under development"
+      );
+      assert.strictEqual(radioVnpay.checked, true, "VNPAY must still be checked");
+    });
+  });
 });

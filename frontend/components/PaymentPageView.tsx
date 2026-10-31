@@ -335,7 +335,7 @@ export interface PaymentPageViewProps {
 
 export default function PaymentPageView({
   initialOrder = null,
-  initialMethod = "CARD",
+  initialMethod = "VNPAY",
   initialCardNumber = "1234567890121234",
   initialPhoneNumber = "0912345678",
   initialIdempotencyKey,
@@ -390,7 +390,10 @@ export default function PaymentPageView({
   const [loyaltyPoints, setLoyaltyPoints] = useState<number>(0);
 
   // State chọn phương thức thanh toán & thông tin CARD / WALLET
-  const [method, setMethod] = useState<PaymentMethod>(initialMethod);
+  const [method, setMethod] = useState<PaymentMethod>(
+    initialMethod === "CARD" || initialMethod === "WALLET" ? "VNPAY" : initialMethod
+  );
+  const [devNotice, setDevNotice] = useState<string | null>(null);
   const [cardNumber, setCardNumber] = useState<string>(initialCardNumber);
   const [phoneNumber, setPhoneNumber] = useState<string>(initialPhoneNumber);
 
@@ -690,46 +693,38 @@ export default function PaymentPageView({
 
   const handleSelectMethod = (nextMethod: PaymentMethod) => {
     if (isSubmitting || !isPayableOrder) return;
-    setMethod(nextMethod);
+    if (nextMethod !== "VNPAY") {
+      setDevNotice(
+        `Phương thức ${
+          nextMethod === "CARD" ? "Thẻ thanh toán (CARD)" : "Ví điện tử (WALLET)"
+        } hiện đang được phát triển. Vui lòng chọn Cổng thanh toán VNPay Sandbox.`
+      );
+      return;
+    }
+    setDevNotice(null);
+    setMethod("VNPAY");
     setPaymentError(null);
     refreshKeyIfChangedAfterSubmit(nextMethod, cardNumber, phoneNumber);
   };
 
-  const handleCardInputChange = (rawVal: string) => {
+  const handleCardInputChange = (_rawVal: string) => {
     if (isSubmitting || !isPayableOrder) return;
-    const digitsOnly = rawVal.replace(/\D/g, "").slice(0, 16);
-    setCardNumber(digitsOnly);
-    setPaymentError(null);
-    refreshKeyIfChangedAfterSubmit(method, digitsOnly, phoneNumber);
+    setDevNotice("Phương thức Thẻ thanh toán (CARD) hiện đang được phát triển. Vui lòng chọn VNPay Sandbox.");
   };
 
-  const handleWalletInputChange = (rawVal: string) => {
+  const handleWalletInputChange = (_rawVal: string) => {
     if (isSubmitting || !isPayableOrder) return;
-    const digitsOnly = rawVal.replace(/\D/g, "").slice(0, 10);
-    setPhoneNumber(digitsOnly);
-    setPaymentError(null);
-    refreshKeyIfChangedAfterSubmit(method, cardNumber, digitsOnly);
+    setDevNotice("Phương thức Ví điện tử (WALLET) hiện đang được phát triển. Vui lòng chọn VNPay Sandbox.");
   };
 
-  const handleSetCardScenario = (scenario: "success" | "fail") => {
+  const handleSetCardScenario = (_scenario: "success" | "fail") => {
     if (isSubmitting || !isPayableOrder) return;
-    const nextCard =
-      scenario === "success" ? "1234567890121234" : "1234567890120002";
-    setMethod("CARD");
-    setCardNumber(nextCard);
-    setPaymentError(null);
-    setIdempotencyKey(generateIdempotencyKey("idem"));
-    setLastSubmittedPayloadJson("");
+    setDevNotice("Phương thức Thẻ thanh toán (CARD) hiện đang được phát triển. Vui lòng chọn VNPay Sandbox.");
   };
 
-  const handleSetWalletScenario = (scenario: "success" | "fail") => {
+  const handleSetWalletScenario = (_scenario: "success" | "fail") => {
     if (isSubmitting || !isPayableOrder) return;
-    const nextPhone = scenario === "success" ? "0912345678" : "0912340000";
-    setMethod("WALLET");
-    setPhoneNumber(nextPhone);
-    setPaymentError(null);
-    setIdempotencyKey(generateIdempotencyKey("idem"));
-    setLastSubmittedPayloadJson("");
+    setDevNotice("Phương thức Ví điện tử (WALLET) hiện đang được phát triển. Vui lòng chọn VNPay Sandbox.");
   };
 
   /**
@@ -1130,6 +1125,32 @@ export default function PaymentPageView({
                             </div>
                           )}
 
+                          {/* Thông báo phương thức đang phát triển */}
+                          {devNotice && (
+                            <div
+                              id="devPaymentNotice"
+                              role="alert"
+                              className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] text-[#92400E] flex items-start gap-2.5 text-xs animate-fadeIn shadow-xs"
+                            >
+                              <span className="material-symbols-outlined text-[20px] text-[#D97706] shrink-0 mt-0.5">
+                                engineering
+                              </span>
+                              <div className="flex items-center justify-between w-full gap-2">
+                                <p className="leading-relaxed font-medium">
+                                  {devNotice}
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => setDevNotice(null)}
+                                  className="text-[#92400E] hover:text-[#78350F] p-1 font-bold text-sm cursor-pointer shrink-0"
+                                  aria-label="Đóng thông báo"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
                           {/* PHƯƠNG THỨC 0: Cổng thanh toán VNPay Sandbox (Phase 2 - BR-01) */}
                           <div
                             className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
@@ -1194,13 +1215,10 @@ export default function PaymentPageView({
 
                           </div>
 
-                          {/* PHƯƠNG THỨC 1: Thẻ thanh toán (CARD) */}
+                          {/* PHƯƠNG THỨC 1: Thẻ thanh toán (CARD) - ĐANG PHÁT TRIỂN */}
                           <div
-                            className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
-                              method === "CARD"
-                                ? "border-2 border-[#C67C4E] bg-[#FAF6EE]/50"
-                                : "border border-[#EFECE6] bg-white hover:border-[#C67C4E]/50"
-                            }`}
+                            className="rounded-xl p-space-md flex flex-col gap-space-md transition-all opacity-70 bg-[#FAF9F5] border border-dashed border-[#D1CCC4] hover:border-[#C67C4E]/60 cursor-pointer"
+                            onClick={() => handleSelectMethod("CARD")}
                           >
                             <label
                               className="flex items-center justify-between cursor-pointer"
@@ -1212,29 +1230,26 @@ export default function PaymentPageView({
                                 type="radio"
                                 name="payment_method_enum"
                                 value="CARD"
-                                checked={method === "CARD"}
-                                disabled={isSubmitting}
-                                onChange={() => handleSelectMethod("CARD")}
-                                className="w-4 h-4 text-[#C67C4E] focus:ring-[#C67C4E] border-[#EFECE6]"
+                                checked={false}
+                                disabled={true}
+                                readOnly
+                                className="w-4 h-4 text-[#C67C4E] focus:ring-[#C67C4E] border-[#EFECE6] cursor-not-allowed"
                               />
                               <div>
                                 <div className="flex items-center gap-2">
-                                  <span className="font-title-sm text-title-sm text-[#1E1510] font-bold">
+                                  <span className="font-title-sm text-title-sm text-[#7D7571] font-bold">
                                     Thẻ thanh toán (CARD)
                                   </span>
-                                  {method === "CARD" && (
-                                    <span className="px-2 py-0.5 rounded bg-[#C67C4E]/10 text-[#C67C4E] font-label-md text-[11px] font-bold">
-                                      ĐANG CHỌN
-                                    </span>
-                                  )}
+                                  <span className="px-2 py-0.5 rounded-full bg-[#E5E0D8] text-[#6E645E] font-label-md text-[11px] font-bold">
+                                    ĐANG PHÁT TRIỂN
+                                  </span>
                                 </div>
-                                <span className="font-body-sm text-body-sm text-on-surface-variant">
-                                  Thanh toán trực tiếp bằng số thẻ mô phỏng API
-                                  chuẩn
+                                <span className="font-body-sm text-body-sm text-on-surface-variant/80">
+                                  Thanh toán bằng thẻ ATM / Thẻ quốc tế (Tính năng đang phát triển - Chưa hỗ trợ)
                                 </span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 opacity-60">
                               <span className="px-2 py-0.5 rounded bg-white border border-[#EFECE6] font-bold text-[11px] text-[#C67C4E]">
                                 VISA
                               </span>
@@ -1375,13 +1390,10 @@ export default function PaymentPageView({
                           </div>
                         </div>
 
-                        {/* PHƯƠNG THỨC 2: Ví điện tử (WALLET) */}
+                        {/* PHƯƠNG THỨC 2: Ví điện tử (WALLET) - ĐANG PHÁT TRIỂN */}
                         <div
-                          className={`rounded-xl p-space-md flex flex-col gap-space-md transition-all ${
-                            method === "WALLET"
-                              ? "border-2 border-[#C67C4E] bg-[#FAF6EE]/50"
-                              : "border border-[#EFECE6] bg-white hover:border-[#C67C4E]/50"
-                          }`}
+                          className="rounded-xl p-space-md flex flex-col gap-space-md transition-all opacity-70 bg-[#FAF9F5] border border-dashed border-[#D1CCC4] hover:border-[#C67C4E]/60 cursor-pointer"
+                          onClick={() => handleSelectMethod("WALLET")}
                         >
                           <label
                             className="flex items-center justify-between cursor-pointer"
@@ -1393,33 +1405,26 @@ export default function PaymentPageView({
                                 type="radio"
                                 name="payment_method_enum"
                                 value="WALLET"
-                                checked={method === "WALLET"}
-                                disabled={isSubmitting}
-                                onChange={() => handleSelectMethod("WALLET")}
-                                className="w-4 h-4 text-[#C67C4E] focus:ring-[#C67C4E] border-[#EFECE6]"
+                                checked={false}
+                                disabled={true}
+                                readOnly
+                                className="w-4 h-4 text-[#C67C4E] focus:ring-[#C67C4E] border-[#EFECE6] cursor-not-allowed"
                               />
                               <div>
                                 <div className="flex items-center gap-2">
-                                  <span className="font-title-sm text-title-sm text-[#1E1510] font-bold">
+                                  <span className="font-title-sm text-title-sm text-[#7D7571] font-bold">
                                     Ví điện tử (WALLET)
                                   </span>
-                                  {method === "WALLET" ? (
-                                    <span className="px-2 py-0.5 rounded bg-[#C67C4E]/10 text-[#C67C4E] font-label-md text-[11px] font-bold">
-                                      ĐANG CHỌN
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-mono text-[11px]">
-                                      MOCK WALLET
-                                    </span>
-                                  )}
+                                  <span className="px-2 py-0.5 rounded-full bg-[#E5E0D8] text-[#6E645E] font-label-md text-[11px] font-bold">
+                                    ĐANG PHÁT TRIỂN
+                                  </span>
                                 </div>
-                                <span className="font-body-sm text-body-sm text-on-surface-variant">
-                                  Thanh toán qua ví điện tử liên kết số điện
-                                  thoại
+                                <span className="font-body-sm text-body-sm text-on-surface-variant/80">
+                                  Thanh toán qua ví điện tử liên kết số điện thoại (Tính năng đang phát triển - Chưa hỗ trợ)
                                 </span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 opacity-60">
                               <span className="w-7 h-7 rounded-lg bg-[#a50064] text-white flex items-center justify-center font-bold text-[10px]">
                                 MoMo
                               </span>

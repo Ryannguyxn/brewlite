@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
@@ -19,6 +19,7 @@ import { AppModule } from '../src/app.module.js';
 import type { Prisma } from '../src/generated/prisma/client.js';
 import { ORDER_EXPIRATION_OPTIONS } from '../src/orders/order-expiration.config.js';
 import { OrderExpirationService } from '../src/orders/order-expiration.service.js';
+import { PaymentFinalizationService } from '../src/payments/payment-finalization.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 
 type Fixture = {
@@ -346,20 +347,89 @@ describe('SCRUM-59 real Order–Payment–Scheduler lifecycle', () => {
     );
   });
 
-  it('supports the complete zero-VND payment lifecycle without points or release', async () => {
+  it('runs ZERO_AMOUNT through Shared Finalization service integration without an API endpoint', async () => {
     const f = await fixture(true);
-    expect((await pay(f).expect(200)).body).toMatchObject({
-      amountVnd: 0,
+    const beforeMock = await snapshot(f);
+    const rejected = await pay(f).expect(409);
+    expect(rejected.body).toMatchObject({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'INVALID_TRANSITION',
+      message: 'Order cannot accept a new payment',
+    });
+    expect(await snapshot(f)).toEqual(beforeMock);
+
+    const finalization = app!.get(PaymentFinalizationService);
+    const command = {
+      provider: 'ZERO_AMOUNT' as const,
+      userId: f.userId,
+      orderId: f.orderId,
+      paymentId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      requestHash: createHash('sha256')
+        .update(JSON.stringify({ orderId: f.orderId }))
+        .digest('hex'),
+    };
+    const finalized = await prisma.$transaction((tx) =>
+      finalization.finalizeInTransaction(tx, command),
+    );
+    expect(finalized.disposition).toBe('FINALIZED');
+    expect(finalized.zeroAmountResponse).toMatchObject({
+      paymentId: command.paymentId,
+      orderId: f.orderId,
+      provider: 'ZERO_AMOUNT',
       paymentStatus: 'SUCCESS',
+      orderStatus: 'PAID',
+      amountVnd: 0,
       pointsEarned: 0,
     });
-    await markExpired(f.orderId);
-    await scheduler.runOnce();
+
     const paid = await snapshot(f);
     expect(paid.order.status).toBe('PAID');
+    expect(paid.order.pointsEarned).toBe(0);
+    expect(paid.order.payments).toHaveLength(1);
+    expect(paid.order.payments[0]).toMatchObject({
+      provider: 'ZERO_AMOUNT',
+      status: 'SUCCESS',
+      amountVnd: 0n,
+      method: null,
+    });
     expect(paid.order.couponRedemption?.status).toBe('CONSUMED');
+    expect(paid.coupon.activeUsageCount).toBe(1);
     expect(paid.product.stock).toBe(3);
     expect(paid.user.loyaltyPoints).toBe(0);
+
+    const duplicate = await prisma.$transaction((tx) =>
+      finalization.finalizeInTransaction(tx, {
+        ...command,
+        paymentId: randomUUID(),
+      }),
+    );
+    expect(duplicate.disposition).toBe('DUPLICATE');
+    expect(duplicate.paymentId).toBe(command.paymentId);
+    expect(duplicate.zeroAmountResponse).toEqual(finalized.zeroAmountResponse);
+    expect(await snapshot(f)).toEqual(paid);
+
+    for (const [from, status] of [
+      ['PAID', 'PREPARING'],
+      ['PREPARING', 'READY'],
+      ['READY', 'COMPLETED'],
+    ]) {
+      expect((await advance(f, from).expect(200)).body.status).toBe(status);
+    }
+    const completed = await snapshot(f);
+    expect(completed.order.status).toBe('COMPLETED');
+    expect(completed.order.pointsEarned).toBe(0);
+    expect(completed.order.payments[0]).toMatchObject({
+      provider: 'ZERO_AMOUNT',
+      status: 'SUCCESS',
+      amountVnd: 0n,
+      method: null,
+    });
+    expect(completed.order.couponRedemption?.status).toBe('CONSUMED');
+    expect(completed.coupon.activeUsageCount).toBe(1);
+    expect(completed.product.stock).toBe(3);
+    expect(completed.user.loyaltyPoints).toBe(0);
   });
 
   it.each(['PREPARING', 'READY'] as const)(

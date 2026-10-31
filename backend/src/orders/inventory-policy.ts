@@ -63,17 +63,68 @@ export async function expireOrderInTransaction(
   });
   if (order.status !== 'PENDING' && order.status !== 'PAYMENT_FAILED')
     return order.status;
-  // DB time is checked AFTER the lock, not from a stale candidate scan.
-  const [clock] = await tx.$queryRaw<{ now: Date; expired: boolean }[]>`
-    SELECT clock_timestamp() AS now, expires_at <= clock_timestamp() AS expired
-    FROM orders WHERE id = ${orderId}::uuid`;
+  // DB time, persisted expiresAt and VNPay pending state are checked together
+  // AFTER the Order lock. A candidate scan must never cancel during Grace.
+  const [clock] = await tx.$queryRaw<
+    {
+      now: Date;
+      expired: boolean;
+      graceEnded: boolean;
+      hasPendingVnpay: boolean;
+    }[]
+  >`
+    WITH db_clock AS MATERIALIZED (
+      SELECT clock_timestamp() AS now
+    )
+    SELECT db_clock.now AS now,
+           db_clock.now >= orders.expires_at AS expired,
+           db_clock.now >= orders.expires_at + INTERVAL '5 minutes' AS "graceEnded",
+           EXISTS (
+             SELECT 1 FROM payments
+             WHERE payments.order_id = orders.id
+               AND payments.provider = 'VNPAY'
+               AND payments.status = 'PENDING'
+           ) AS "hasPendingVnpay"
+    FROM orders CROSS JOIN db_clock
+    WHERE orders.id = ${orderId}::uuid`;
   if (!clock) throw new Error('Missing Order expiration clock');
   if (!clock.expired) return order.status;
+  if (clock.hasPendingVnpay && !clock.graceEnded) return order.status;
 
-  await tx.order.update({
+  return cancelLockedOrderAndReleaseInTransaction(tx, orderId, clock.now);
+}
+
+/**
+ * Caller must already hold the Order row lock and own the transaction.
+ * CANCELLED is the one-time marker for inventory and coupon release.
+ */
+export async function cancelLockedOrderAndReleaseInTransaction(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  now: Date,
+): Promise<OrderStatus | null> {
+  const order = await tx.order.findUnique({
     where: { id: orderId },
-    data: { status: 'CANCELLED', cancelledAt: clock.now },
+    select: { status: true },
   });
+  if (!order) return null;
+  if (order.status !== 'PENDING' && order.status !== 'PAYMENT_FAILED')
+    return order.status;
+  const cancelled = await tx.order.updateMany({
+    where: { id: orderId, status: { in: ['PENDING', 'PAYMENT_FAILED'] } },
+    data: {
+      status: 'CANCELLED',
+      cancelledAt: now,
+      updatedAt: now,
+    },
+  });
+  if (cancelled.count !== 1) {
+    const current = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { status: true },
+    });
+    return current?.status ?? null;
+  }
   const items = await tx.orderItem.findMany({
     where: { orderId },
     select: { productId: true, quantity: true },
@@ -85,6 +136,6 @@ export async function expireOrderInTransaction(
       data: { stock: { increment: quantity } },
     });
   }
-  await releaseHeldCoupon(tx, orderId);
+  await releaseHeldCoupon(tx, orderId, now);
   return 'CANCELLED';
 }

@@ -105,6 +105,7 @@ describe('Orders PostgreSQL transaction integration', () => {
         idempotencyKey: randomUUID(),
         requestHash: 'a'.repeat(64),
         amountVnd: 98000n,
+        provider: 'MOCK',
         method: 'CARD',
         status,
         methodLast4: '1234',

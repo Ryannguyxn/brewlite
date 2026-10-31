@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client.js';
 import { PaymentsService } from './payments.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MockPaymentService } from './mock-payment.service.js';
+import { PaymentFinalizationService } from './payment-finalization.service.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
@@ -19,6 +20,7 @@ describe('Payment transaction error contract', () => {
     const value = new PaymentsService(
       { $transaction: transaction } as unknown as PrismaService,
       new MockPaymentService(),
+      new PaymentFinalizationService(),
       new CreatePaymentPipe(),
       new IdempotencyKeyPipe(),
     );

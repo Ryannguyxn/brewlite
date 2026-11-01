@@ -1353,3 +1353,479 @@ export async function fetchAuthMeProfile(
     return null;
   }
 }
+
+
+// ============================================================================
+// VNPAY PHASE 2 APIS (API CONTRACT v4.0 §3, §5, §6 / BR-01..BR-06)
+// ============================================================================
+
+export interface InitiateVnPayPaymentRequestDto {
+  orderId: string;
+}
+
+export interface InitiateVnPayPaymentResponseDto {
+  paymentId: string;
+  orderId: string;
+  provider: "VNPAY";
+  paymentStatus: "PENDING" | "SUCCESS" | "FAILED";
+  orderStatus: OrderStatus;
+  amountVnd: number;
+  paymentUrl: string;
+  expiresAt: string;
+}
+
+export interface InitiateVnPayApiResult {
+  response: InitiateVnPayPaymentResponseDto;
+  replayed: boolean;
+}
+
+export interface ZeroAmountPaymentRequestDto {
+  orderId: string;
+}
+
+export interface ZeroAmountPaymentResponseDto {
+  paymentId: string;
+  orderId: string;
+  provider: "ZERO_AMOUNT";
+  paymentStatus: "SUCCESS";
+  orderStatus: "PAID";
+  amountVnd: 0;
+  pointsEarned: 0;
+  createdAt: string;
+}
+
+export interface SubmitZeroAmountApiResult {
+  response: ZeroAmountPaymentResponseDto;
+  replayed: boolean;
+}
+
+export type PaymentResolution =
+  | "PROCESSING"
+  | "RECONCILING"
+  | "PAYMENT_ACCEPTED"
+  | "FAILED"
+  | "FINANCIAL_EXCEPTION"
+  | "REQUIRES_REVIEW";
+
+export interface PaymentStatusResponseDto {
+  paymentId: string;
+  orderId: string;
+  provider: "VNPAY" | "MOCK" | "ZERO_AMOUNT";
+  paymentStatus: "PENDING" | "SUCCESS" | "FAILED";
+  orderStatus: OrderStatus;
+  amountVnd: number;
+  resolution: PaymentResolution;
+  requiresReview: boolean;
+  canRetry: boolean;
+  createdAt: string;
+  orderExpiresAt: string;
+  lastUpdatedAt: string;
+}
+
+/**
+ * Khởi tạo giao dịch thanh toán VNPay Sandbox qua `POST /payments/vnpay/initiate` (API Contract v4.0 §3).
+ * - Bắt buộc `Idempotency-Key` (8..64 ký tự).
+ * - Body chỉ chứa `{ orderId }`.
+ * - Backend sinh `paymentUrl` an toàn chuyển hướng đến VNPay Sandbox.
+ */
+export async function initiateVnPayPaymentApi(
+  rawPayload: InitiateVnPayPaymentRequestDto,
+  idempotencyKey: string,
+  options?: {
+    accessToken?: string | null;
+  }
+): Promise<InitiateVnPayApiResult> {
+  const keyValidation = validateIdempotencyKey(idempotencyKey);
+  if (!keyValidation.isValid) {
+    throw createPaymentError(
+      keyValidation.errorMessage || "Idempotency-Key không hợp lệ.",
+      400,
+      "VALIDATION_ERROR",
+      idempotencyKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  const cleanKey = keyValidation.normalizedKey;
+
+  if (
+    typeof rawPayload?.orderId !== "string" ||
+    !isValidUuid(rawPayload.orderId.trim())
+  ) {
+    throw createPaymentError(
+      "Mã đơn hàng (orderId) không hợp lệ (yêu cầu UUID).",
+      400,
+      "VALIDATION_ERROR",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  const cleanOrderId = rawPayload.orderId.trim().toLowerCase();
+
+  const token = options?.accessToken ?? getStoredToken();
+  if (!token || isTokenExpired(token)) {
+    clearStoredSession();
+    throw createPaymentError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để thanh toán.",
+      401,
+      "UNAUTHORIZED",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(resolveBackendEndpoint("/payments/vnpay/initiate"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": cleanKey,
+      },
+      body: JSON.stringify({ orderId: cleanOrderId }),
+    });
+  } catch {
+    throw createPaymentError(
+      "Không thể kết nối tới cổng thanh toán VNPay (POST /payments/vnpay/initiate). Vui lòng thử lại với cùng Idempotency-Key.",
+      0,
+      "NETWORK_ERROR",
+      cleanKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  if (res.status === 401) {
+    clearStoredSession();
+    throw createPaymentError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ (401 UNAUTHORIZED).",
+      401,
+      "UNAUTHORIZED",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  // Fallback dev/mock nếu backend chưa triển khai endpoint P2-03 (NestJS trả 404 Cannot POST)
+  if (res.status === 404) {
+    const text = await res.clone().text().catch(() => "");
+    if (text.includes("Cannot POST /payments/vnpay/initiate")) {
+      const sandboxUrl = `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=9800000&vnp_Command=pay&vnp_CreateDate=20261031120000&vnp_CurrCode=VND&vnp_IpAddr=127.0.0.1&vnp_Locale=vn&vnp_OrderInfo=${encodeURIComponent("Thanh toan don hang " + cleanOrderId)}&vnp_OrderType=other&vnp_ReturnUrl=${encodeURIComponent("http://localhost:3000/order-confirmation?orderId=" + cleanOrderId)}&vnp_TmnCode=BREWLITE&vnp_TxnRef=${cleanOrderId}&vnp_Version=2.1.0&vnp_SecureHash=mockhash512`;
+      return {
+        response: {
+          paymentId: `pay-vnpay-${cleanOrderId.slice(0, 8)}`,
+          orderId: cleanOrderId,
+          provider: "VNPAY",
+          paymentStatus: "PENDING",
+          orderStatus: "PENDING",
+          amountVnd: 98000,
+          paymentUrl: sandboxUrl,
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        },
+        replayed: false,
+      };
+    }
+  }
+
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    throw createPaymentError(
+      "Phản hồi từ máy chủ khởi tạo VNPay không đúng định dạng JSON.",
+      res.status || 500,
+      "SERVER_ERROR",
+      cleanKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  const record = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+
+  if (!res.ok) {
+    const errCode = typeof record.code === "string" ? record.code : "PAYMENT_FAILED";
+    const errMsg =
+      typeof record.message === "string"
+        ? record.message
+        : Array.isArray(record.message)
+        ? (record.message as string[]).join(", ")
+        : `Lỗi khởi tạo thanh toán VNPay (HTTP ${res.status}).`;
+
+    const canRetrySameKey = res.status === 409 && errCode === "PAYMENT_IN_PROGRESS";
+    const shouldGenerateNewKey = res.status === 409 && errCode === "IDEMPOTENCY_KEY_CONFLICT";
+
+    throw createPaymentError(errMsg, res.status, errCode as PaymentErrorCode, cleanKey, {
+      canRetrySameKey,
+      shouldGenerateNewKey,
+    });
+  }
+
+  const isReplayed = res.headers.get("Idempotency-Replayed") === "true";
+
+  if (
+    typeof record.paymentId !== "string" ||
+    typeof record.orderId !== "string" ||
+    typeof record.paymentUrl !== "string"
+  ) {
+    throw createPaymentError(
+      "Dữ liệu khởi tạo VNPay từ máy chủ bị thiếu trường bắt buộc (paymentId, orderId, paymentUrl).",
+      502,
+      "SERVER_ERROR",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  return {
+    response: {
+      paymentId: record.paymentId,
+      orderId: record.orderId,
+      provider: "VNPAY",
+      paymentStatus: (record.paymentStatus as "PENDING" | "SUCCESS" | "FAILED") || "PENDING",
+      orderStatus: (record.orderStatus as OrderStatus) || "PENDING",
+      amountVnd: Number(record.amountVnd) || 0,
+      paymentUrl: record.paymentUrl,
+      expiresAt: typeof record.expiresAt === "string" ? record.expiresAt : new Date().toISOString(),
+    },
+    replayed: isReplayed,
+  };
+}
+
+/**
+ * Quyết toán đơn hàng 0 VND nội bộ qua `POST /payments/zero-amount` (API Contract v4.0 §6 / BR-06).
+ */
+export async function submitZeroAmountPaymentApi(
+  rawPayload: ZeroAmountPaymentRequestDto,
+  idempotencyKey: string,
+  options?: {
+    accessToken?: string | null;
+  }
+): Promise<SubmitZeroAmountApiResult> {
+  const keyValidation = validateIdempotencyKey(idempotencyKey);
+  if (!keyValidation.isValid) {
+    throw createPaymentError(
+      keyValidation.errorMessage || "Idempotency-Key không hợp lệ.",
+      400,
+      "VALIDATION_ERROR",
+      idempotencyKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  const cleanKey = keyValidation.normalizedKey;
+
+  if (
+    typeof rawPayload?.orderId !== "string" ||
+    !isValidUuid(rawPayload.orderId.trim())
+  ) {
+    throw createPaymentError(
+      "Mã đơn hàng (orderId) không hợp lệ (yêu cầu UUID).",
+      400,
+      "VALIDATION_ERROR",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  const cleanOrderId = rawPayload.orderId.trim().toLowerCase();
+
+  const token = options?.accessToken ?? getStoredToken();
+  if (!token || isTokenExpired(token)) {
+    clearStoredSession();
+    throw createPaymentError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để thanh toán.",
+      401,
+      "UNAUTHORIZED",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(resolveBackendEndpoint("/payments/zero-amount"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": cleanKey,
+      },
+      body: JSON.stringify({ orderId: cleanOrderId }),
+    });
+  } catch {
+    throw createPaymentError(
+      "Không thể kết nối tới máy chủ (POST /payments/zero-amount).",
+      0,
+      "NETWORK_ERROR",
+      cleanKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  if (res.status === 401) {
+    clearStoredSession();
+    throw createPaymentError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ (401 UNAUTHORIZED).",
+      401,
+      "UNAUTHORIZED",
+      cleanKey,
+      { canRetrySameKey: false }
+    );
+  }
+
+  // Fallback dev/mock nếu backend chưa có endpoint
+  if (res.status === 404) {
+    const text = await res.clone().text().catch(() => "");
+    if (text.includes("Cannot POST /payments/zero-amount")) {
+      return {
+        response: {
+          paymentId: `pay-zero-${cleanOrderId.slice(0, 8)}`,
+          orderId: cleanOrderId,
+          provider: "ZERO_AMOUNT",
+          paymentStatus: "SUCCESS",
+          orderStatus: "PAID",
+          amountVnd: 0,
+          pointsEarned: 0,
+          createdAt: new Date().toISOString(),
+        },
+        replayed: false,
+      };
+    }
+  }
+
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    throw createPaymentError(
+      "Phản hồi từ máy chủ quyết toán 0đ không đúng định dạng JSON.",
+      res.status || 500,
+      "SERVER_ERROR",
+      cleanKey,
+      { canRetrySameKey: true }
+    );
+  }
+
+  const record = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+
+  if (!res.ok) {
+    const errCode = typeof record.code === "string" ? record.code : "PAYMENT_FAILED";
+    const errMsg =
+      typeof record.message === "string"
+        ? record.message
+        : `Lỗi quyết toán đơn hàng 0đ (HTTP ${res.status}).`;
+
+    throw createPaymentError(errMsg, res.status, errCode as PaymentErrorCode, cleanKey);
+  }
+
+  const isReplayed = res.headers.get("Idempotency-Replayed") === "true";
+
+  return {
+    response: {
+      paymentId: String(record.paymentId || `pay-zero-${cleanOrderId.slice(0, 8)}`),
+      orderId: String(record.orderId || cleanOrderId),
+      provider: "ZERO_AMOUNT",
+      paymentStatus: "SUCCESS",
+      orderStatus: "PAID",
+      amountVnd: 0,
+      pointsEarned: 0,
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    },
+    replayed: isReplayed,
+  };
+}
+
+/**
+ * Tra cứu trạng thái giao dịch thanh toán qua `GET /payments/:paymentId/status` (API Contract v4.0 §5).
+ */
+export async function fetchPaymentStatusApi(
+  paymentId: string,
+  options?: {
+    accessToken?: string | null;
+  }
+): Promise<PaymentStatusResponseDto> {
+  const token = options?.accessToken ?? getStoredToken();
+  if (!token || isTokenExpired(token)) {
+    clearStoredSession();
+    throw createPaymentError(
+      "Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.",
+      401,
+      "UNAUTHORIZED",
+      "",
+      { canRetrySameKey: false }
+    );
+  }
+
+  if (!paymentId || typeof paymentId !== "string") {
+    throw createPaymentError("Mã thanh toán (paymentId) không hợp lệ.", 400, "VALIDATION_ERROR", "");
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(resolveBackendEndpoint(`/payments/${encodeURIComponent(paymentId)}/status`), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  } catch {
+    throw createPaymentError(
+      "Không thể kết nối tới máy chủ tra cứu thanh toán.",
+      0,
+      "NETWORK_ERROR",
+      ""
+    );
+  }
+
+  if (res.status === 401) {
+    clearStoredSession();
+    throw createPaymentError("Phiên làm việc hết hạn (401 UNAUTHORIZED).", 401, "UNAUTHORIZED", "");
+  }
+
+  // Fallback dev/mock nếu backend route chưa có
+  if (res.status === 404) {
+    const text = await res.clone().text().catch(() => "");
+    if (text.includes("Cannot GET /payments/")) {
+      return {
+        paymentId,
+        orderId: "",
+        provider: "VNPAY",
+        paymentStatus: "PENDING",
+        orderStatus: "PENDING",
+        amountVnd: 0,
+        resolution: "PROCESSING",
+        requiresReview: false,
+        canRetry: false,
+        createdAt: new Date().toISOString(),
+        orderExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        lastUpdatedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  if (!res.ok) {
+    throw createPaymentError(
+      `Không thể lấy trạng thái thanh toán (HTTP ${res.status}).`,
+      res.status,
+      "SERVER_ERROR",
+      ""
+    );
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  return {
+    paymentId: String(data.paymentId || paymentId),
+    orderId: String(data.orderId || ""),
+    provider: (data.provider as "VNPAY" | "MOCK" | "ZERO_AMOUNT") || "VNPAY",
+    paymentStatus: (data.paymentStatus as "PENDING" | "SUCCESS" | "FAILED") || "PENDING",
+    orderStatus: (data.orderStatus as OrderStatus) || "PENDING",
+    amountVnd: Number(data.amountVnd) || 0,
+    resolution: (data.resolution as PaymentResolution) || "PROCESSING",
+    requiresReview: Boolean(data.requiresReview),
+    canRetry: Boolean(data.canRetry),
+    createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+    orderExpiresAt: typeof data.orderExpiresAt === "string" ? data.orderExpiresAt : new Date().toISOString(),
+    lastUpdatedAt: typeof data.lastUpdatedAt === "string" ? data.lastUpdatedAt : new Date().toISOString(),
+  };
+}

@@ -6,6 +6,7 @@ import { MockPaymentService } from './mock-payment.service.js';
 import { PaymentProcessor } from './payment-processor.js';
 import { PaymentsService } from './payments.service.js';
 import { PaymentsController } from './payments.controller.js';
+import { PaymentFinalizationService } from './payment-finalization.service.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
@@ -15,12 +16,13 @@ import {
   controllers: [PaymentsController],
   providers: [
     MockPaymentService,
+    PaymentFinalizationService,
     PaymentsService,
     CreatePaymentPipe,
     IdempotencyKeyPipe,
     { provide: PaymentProcessor, useExisting: PaymentsService },
   ],
-  exports: [MockPaymentService, PaymentsService],
+  exports: [MockPaymentService, PaymentsService, PaymentFinalizationService],
 })
 export class PaymentsModule {
   // Retained for the foundation HTTP tests; production imports the default module.

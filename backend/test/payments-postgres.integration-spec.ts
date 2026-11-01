@@ -300,8 +300,8 @@ describe('Payments real database transactions', () => {
       ).toBe(8);
     },
   );
-  it('supports WALLET success and zero-VND payments', async () => {
-    const f = await fixture({ total: 0n });
+  it('supports WALLET success for a positive amount', async () => {
+    const f = await fixture();
     const r = await pay(
       f,
       undefined,
@@ -311,10 +311,65 @@ describe('Payments real database transactions', () => {
     expect(r.body).toMatchObject({
       paymentStatus: 'SUCCESS',
       method: 'WALLET',
-      amountVnd: 0,
-      pointsEarned: 0,
+      amountVnd: 98000,
+      pointsEarned: 9,
       methodLast4: '5678',
     });
+  });
+  it('rejects zero-VND through Mock without payment-side effects', async () => {
+    const f = await fixture({ total: 0n, coupon: true });
+    const before = {
+      order: await prisma.order.findUniqueOrThrow({
+        where: { id: f.orderId },
+      }),
+      redemption: await prisma.couponRedemption.findUnique({
+        where: { orderId: f.orderId },
+      }),
+      coupon: await prisma.coupon.findUniqueOrThrow({
+        where: { id: f.couponId! },
+      }),
+      user: await prisma.user.findUniqueOrThrow({
+        where: { id: f.userId },
+      }),
+      stock: (
+        await prisma.product.findUniqueOrThrow({
+          where: { id: productId },
+        })
+      ).stock,
+      attempts: await count(f),
+    };
+    const rejected = await pay(
+      f,
+      randomUUID(),
+      { phoneNumber: '0912345678' },
+      'WALLET',
+    ).expect(409);
+    expect(rejected.body).toMatchObject({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'INVALID_TRANSITION',
+      message: 'Order cannot accept a new payment',
+    });
+    expect({
+      order: await prisma.order.findUniqueOrThrow({
+        where: { id: f.orderId },
+      }),
+      redemption: await prisma.couponRedemption.findUnique({
+        where: { orderId: f.orderId },
+      }),
+      coupon: await prisma.coupon.findUniqueOrThrow({
+        where: { id: f.couponId! },
+      }),
+      user: await prisma.user.findUniqueOrThrow({
+        where: { id: f.userId },
+      }),
+      stock: (
+        await prisma.product.findUniqueOrThrow({
+          where: { id: productId },
+        })
+      ).stock,
+      attempts: await count(f),
+    }).toEqual(before);
   });
   it('rejects key reuse with a different full credential despite the same last4', async () => {
     const f = await fixture();
@@ -450,6 +505,7 @@ describe('Payments real database transactions', () => {
           idempotencyKey: randomUUID(),
           requestHash: 'test',
           amountVnd: 98000n,
+          provider: 'MOCK',
           method: 'CARD',
           status: 'SUCCESS',
           responseSnapshot: r.body,

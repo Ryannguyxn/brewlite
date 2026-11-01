@@ -33,7 +33,9 @@ The service-level tests use verified gateway outcomes. They do not test an IPN e
 
 ## Rerun in PowerShell
 
-Set `AUTH_TEST_DATABASE_URL` and `ORDERS_TEST_DATABASE_URL` in the PowerShell process to the dedicated test database, without printing their values. From `D:\CNPM_PJ\brewlite\backend`:
+Set `AUTH_TEST_DATABASE_URL` and `ORDERS_TEST_DATABASE_URL` in the PowerShell process to the dedicated test database, without printing their values.
+
+Chạy các lệnh sau từ thư mục `backend/` của repository hoặc worktree đang kiểm thử.
 
 ```powershell
 $env:PAYMENT_CONCURRENCY_TESTS = '1'

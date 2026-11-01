@@ -230,21 +230,55 @@ describe('SCRUM-56 promotion and loyalty PostgreSQL integration', () => {
     },
     { price: 15000n, coupon: { value: 20000 }, discount: 15000, total: 0 },
   ])(
-    'persists exact discount and pays total $total',
+    'persists exact discount and applies payment policy for total $total',
     async ({ price, coupon, discount, total }) => {
       const f = await fixture({ price, coupon });
       const r = await order(f).expect(201);
       expect(r.body).toMatchObject({ discountVnd: discount, totalVnd: total });
+      if (total === 0) {
+        const before = await state(f, r.body.id);
+        expect(before.order.status).toBe('PENDING');
+        expect(before.redemption?.status).toBe('HELD');
+        expect(before.coupon.activeUsageCount).toBe(1);
+        expect(before.stock).toBe(99);
+        const rejected = await pay(f, r.body.id).expect(409);
+        expect(rejected.body).toMatchObject({
+          statusCode: 409,
+          error: 'Conflict',
+          code: 'INVALID_TRANSITION',
+          message: 'Order cannot accept a new payment',
+        });
+        expect(await state(f, r.body.id)).toEqual(before);
+        return;
+      }
       const paid = await pay(f, r.body.id).expect(200);
       expect(paid.body.pointsEarned).toBe(Math.floor(total / 10000));
       expect((await state(f, r.body.id)).redemption?.status).toBe('CONSUMED');
     },
   );
   it.each([0, 9999, 10000, 19999, 20000])(
-    'awards floor points on no-coupon total %i',
+    'applies zero-amount Mock policy and floor points for no-coupon total %i',
     async (total) => {
       const f = await fixture({ price: BigInt(total), points: 7 });
       const r = await order(f, { couponCode: undefined }).expect(201);
+      if (total === 0) {
+        const before = await state(f, r.body.id);
+        expect(before.order.status).toBe('PENDING');
+        expect(before.order.pointsEarned).toBe(0);
+        expect(before.user.loyaltyPoints).toBe(7);
+        expect(before.coupon.activeUsageCount).toBe(0);
+        expect(before.redemption).toBeNull();
+        expect(before.stock).toBe(99);
+        const rejected = await pay(f, r.body.id).expect(409);
+        expect(rejected.body).toMatchObject({
+          statusCode: 409,
+          error: 'Conflict',
+          code: 'INVALID_TRANSITION',
+          message: 'Order cannot accept a new payment',
+        });
+        expect(await state(f, r.body.id)).toEqual(before);
+        return;
+      }
       await pay(f, r.body.id)
         .expect(200)
         .expect((p) =>

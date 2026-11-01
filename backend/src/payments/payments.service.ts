@@ -8,7 +8,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { calculateLoyaltyPoints } from '../promotions/promotion-policy.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import type { CreatePaymentDto } from './dto/create-payment.dto.js';
@@ -20,6 +19,7 @@ import {
   IdempotencyKeyPipe,
 } from './payment-validation.pipe.js';
 import { readPaymentSnapshot } from './payment-snapshot.js';
+import { PaymentFinalizationService } from './payment-finalization.service.js';
 
 type Result = { response: PaymentResponseDto; replayed: boolean };
 type Tx = Prisma.TransactionClient;
@@ -60,6 +60,8 @@ export class PaymentsService extends PaymentProcessor {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(MockPaymentService) private readonly mock: MockPaymentService,
+    @Inject(PaymentFinalizationService)
+    private readonly finalization: PaymentFinalizationService,
     @Inject(CreatePaymentPipe) private readonly bodyPipe: CreatePaymentPipe,
     @Inject(IdempotencyKeyPipe) private readonly keyPipe: IdempotencyKeyPipe,
   ) {
@@ -134,98 +136,24 @@ export class PaymentsService extends PaymentProcessor {
               requestHash,
             );
             if (afterLock) return afterLock;
-            const order = await tx.order.findUniqueOrThrow({
-              where: { id: dto.orderId },
-              select: {
-                id: true,
-                userId: true,
-                status: true,
-                totalVnd: true,
-                couponId: true,
-                pointsEarned: true,
-              },
-            });
-            const [clock] = await tx.$queryRaw<
-              { now: Date; expired: boolean }[]
-            >`
-            SELECT clock_timestamp() AS now, expires_at <= clock_timestamp() AS expired FROM orders WHERE id = ${dto.orderId}::uuid`;
-            if (
-              !clock ||
-              clock.expired ||
-              !['PENDING', 'PAYMENT_FAILED'].includes(order.status)
-            )
-              throw transition();
-            if (
-              await tx.payment.findFirst({
-                where: { orderId: order.id, status: 'SUCCESS' },
-                select: { id: true },
-              })
-            )
-              throw transition();
-            if (order.pointsEarned !== 0)
-              throw new Error('Unexpected pre-payment points');
-            const amountVnd = Number(order.totalVnd);
-            if (order.totalVnd < 0n || !Number.isSafeInteger(amountVnd))
-              throw new Error('Unsafe payment amount');
             const outcome = this.mock.evaluate(dto);
-            const success = outcome.paymentStatus === 'SUCCESS';
-            const pointsEarned = success
-              ? calculateLoyaltyPoints(order.totalVnd)
-              : 0;
             const paymentId = randomUUID();
-            const response = {
-              paymentId,
-              orderId: order.id,
-              ...outcome,
-              orderStatus: success ? 'PAID' : 'PAYMENT_FAILED',
-              amountVnd,
-              method: dto.method,
-              mockReference: `MOCK-${paymentId}`,
-              pointsEarned,
-              createdAt: clock.now.toISOString(),
-            } satisfies PaymentResponseDto;
-            // Retry's PENDING state never commits separately; it does not reserve inventory again.
-            if (order.status === 'PAYMENT_FAILED')
-              await tx.order.update({
-                where: { id: order.id },
-                data: { status: 'PENDING' },
-              });
-            if (success)
-              await this.applySuccess(
-                tx,
+            const finalized = await this.finalization.finalizeInTransaction(
+              tx,
+              {
+                provider: 'MOCK',
                 userId,
-                order.id,
-                order.couponId,
-                pointsEarned,
-                clock.now,
-              );
-            await tx.order.update({
-              where: { id: order.id },
-              data: {
-                status: response.orderStatus,
-                pointsEarned,
-                ...(success ? { paidAt: clock.now } : {}),
-              },
-            });
-            await tx.payment.create({
-              data: {
-                id: paymentId,
-                orderId: order.id,
-                userId,
+                orderId: dto.orderId,
+                paymentId,
                 idempotencyKey,
                 requestHash,
-                amountVnd: order.totalVnd,
-                provider: 'MOCK',
                 method: dto.method,
-                status: outcome.paymentStatus,
-                methodLast4: outcome.methodLast4,
-                mockReference: response.mockReference,
-                responseSnapshot: { ...response },
-                createdAt: clock.now,
-                updatedAt: clock.now,
+                outcome,
               },
-            });
-            return { response, replayed: false };
+            );
+            if (!finalized.mockResponse)
+              throw new Error('Mock finalization did not return its snapshot');
+            return { response: finalized.mockResponse, replayed: false };
           },
           {
             isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
@@ -320,29 +248,4 @@ export class PaymentsService extends PaymentProcessor {
     };
   }
 
-  private async applySuccess(
-    tx: Tx,
-    userId: string,
-    orderId: string,
-    couponId: string | null,
-    points: number,
-    now: Date,
-  ) {
-    // HELD already counts against quota; consuming must not increment activeUsageCount again.
-    if (couponId) {
-      const consumed = await tx.couponRedemption.updateMany({
-        where: { orderId, userId, couponId, status: 'HELD' },
-        data: { status: 'CONSUMED', consumedAt: now },
-      });
-      if (consumed.count !== 1)
-        throw new Error('Held coupon reservation is missing');
-    }
-    if (points > 0) {
-      const updated = await tx.user.updateMany({
-        where: { id: userId, loyaltyPoints: { lte: 2147483647 - points } },
-        data: { loyaltyPoints: { increment: points } },
-      });
-      if (updated.count !== 1) throw new Error('Unable to award points');
-    }
-  }
 }

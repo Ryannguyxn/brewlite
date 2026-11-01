@@ -3,6 +3,7 @@ import { HttpException } from '@nestjs/common';
 import { PaymentsService } from './payments.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MockPaymentService } from './mock-payment.service.js';
+import { PaymentFinalizationService } from './payment-finalization.service.js';
 import {
   CreatePaymentPipe,
   IdempotencyKeyPipe,
@@ -52,6 +53,7 @@ function subject() {
   const service = new PaymentsService(
     { $transaction: transaction } as unknown as PrismaService,
     mock,
+    new PaymentFinalizationService(),
     new CreatePaymentPipe(),
     new IdempotencyKeyPipe(),
   );

@@ -90,6 +90,7 @@ export async function reserveCoupon(
 export async function releaseHeldCoupon(
   tx: Prisma.TransactionClient,
   orderId: string,
+  now: Date = new Date(),
 ): Promise<boolean> {
   await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId}::uuid FOR UPDATE`;
   const order = await tx.order.findUniqueOrThrow({
@@ -121,7 +122,7 @@ export async function releaseHeldCoupon(
       userId: order.userId,
       status: 'HELD',
     },
-    data: { status: 'RELEASED', releasedAt: new Date() },
+    data: { status: 'RELEASED', releasedAt: now },
   });
   if (released.count !== 1) throw new Error('Unable to release held coupon');
   const restored = await tx.coupon.updateMany({
